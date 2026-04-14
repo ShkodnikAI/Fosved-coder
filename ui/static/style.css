@@ -1,0 +1,21 @@
+body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #d4d4d4; display: flex; height: 100vh; overflow: hidden; }
+.sidebar { width: 250px; background-color: #252526; border-right: 1px solid #3c3c3c; display: flex; flex-direction: column; padding: 10px; }
+.main { flex: 1; display: flex; flex-direction: column; background-color: #1e1e1e; }
+.chat-box { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+.input-area { padding: 15px; background-color: #2d2d2d; border-top: 1px solid #3c3c3c; display: flex; gap: 10px; }
+.bottom-bar { height: 40px; background-color: #007acc; display: flex; align-items: center; padding: 0 10px; gap: 15px; }
+.bottom-bar button { background: none; border: none; color: white; cursor: pointer; font-size: 14px; }
+.bottom-bar button:hover { text-decoration: underline; }
+h3 { margin-top: 0; color: #569cd6; font-size: 14px; text-transform: uppercase; border-bottom: 1px solid #3c3c3c; padding-bottom: 5px; }
+.project-item, .idea-item { padding: 8px; background-color: #2d2d2d; margin-bottom: 5px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.project-item:hover, .idea-item:hover { background-color: #37373d; }
+.project-item.active { border-left: 3px solid #007acc; }
+.msg { max-width: 80%; padding: 10px; border-radius: 8px; font-size: 14px; line-height: 1.4; }
+.msg.user { background-color: #264f78; align-self: flex-end; color: white; }
+.msg.ai { background-color: #333333; align-self: flex-start; }
+.msg.system { background-color: #1e1e1e; color: #dcdcaa; align-self: center; font-style: italic; font-size: 12px; }
+input[type="text"] { flex: 1; padding: 10px; border: 1px solid #3c3c3c; background-color: #1e1e1e; color: white; border-radius: 4px; outline: none; }
+input[type="text"]:focus { border-color: #007acc; }
+button.send-btn { padding: 10px 20px; background-color: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer; }
+button.send-btn:hover { background-color: #005a9e; }
+#idea-input { width: 100%; margin-top: 10px; padding: 5px; box-sizing: border-box; background: #1e1e1e; border: 1px solid #3c3c3c; color: white; border-radius: 3px; }

@@ -1,0 +1,10 @@
+llm:
+  default_model: "openrouter/anthropic/claude-3.5-sonnet"
+  router_model: "openrouter/google/gemini-2.0-flash-exp:free"
+  api_base: "https://openrouter.ai/api/v1"
+  api_key: "ТВОЙ_API_КЛЮЧ_СЮДА" 
+  temperature: 0.2
+system:
+  db_url: "sqlite+aiosqlite:///fosved_coder.db"
+  projects_dir: "./projects"
+  ideas_cache_dir: "./.cache/ideas"

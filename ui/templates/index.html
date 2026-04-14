@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fosved Coder</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="sidebar">
+        <h3>Проекты</h3>
+        <div id="projects-list">
+            <div class="project-item active">Общий чат</div>
+        </div>
+        
+        <h3 style="margin-top: 20px;">Идеи (Репозитории)</h3>
+        <input type="text" id="idea-input" placeholder="Вставить ссылку GitHub...">
+        <div id="ideas-list"></div>
+    </div>
+
+    <div class="main">
+        <div class="chat-box" id="chat-box">
+            <div class="msg system">Подключение к серверу...</div>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Введите задачу или промпт..." onkeypress="handleKeyPress(event)">
+            <button class="send-btn" onclick="sendMessage()">Отправить</button>
+        </div>
+
+        <div class="bottom-bar">
+            <button onclick="sendCommand('/terminal ')">🛠 Terminal</button>
+            <button onclick="sendCommand('/db ')">🗄 DB</button>
+            <button onclick="sendCommand('/server ')">🌐 Server</button>
+            <button onclick="sendCommand('/git_pull')">📥 Git Pull</button>
+            <button onclick="sendCommand('/git_push')">📤 Git Push</button>
+        </div>
+    </div>
+
+    <script>
+        const ws = new WebSocket("ws://" + window.location.host + "/ws");
+        const chatBox = document.getElementById("chat-box");
+        
+        let currentAiDiv = null;
+        let currentAiText = "";
+
+        ws.onopen = () => {
+            addMessage("system", "Соединение установлено. Вставьте API ключ в config.yaml и пишите задачи.");
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === "chunk") {
+                // Прилетела часть текста от ИИ
+                if (!currentAiDiv) {
+                    currentAiDiv = document.createElement("div");
+                    currentAiDiv.className = "msg ai";
+                    chatBox.appendChild(currentAiDiv);
+                }
+                currentAiText += data.content;
+                currentAiDiv.innerText = currentAiText; // innerText безопаснее для кода
+                chatBox.scrollTop = chatBox.scrollHeight;
+                
+            } else if (data.type === "done") {
+                // ИИ закончил писать
+                currentAiDiv = null;
+                currentAiText = "";
+                
+            } else if (data.type === "error") {
+                // Ошибка API ключа или сети
+                addMessage("system", "⚠️ " + data.content);
+                currentAiDiv = null;
+                currentAiText = "";
+                
+            } else {
+                // Обычные системные сообщения
+                addMessage(data.type, data.content);
+            }
+        };
+
+        ws.onclose = () => {
+            addMessage("system", "Соединение потеряно. Перезагрузите страницу (F5).");
+        };
+
+        function addMessage(type, text) {
+            const div = document.createElement("div");
+            div.className = "msg " + type;
+            div.innerText = text;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById("user-input");
+            const text = input.value.trim();
+            if (!text) return;
+            
+            addMessage("user", text);
+            ws.send(text);
+            input.value = "";
+        }
+
+        function sendCommand(cmd) {
+            const input = document.getElementById("user-input");
+            input.value = cmd;
+            input.focus();
+        }
+
+        function handleKeyPress(e) {
+            if (e.key === "Enter") sendMessage();
+        }
+    </script>
+</body>
+</html>
