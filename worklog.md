@@ -181,3 +181,37 @@ Stage Summary:
 - Сообщения привязаны к потокам через thread_id, основные сообщения без потока продолжают работать
 - Ветвление создаёт новый поток с parent_id от текущего
 - UI компактный, в стиле существующего дизайна, все тексты на русском
+
+---
+Task ID: 3
+Agent: Bug Fix + Feature Completion Agent
+Task: Fix all bugs and add missing features (Bug Fixes 1-3, Features 1-9)
+
+Work Log:
+- Проанализировал текущее состояние: core/memory.py, api/endpoints.py, run.py, core/agent.py
+- Bug Fix 1: Добавил `session.refresh(project)` после `session.flush()` в `create_project()` (core/memory.py:128)
+- Bug Fix 1: Добавил `session.refresh(archive)` после `session.flush()` в `save_project_archive()` (core/memory.py:371)
+- Bug Fix 2: Заменил `file_pattern not in f.lower()` на `fnmatch.fnmatch(f, file_pattern)` для корректного glob-матчинга (api/endpoints.py:319)
+- Bug Fix 2: Убрал `.lower()` из `file_pattern`, чтобы fnmatch работал с оригинальными паттернами (api/endpoints.py:308)
+- Bug Fix 3: Проверена консистентность `update_project_settings` — использует direct session, работает корректно
+- Feature 1: Добавлены 5 REST эндпоинтов для Chat Threads в api/endpoints.py (POST/GET/DELETE/PUT/GET для threads)
+- Feature 2: Добавлена модель ChatThread (5 полей) в core/memory.py после ChatHistory
+- Feature 2: Добавлена колонка thread_id (nullable, indexed) в ChatHistory
+- Feature 3: Создан файл core/context_compressor.py (~230 строк) с классом ContextCompressor
+- Feature 4: Добавлена модель ContextSnapshot (13 полей) в core/memory.py
+- Feature 5: Добавлены 5 REST эндпоинтов для управления контекстом (GET/POST/POST/GET/DELETE)
+- Feature 6: Добавлены 3 CRUD-функции для ContextSnapshot: save_context_snapshot, get_context_snapshots, delete_context_snapshot
+- Feature 7: Добавлена обработка "refactor" и "ping" типов в WebSocket handler (run.py:93-123)
+- Feature 8: Добавлен `import fnmatch` в api/endpoints.py
+- Feature 9: Обновлена функция save_message() — добавлен параметр thread_id с дефолтом None
+- Добавлен импорт stream_llm_response в run.py для обработки refactor запросов
+- Все 13 Python файлов прошли py_compile без ошибок
+
+Stage Summary:
+- Исправлено 2 бага (null id при создании проекта/архива, некорректный поиск файлов)
+- Создан 1 новый файл: core/context_compressor.py
+- Изменены 3 файла: core/memory.py, api/endpoints.py, run.py
+- Добавлено 3 новых SQLAlchemy модели: ChatThread, ContextSnapshot, thread_id в ChatHistory
+- Добавлено 10 новых REST эндпоинтов (5 для threads, 5 для context)
+- Добавлено 2 типа WebSocket сообщений (refactor, ping/pong)
+- Все Python файлы проходят py_compile
