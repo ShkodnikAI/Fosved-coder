@@ -36,6 +36,15 @@ body{font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;background:#1a1a1a;
 .idea-chip{background:rgba(200,169,126,0.15);color:#C8A97E;padding:1px 6px;border-radius:8px;font-size:10px}
 .project-model{font-size:10px;color:#C8A97E;margin-top:2px}
 .project-status{font-size:11px;color:#888;margin-top:2px}
+.project-progress{margin-top:4px;display:flex;align-items:center;gap:6px}
+.progress-bar{flex:1;height:6px;background:#1a1a1a;border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;border-radius:3px;transition:width .4s ease}
+.progress-fill.green{background:linear-gradient(90deg,#27ae60,#2ecc71)}
+.progress-fill.yellow{background:linear-gradient(90deg,#f39c12,#f1c40f)}
+.progress-fill.red{background:linear-gradient(90deg,#c0392b,#e74c3c)}
+.progress-fill.beige{background:linear-gradient(90deg,#C8A97E,#d4b88e)}
+.progress-pct{font-size:10px;color:#888;min-width:30px;text-align:right}
+
 
 .model-item{padding:6px 10px;background:#2a2a2a;border-radius:4px;display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:3px}
 .model-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}

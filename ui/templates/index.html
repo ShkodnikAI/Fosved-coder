@@ -322,6 +322,12 @@ function renderProjects() {
         var sel = p.id === selectedProjectId ? ' selected' : '';
         var ideas = (p.ideas||[]).map(function(i){ return '<span class="idea-chip">'+esc(i)+'</span>'; }).join('');
         var model = p.selected_model ? '<div class="project-model">Model: '+esc(p.selected_model)+'</div>' : '';
+        var prog = p.progress || 0;
+        var progPct = Math.min(100, Math.max(0, prog));
+        var progColor = progPct >= 100 ? 'green' : progPct >= 50 ? 'beige' : progPct >= 25 ? 'yellow' : 'red';
+        var progressHtml = '<div class="project-progress" onclick="event.stopPropagation();promptProgress(\''+p.id+'\')">' +
+            '<div class="progress-bar"><div class="progress-fill '+progColor+'" style="width:'+progPct+'%"></div></div>' +
+            '<span class="progress-pct">'+progPct+'%</span></div>';
         return '<div class="project-item'+sel+'" onclick="selectProject(\''+p.id+'\')">' +
             '<div class="project-top"><div class="project-name">'+esc(p.name)+'</div>' +
             '<div class="project-btns">' +
@@ -329,8 +335,23 @@ function renderProjects() {
             '<button class="project-delete" onclick="event.stopPropagation();deleteProject(\''+p.id+'\')" title="Delete">✕</button>' +
             '</div></div>' +
             (ideas?'<div class="project-ideas">'+ideas+'</div>':'') + model +
-            '<div class="project-status">'+esc(p.status||'idle')+'</div></div>';
+            '<div class="project-status">'+esc(p.status||'idle')+'</div>' +
+            progressHtml + '</div>';
     }).join('');
+}
+
+function promptProjectProgress(pid) {
+    var p = allProjects.find(function(x){return x.id===pid;});
+    if (!p) return;
+    var val = prompt('Project progress % (0-100):', p.progress || 0);
+    if (val === null) return;
+    var num = parseInt(val, 10);
+    if (isNaN(num)) return;
+    num = Math.min(100, Math.max(0, num));
+    fetch('/api/projects/'+pid, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({progress:num, status: num>=100?'completed':'in progress'})
+    }).then(function(r){if(r.ok)loadProjects();}).catch(function(){});
 }
 
 function openNewProject() {
