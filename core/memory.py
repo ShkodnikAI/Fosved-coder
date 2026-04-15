@@ -21,6 +21,8 @@ class Project(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(unique=True, index=True)
     path: Mapped[str] = mapped_column(unique=True)
+    selected_models: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of model IDs
+    progress: Mapped[int] = mapped_column(default=0)  # 0-100 percent
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 class Idea(Base):
@@ -73,20 +75,19 @@ async def init_db():
 
 async def create_project(name: str, path: str) -> dict:
     """Create a new project. Returns dict representation."""
+    import json
     async with async_session() as session:
         async with session.begin():
-            # Check for duplicates
             existing = await session.execute(
                 select(Project).where((Project.name == name) | (Project.path == path))
             )
             if existing.scalar_one_or_none():
-                return None  # Duplicate
+                return None
             project = Project(name=name, path=path)
             session.add(project)
             session.flush()
-            # Create the project directory on disk
             os.makedirs(path, exist_ok=True)
-            return {"id": project.id, "name": project.name, "path": project.path, "created_at": str(project.created_at)}
+            return {"id": project.id, "name": project.name, "path": project.path, "selected_models": project.selected_models, "progress": project.progress, "created_at": str(project.created_at)}
 
 async def get_all_projects() -> list[dict]:
     """Get all projects as list of dicts."""
@@ -95,7 +96,7 @@ async def get_all_projects() -> list[dict]:
             select(Project).order_by(Project.created_at.desc())
         )
         return [
-            {"id": p.id, "name": p.name, "path": p.path, "created_at": str(p.created_at)}
+            {"id": p.id, "name": p.name, "path": p.path, "selected_models": p.selected_models, "progress": p.progress, "created_at": str(p.created_at)}
             for p in result.scalars().all()
         ]
 
@@ -107,8 +108,35 @@ async def get_project(project_id: int) -> dict | None:
         )
         p = result.scalar_one_or_none()
         if p:
-            return {"id": p.id, "name": p.name, "path": p.path, "created_at": str(p.created_at)}
+            return {"id": p.id, "name": p.name, "path": p.path, "selected_models": p.selected_models, "progress": p.progress, "created_at": str(p.created_at)}
         return None
+
+async def update_project_progress(project_id: int, progress: int) -> bool:
+    """Update project progress (0-100)."""
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(Project).where(Project.id == project_id)
+            )
+            project = result.scalar_one_or_none()
+            if project:
+                project.progress = max(0, min(100, progress))
+                return True
+            return False
+
+async def update_project_models(project_id: int, model_ids: list) -> bool:
+    """Update selected models for a project."""
+    import json
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(Project).where(Project.id == project_id)
+            )
+            project = result.scalar_one_or_none()
+            if project:
+                project.selected_models = json.dumps(model_ids)
+                return True
+            return False
 
 async def delete_project(project_id: int) -> bool:
     """Delete a project and all related data (chat history, repo map)."""

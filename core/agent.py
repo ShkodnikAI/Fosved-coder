@@ -1,5 +1,6 @@
 import litellm
 from core.memory import CONFIG, save_message, get_history
+from core.keys_manager import keys_manager
 
 litellm.suppress_debug_info = True
 
@@ -18,24 +19,39 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 
 
 async def stream_llm_response(prompt: str, history: list, websocket, model: str = None, system_prompt: str = None):
-    """Stream AI response chunk by chunk to WebSocket"""
+    """Stream AI response chunk by chunk to WebSocket. Uses keys_manager for API config."""
     if model is None:
-        model = CONFIG["llm"]["default_model"]
+        # Try first selected model from project or fallback
+        model = CONFIG["llm"].get("default_model")
     if system_prompt is None:
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="")
+
+    # Resolve model config from keys_manager if model_id is provided
+    api_key = CONFIG["llm"].get("api_key", "")
+    api_base = CONFIG["llm"].get("api_base", "")
+
+    model_config = keys_manager.get_model_config(model)
+    if model_config:
+        model = model_config["model"]  # full litellm model name
+        api_key = model_config["api_key"]
+        api_base = model_config["api_base"]
 
     try:
         messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": prompt}]
 
-        response = await litellm.acompletion(
-            model=model,
-            messages=messages,
-            api_base=CONFIG["llm"]["api_base"],
-            api_key=CONFIG["llm"]["api_key"],
-            stream=True,
-            temperature=CONFIG["llm"]["temperature"],
-            max_tokens=CONFIG["llm"].get("max_tokens", 4096)
-        )
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "temperature": CONFIG["llm"].get("temperature", 0.2),
+            "max_tokens": CONFIG["llm"].get("max_tokens", 4096),
+        }
+        if api_key:
+            kwargs["api_key"] = api_key
+        if api_base:
+            kwargs["api_base"] = api_base
+
+        response = await litellm.acompletion(**kwargs)
 
         full_response = ""
         async for chunk in response:
@@ -50,7 +66,7 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
     except Exception as e:
         error_msg = str(e)
         if "401" in error_msg:
-            error_msg = "Ошибка 401: Неверный API ключ. Проверьте config.yaml!"
+            error_msg = "Ошибка 401: Неверный API ключ. Проверьте настройки ключей!"
         elif "429" in error_msg:
             error_msg = "Ошибка 429: Лимит запросов исчерпан или нет средств."
         elif "500" in error_msg:
@@ -65,10 +81,8 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
 
 async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket):
     """Main entry point: get history, add repo_map context, stream response, save to memory."""
-    # Get chat history from database
     history = await get_history(project_id)
 
-    # Build system prompt with repo map
     repo_map_text = ""
     if repo_map:
         repo_map_text = f"СТРУКТУРА ПРОЕКТА (Repo Map):\n{repo_map}"
@@ -78,23 +92,34 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         ideas_context=""
     )
 
-    # Save user message to chat history
     await save_message(project_id, "user", prompt)
 
-    # Stream AI response with cyclic auto-retry on errors (up to 3 attempts)
-    max_retries = 3
+    # Determine which model to use
+    model = None
+    if project_id:
+        from core.memory import get_project
+        project = await get_project(project_id)
+        if project and project.get("selected_models"):
+            import json
+            try:
+                models = json.loads(project["selected_models"])
+                if models:
+                    model = models[0]  # Use first selected model
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # Cyclic agent: up to 3 retries on errors
+    max_retries = CONFIG["system"].get("max_iterations", 3)
     ai_response = None
     for attempt in range(max_retries):
-        ai_response = await stream_llm_response(prompt, history, websocket, system_prompt=system_prompt)
+        ai_response = await stream_llm_response(prompt, history, websocket, model=model, system_prompt=system_prompt)
         if ai_response is not None:
             break
-        # If we got an error, notify the client and retry
         if attempt < max_retries - 1:
             await websocket.send_json({
                 "type": "info",
                 "content": f"Попытка {attempt + 2}/{max_retries}..."
             })
 
-    # Save AI response to memory
     if ai_response:
         await save_message(project_id, "ai", ai_response)
