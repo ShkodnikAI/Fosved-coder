@@ -3,7 +3,7 @@ Fosved Coder v2.0 — REST API Endpoints
 Включает управление ключами, моделями, проектами, идеями, чатом.
 Поиск файлов, гит, шаблоны, пакеты, архив.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -275,7 +275,7 @@ async def read_file(project_id: int, path: str):
         raise HTTPException(500, str(e))
 
 @router.post("/projects/{project_id}/save-file")
-async def save_file(project_id: int, path: str, content: str = ""):
+async def save_file(project_id: int, path: str = Body(...), content: str = Body("")):
     """Сохранить/создать файл в проекте."""
     project = await get_project(project_id)
     if not project:

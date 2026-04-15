@@ -111,6 +111,7 @@
                 <button onclick="togglePanel('git')" class="bottom-bar-btn">🔀 Git</button>
                 <button onclick="togglePanel('packages')" class="bottom-bar-btn">📦 Packages</button>
                 <button onclick="togglePanel('files')" class="bottom-bar-btn">📁 Files</button>
+                <button onclick="openRefactorModal()" class="bottom-bar-btn">🔄 Refactor</button>
                 <button onclick="showArchivePanel()" class="bottom-bar-btn">🗃️ Archive</button>
             </div>
         </div>
@@ -314,7 +315,7 @@
     // ═══════════════════════════════════════════════════════
     // State
     // ═══════════════════════════════════════════════════════
-    const ws = new WebSocket("ws://" + window.location.host + "/ws");
+    let ws = null;
     const chatBox = document.getElementById("chat-box");
     let currentAiDiv = null;
     let currentAiText = "";
@@ -363,46 +364,99 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    // WebSocket
+    // WebSocket Manager (auto-reconnect + heartbeat + queue)
     // ═══════════════════════════════════════════════════════
-    ws.onopen = () => {
-        chatBox.innerHTML = "";
-        addMessage("system", "Fosved Coder готов. Выберите модель и начните работу.");
-        loadModels();
-        loadProjects();
-        loadIdeas();
-    };
+    let wsReconnectAttempts = 0;
+    const WS_MAX_RECONNECTS = 5;
+    let wsHeartbeatInterval = null;
+    let wsMessageQueue = [];
+    let wsIsConnected = false;
 
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "chunk") {
-            if (!currentAiDiv) {
-                currentAiDiv = document.createElement("div");
-                currentAiDiv.className = "msg ai";
-                chatBox.appendChild(currentAiDiv);
+    function wsConnect() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(protocol + "//" + window.location.host + "/ws");
+
+        ws.onopen = () => {
+            wsReconnectAttempts = 0;
+            wsIsConnected = true;
+            chatBox.innerHTML = "";
+            addMessage("system", "Fosved Coder готов. Выберите модель и начните работу.");
+            loadModels();
+            loadProjects();
+            loadIdeas();
+            // Start heartbeat
+            wsHeartbeatInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({type: "ping"}));
+                }
+            }, 30000);
+            // Flush queued messages
+            while (wsMessageQueue.length > 0) {
+                const msg = wsMessageQueue.shift();
+                ws.send(msg);
             }
-            currentAiText += data.content;
-            currentAiDiv.innerHTML = renderMarkdown(currentAiText);
-            addCopyButtons(currentAiDiv);
-            chatBox.scrollTop = chatBox.scrollHeight;
-        } else if (data.type === "done") {
-            currentAiDiv = null; currentAiText = "";
-        } else if (data.type === "error") {
-            addMessage("error", data.content);
-            showToast(data.content, "error");
-            currentAiDiv = null; currentAiText = "";
-        } else if (data.type === "system") {
-            addMessage("system", data.content);
-        } else if (data.type === "command_result") {
-            addMessage("terminal", data.content);
-        } else if (data.type === "idea_result") {
-            addMessage("idea", data.content);
-        } else {
-            addMessage(data.type || "system", data.content || "");
-        }
-    };
+        };
 
-    ws.onclose = () => { addMessage("error", "Соединение потеряно. Перезагрузите (F5)."); };
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            // Handle pong
+            if (data.type === "pong") return;
+            if (data.type === "chunk") {
+                if (!currentAiDiv) {
+                    currentAiDiv = document.createElement("div");
+                    currentAiDiv.className = "msg ai";
+                    chatBox.appendChild(currentAiDiv);
+                }
+                currentAiText += data.content;
+                currentAiDiv.innerHTML = renderMarkdown(currentAiText);
+                addCopyButtons(currentAiDiv);
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } else if (data.type === "done") {
+                currentAiDiv = null; currentAiText = "";
+            } else if (data.type === "error") {
+                addMessage("error", data.content);
+                showToast(data.content, "error");
+                currentAiDiv = null; currentAiText = "";
+            } else if (data.type === "system") {
+                addMessage("system", data.content);
+            } else if (data.type === "command_result") {
+                addMessage("terminal", data.content);
+            } else if (data.type === "idea_result") {
+                addMessage("idea", data.content);
+            } else {
+                addMessage(data.type || "system", data.content || "");
+            }
+        };
+
+        ws.onclose = () => {
+            wsIsConnected = false;
+            if (wsHeartbeatInterval) { clearInterval(wsHeartbeatInterval); wsHeartbeatInterval = null; }
+            addMessage("error", "Соединение потеряно. Переподключение...");
+            // Auto-reconnect with exponential backoff
+            if (wsReconnectAttempts < WS_MAX_RECONNECTS) {
+                const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000);
+                wsReconnectAttempts++;
+                setTimeout(wsConnect, delay);
+            } else {
+                addMessage("error", "Не удалось переподключиться. Перезагрузите страницу (F5).");
+            }
+        };
+
+        ws.onerror = () => {};
+    }
+
+    function wsSend(data) {
+        const msg = typeof data === 'string' ? data : JSON.stringify(data);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(msg);
+        } else {
+            wsMessageQueue.push(msg);
+            if (!wsReconnectAttempts) wsConnect();
+        }
+    }
+
+    // Override ws.send and ws.send usage
+    wsConnect();
 
     // ═══════════════════════════════════════════════════════
     // Messages
@@ -451,7 +505,7 @@
             payload.priority_models = priorityModels;
         }
         if (attachedFile) payload.file_content = attachedFile.content;
-        ws.send(JSON.stringify(payload));
+        wsSend(payload);
 
         input.value = ""; attachedFile = null;
         document.getElementById("file-input").value = "";
@@ -888,7 +942,7 @@
     // CHAT ACTIONS
     // ═══════════════════════════════════════════════════════
     function clearChat() {
-        ws.send("/clear");
+        wsSend("/clear");
         chatBox.querySelectorAll(".msg").forEach(m => m.remove());
         addMessage("system", "Чат очищен.");
     }
@@ -1714,6 +1768,59 @@
     function closeArchiveModal() {
         document.getElementById("archive-modal").classList.remove("active");
     }
+
+    // ═══════════════════════════════════════════════════════
+    // REFACTOR MODAL
+    // ═══════════════════════════════════════════════════════
+    function openRefactorModal() { document.getElementById("refactor-modal").classList.add("active"); }
+    function closeRefactorModal() { document.getElementById("refactor-modal").classList.remove("active"); }
+    function sendRefactor() {
+        const code = document.getElementById("refactor-code").value.trim();
+        if (!code) { showToast("Вставьте код для рефакторинга", "error"); return; }
+        const type = document.getElementById("refactor-type").value;
+        const instructions = document.getElementById("refactor-instructions").value.trim();
+        const typeLabels = {optimize:"Оптимизация",clean:"Очистка",modernize:"Модернизация",simplify:"Упрощение",document:"Документация",type_hints:"Type hints",error_handling:"Обработка ошибок"};
+        addMessage("user", `🔄 Рефакторинг: ${typeLabels[type]||type}\n\`\`\`\n${code.substring(0,200)}${code.length>200?'...':''}\n\`\`\``);
+        let payload = { type: "refactor", code: code, refactor_type: type, instructions: instructions };
+        if (activeModelId) payload.model = activeModelId;
+        if (priorityModels.length) payload.priority_models = priorityModels;
+        wsSend(payload);
+        closeRefactorModal();
+        document.getElementById("refactor-code").value = "";
+        document.getElementById("refactor-instructions").value = "";
+    }
     </script>
+
+    <!-- REFACTOR MODAL -->
+    <div class="modal" id="refactor-modal" onclick="if(event.target===this)closeRefactorModal()">
+        <div class="modal-content" style="width:700px;max-width:95vw;" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2>🔄 Авто-рефакторинг</h2>
+                <button class="btn-add" onclick="closeRefactorModal()" style="background:var(--bg-tertiary);font-size:16px;">✕</button>
+            </div>
+            <div class="form-group">
+                <label>Код для рефакторинга</label>
+                <textarea id="refactor-code" placeholder="Вставьте код сюда..." style="height:200px;font-family:'Cascadia Code',Consolas,monospace;font-size:13px;"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Тип рефакторинга</label>
+                <select id="refactor-type" class="priority-select" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;">
+                    <option value="optimize">Оптимизация производительности</option>
+                    <option value="clean">Очистка и форматирование</option>
+                    <option value="modernize">Модернизация (Python 3.10+)</option>
+                    <option value="simplify">Упрощение логики</option>
+                    <option value="document">Добавление документации</option>
+                    <option value="type_hints">Добавление type hints</option>
+                    <option value="error_handling">Улучшение обработки ошибок</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Дополнительные инструкции (необязательно)</label>
+                <textarea id="refactor-instructions" placeholder="Особые требования..." style="height:60px;"></textarea>
+            </div>
+            <button class="btn-create" onclick="sendRefactor()" style="margin-top:10px;">🔄 Рефакторить</button>
+        </div>
+    </div>
+
 </body>
 </html>

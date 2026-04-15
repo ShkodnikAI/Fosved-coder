@@ -1,3 +1,8 @@
+"""
+[DEPRECATED/LEGACY] — This module is no longer actively used.
+It references `keys_mgr.get_key(provider)` which doesn't exist in the current KeysManager class.
+See core/agent.py for the current chat/streaming implementation.
+"""
 import json
 import os
 import asyncio

@@ -89,9 +89,32 @@ async def websocket_chat(websocket: WebSocket):
                 prompt = data
                 model_id = None
                 priority = []
+                payload = {}
 
-            # Save user message
-            await save_message(current_project_id, "user", prompt)
+            # Handle refactor requests
+            if payload.get("type") == "refactor":
+                refactor_code = payload.get("code", "")
+                refactor_type = payload.get("refactor_type", "optimize")
+                instructions = payload.get("instructions", "")
+                type_prompts = {
+                    "optimize": "Оптимизируй этот код для лучшей производительности",
+                    "clean": "Очисти и отформатируй этот код",
+                    "modernize": "Модернизируй этот код, используя современные возможности Python 3.10+",
+                    "simplify": "Упрости логику этого кода",
+                    "document": "Добавь полные docstrings и комментарии к этому коду",
+                    "type_hints": "Добавь аннотации типов ко всем функциям и переменным",
+                    "error_handling": "Улучши обработку ошибок в этом коде",
+                }
+                refactor_prompt = f"""{type_prompts.get(refactor_type, 'Рефактори этот код')}.
+{'Дополнительные инструкции: ' + instructions if instructions else ''}
+Верни ТОЛЬКО улучшенный код без пояснений, в code block.
+
+Код для рефакторинга:
+```
+{refactor_code}
+```"""
+                await handle_chat_message(refactor_prompt, current_project_id, repo_map, websocket)
+                continue
 
             # Build project context (Repo Map)
             repo_map = None
