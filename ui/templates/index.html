@@ -1,1371 +1,524 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fosved Coder</title>
-<link rel="stylesheet" href="/static/style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fosved Coder v2.0</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Code syntax highlighting (light theme) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
-<div class="app" id="app">
-  <!-- HEADER -->
-  <div class="header">
-    <h1>&#9889; Fosved Coder</h1>
-    <div class="header-actions">
-      <button class="btn btn-ghost" onclick="toggleSidebar()">&#9776;</button>
-      <button class="btn btn-ghost" onclick="openSearch()" title="Поиск по файлам">&#128269;</button>
-      <button class="btn btn-ghost" onclick="openTerminal()" title="Терминал">&#128424;</button>
-      <button class="btn btn-ghost" onclick="openGitModal()" title="Git">&#128260;</button>
-      <button class="btn btn-ghost" onclick="openTemplates()" title="Шаблоны">&#128221;</button>
-      <button class="btn btn-ghost" onclick="openPackages()" title="Пакеты">&#128230;</button>
-      <button class="btn btn-accent" onclick="openSettings()">&#9881;</button>
-    </div>
-  </div>
-
-  <div class="main">
-    <!-- SIDEBAR -->
-    <div class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <h2>&#128193; Проекты</h2>
-        <button class="btn btn-accent btn-sm" onclick="openNewProject()">&#43; Новый проект</button>
-      </div>
-      <div class="project-list" id="projectList"></div>
-    </div>
-
-    <!-- CHAT AREA -->
-    <div class="chat-area">
-      <div class="chat-header">
-        <h2 id="chatTitle">Выберите проект</h2>
-        <div class="model-bar" id="modelBar" style="display:none">
-          <select id="modelSelect" onchange="currentModel=this.value"></select>
-          <button class="btn btn-sm btn-ghost" onclick="clearChat()" title="Очистить чат">&#128465;</button>
+    <!-- LEFT SIDEBAR -->
+    <div class="sidebar">
+        <!-- Brand Logo -->
+        <div class="sidebar-logo">
+            <div class="logo-mark">φ</div>
+            <div class="logo-text">
+                <div class="logo-name">Fosved</div>
+                <div class="logo-subtitle">φῶς · веды · coder</div>
+            </div>
         </div>
-      </div>
 
-      <!-- THREAD TABS -->
-      <div class="threads-bar" id="threadsBar" style="display:none"></div>
-
-      <!-- MESSAGES -->
-      <div class="messages" id="messages"></div>
-
-      <!-- INPUT -->
-      <div class="input-area" id="inputArea" style="display:none">
-        <div class="file-preview" id="filePreview">
-          <span id="fileName"></span>
-          <span class="remove-file" onclick="removeFile()">&times;</span>
+        <!-- Projects -->
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <h3>Проекты</h3>
+                <button class="btn-icon" onclick="createProject()" title="Новый проект">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+            </div>
+            <div id="projects-list">
+                <div class="project-item active" data-id="null" onclick="selectProject(null, this)">
+                    Общий чат
+                </div>
+            </div>
         </div>
-        <label class="attach-btn" title="Прикрепить файл">&#128206;<input type="file" id="fileInput" hidden onchange="handleFile(this)"></label>
-        <textarea id="msgInput" rows="3" placeholder="Сообщение... (Shift+Enter — новая строка)" onkeydown="handleKey(event)"></textarea>
-        <button class="btn btn-accent" onclick="sendMessage()">&#9654;</button>
-      </div>
-    </div>
-  </div>
 
-  <!-- QUICK BAR -->
-  <div class="quick-bar" id="quickBar">
-    <div class="quick-group"><span>Ссылки:</span></div>
-  </div>
-</div>
-
-<!-- PROJECT MODAL -->
-<div class="modal-overlay" id="projectModal">
-  <div class="modal">
-    <h2 id="projectModalTitle">Новый проект</h2>
-    <label>Название</label>
-    <input id="pName" placeholder="My Project">
-    <label>Папка проекта</label>
-    <input id="pFolder" placeholder="C:/projects/myapp">
-    <label>GitHub репозиторий</label>
-    <input id="pGithub" placeholder="https://github.com/user/repo">
-    <label>Описание / Промпт</label>
-    <textarea id="pPrompt" rows="3" placeholder="Опишите проект для AI..."></textarea>
-    <label>Инструкции</label>
-    <textarea id="pInstructions" rows="3" placeholder="Специфичные инструкции для AI..."></textarea>
-    <label>Идеи и заметки</label>
-    <textarea id="pIdeas" rows="2" placeholder="Идеи, ссылки, заметки..."></textarea>
-    <label>Модель по умолчанию</label>
-    <select id="pModel"></select>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('projectModal')">Отмена</button>
-      <button class="btn btn-accent" id="projectModalSave" onclick="saveProject()">Создать</button>
-    </div>
-  </div>
-</div>
-
-<!-- SETTINGS MODAL -->
-<div class="modal-overlay" id="settingsModal">
-  <div class="modal" style="width:620px">
-    <h2>&#9881; Настройки</h2>
-    <div class="settings-section">
-      <h3>&#128273; API Ключи</h3>
-      <div id="keysList"></div>
-      <div class="add-key-form">
-        <select id="keyProvider"></select>
-        <input id="keyValue" placeholder="sk-..." type="password">
-        <input id="keyName" placeholder="Имя (необязательно)" style="max-width:150px">
-        <button class="btn btn-accent btn-sm" onclick="addKey()">Добавить</button>
-      </div>
-    </div>
-    <div class="settings-section">
-      <h3>&#128187; GitHub</h3>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input id="ghToken" placeholder="GitHub Token" type="password" style="flex:1">
-        <input id="ghUsername" placeholder="Username" style="max-width:140px">
-        <button class="btn btn-accent btn-sm" onclick="saveGithub()">Сохранить</button>
-      </div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Закрыть</button>
-    </div>
-  </div>
-</div>
-
-<!-- FILE TREE MODAL -->
-<div class="modal-overlay" id="filesModal">
-  <div class="modal" style="width:700px">
-    <h2>&#128193; Файлы проекта</h2>
-    <div class="file-tree" id="fileTree"></div>
-    <div class="file-viewer" id="fileViewer" style="display:none"></div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('filesModal')">Закрыть</button>
-    </div>
-  </div>
-</div>
-
-<!-- THREAD CONTEXT MENU -->
-<div id="threadMenu" style="display:none;position:fixed;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;padding:6px 0;z-index:200;min-width:140px;box-shadow:0 4px 12px rgba(0,0,0,.5)">
-  <div style="padding:6px 14px;cursor:pointer;font-size:13px" onclick="renameCurrentThread()">&#9998; Переименовать</div>
-  <div style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--danger)" onclick="deleteCurrentThread()">&#128465; Удалить</div>
-</div>
-
-<!-- TERMINAL PANEL -->
-<div class="terminal-overlay" id="terminalOverlay" onclick="if(event.target===this)closeTerminal()">
-  <div class="terminal-panel">
-    <div class="terminal-header">
-      <div style="display:flex;align-items:center;gap:10px">
-        <h3>&#128424; Терминал</h3>
-        <span class="terminal-cwd" id="termCwd"></span>
-      </div>
-      <div class="terminal-header-actions">
-        <button class="btn btn-sm btn-ghost" onclick="clearTerminal()" title="Очистить">&#128465;</button>
-        <button class="btn btn-sm btn-ghost" onclick="closeTerminal()" title="Закрыть">&times;</button>
-      </div>
-    </div>
-    <div class="terminal-output" id="termOutput"></div>
-    <div class="terminal-input-bar">
-      <span class="prompt-symbol">$</span>
-      <input id="termInput" placeholder="Введите команду..." onkeydown="handleTermKey(event)" autocomplete="off" spellcheck="false">
-      <button class="run-btn" id="termRunBtn" onclick="runTermCmd()">&#9654; Run</button>
-      <button class="kill-btn" id="termKillBtn" onclick="killTermProcess()" disabled>&#9632; Stop</button>
-    </div>
-  </div>
-</div>
-
-<!-- REFACTOR PANEL -->
-<div class="refactor-overlay" id="refactorOverlay" onclick="if(event.target===this)closeRefactor()">
-  <div class="refactor-panel">
-    <div class="refactor-header">
-      <h2>&#129302; Авто-рефакторинг</h2>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-sm btn-ghost" onclick="closeRefactor()">&times; Закрыть</button>
-      </div>
-    </div>
-    <div class="refactor-controls">
-      <label>Фокус:</label>
-      <div class="focus-group">
-        <button class="focus-btn active" data-focus="full" onclick="setRefactorFocus('full',this)">&#128218; Полный</button>
-        <button class="focus-btn" data-focus="security" onclick="setRefactorFocus('security',this)">&#128274; Безопасность</button>
-        <button class="focus-btn" data-focus="performance" onclick="setRefactorFocus('performance',this)">&#9889; Скорость</button>
-        <button class="focus-btn" data-focus="style" onclick="setRefactorFocus('style',this)">&#9999; Стиль</button>
-      </div>
-      <label style="margin-left:auto">Модель:</label>
-      <select id="refactorModel"></select>
-      <button class="btn btn-accent btn-sm" id="refactorStartBtn" onclick="startRefactor()">&#9654; Анализ</button>
-    </div>
-    <div class="refactor-output" id="refactorOutput">
-      <div class="refactor-status">
-        <div>Нажмите &#9654; Анализ для начала</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- SEARCH MODAL -->
-<div class="modal-overlay" id="searchModal">
-  <div class="modal" style="width:650px">
-    <h2>&#128269; Поиск по файлам</h2>
-    <div class="search-bar" style="margin:10px 0;padding:0">
-      <input id="searchQuery" placeholder="Поиск текста..." onkeydown="if(event.key==='Enter')doSearch()">
-      <button class="btn btn-accent btn-sm" onclick="doSearch()">&#128269;</button>
-    </div>
-    <div class="search-result-count" id="searchCount"></div>
-    <div class="search-results" id="searchResults"></div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('searchModal')">Закрыть</button>
-    </div>
-  </div>
-</div>
-
-<!-- GIT MODAL -->
-<div class="modal-overlay" id="gitModal">
-  <div class="modal" style="width:650px">
-    <h2>&#128260; Git</h2>
-    <div class="git-panel">
-      <h4>&#128220; Статус</h4>
-      <div class="git-status" id="gitStatus">Загрузка...</div>
-      <div class="git-commit-bar">
-        <input id="gitCommitMsg" placeholder="Сообщение коммита...">
-        <button class="btn btn-accent btn-sm" onclick="gitCommit()">&#128190; Commit</button>
-        <button class="btn btn-sm btn-ghost" onclick="gitPush()">Push</button>
-        <button class="btn btn-sm btn-ghost" onclick="gitPull()">Pull</button>
-        <button class="btn btn-sm btn-ghost" onclick="loadGitStatus()">&#128260;</button>
-      </div>
-      <h4>&#128336; История коммитов</h4>
-      <div class="git-log" id="gitLog">Загрузка...</div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('gitModal')">Закрыть</button>
-    </div>
-  </div>
-</div>
-
-<!-- TEMPLATES MODAL -->
-<div class="modal-overlay" id="templatesModal">
-  <div class="modal" style="width:550px">
-    <h2>&#128221; Шаблоны проектов</h2>
-    <div class="template-grid" id="templateGrid"></div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('templatesModal')">Закрыть</button>
-    </div>
-  </div>
-</div>
-
-<!-- PACKAGES MODAL -->
-<div class="modal-overlay" id="packagesModal">
-  <div class="modal" style="width:550px">
-    <h2>&#128230; Менеджер пакетов</h2>
-    <div style="display:flex;gap:8px;margin-bottom:10px">
-      <button class="btn btn-sm btn-ghost pkg-mgr-btn active" onclick="setPkgMgr('pip',this)" id="pipBtn">pip</button>
-      <button class="btn btn-sm btn-ghost pkg-mgr-btn" onclick="setPkgMgr('npm',this)" id="npmBtn">npm</button>
-    </div>
-    <div class="pkg-input-bar">
-      <input id="pkgInput" placeholder="fastapi uvicorn requests..." onkeydown="if(event.key==='Enter')installPkg()">
-      <button class="btn btn-accent btn-sm" onclick="installPkg()">&#128230; Установить</button>
-    </div>
-    <div class="pkg-output" id="pkgOutput" style="display:none"></div>
-    <h4 style="font-size:13px;margin-top:10px">Установленные пакеты</h4>
-    <div class="pkg-list" id="pkgList">Загрузка...</div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('packagesModal')">Закрыть</button>
-    </div>
-  </div>
-</div>
-
-<!-- DIFF MODAL -->
-<div class="modal-overlay" id="diffModal">
-  <div class="modal" style="width:700px">
-    <h2>&#128196; Просмотр изменений</h2>
-    <div id="diffInfo" style="font-size:12px;color:var(--text-dim);margin-bottom:6px"></div>
-    <div class="diff-viewer" id="diffViewer"></div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('diffModal')">Закрыть</button>
-      <button class="btn btn-accent" id="diffApplyBtn" onclick="applyDiff()">&#128190; Применить</button>
-    </div>
-  </div>
-</div>
-
-<!-- TOAST CONTAINER -->
-<div class="toast-container" id="toastContainer"></div>
-
-<script>
-// ===== STATE =====
-let projects = {};
-let currentProjectId = null;
-let currentThreadId = 'main';
-let threads = [];
-let ws = null;
-let isStreaming = false;
-let attachedFile = null;
-let models = [];
-let quickLinks = JSON.parse(localStorage.getItem('quickLinks') || '[]');
-
-// ===== INIT =====
-async function init() {
-  await loadProjects();
-  await loadModels();
-  renderQuickBar();
-}
-
-// ===== API HELPERS =====
-async function api(path, opts = {}) {
-  try {
-    const r = await fetch(path, opts);
-    return await r.json();
-  } catch(e) { console.error(e); return null; }
-}
-
-// ===== PROJECTS =====
-async function loadProjects() {
-  projects = (await api('/api/projects')) || {};
-  renderProjects();
-}
-
-function renderProjects() {
-  const el = document.getElementById('projectList');
-  el.innerHTML = '';
-  Object.values(projects).sort((a,b) => (b.created||'').localeCompare(a.created||'')).forEach(p => {
-    const active = p.id === currentProjectId ? 'active' : '';
-    const pct = p.progress || 0;
-    const color = pct < 30 ? 'var(--danger)' : pct < 70 ? 'var(--warning)' : 'var(--success)';
-    const ghLink = p.github_repo ? `<a href="${p.github_repo}" target="_blank" class="github-link" onclick="event.stopPropagation()">&#128279; GitHub</a>` : '';
-    el.innerHTML += `
-      <div class="project-card ${active}" onclick="selectProject('${p.id}')">
-        <h3>${esc(p.name)}</h3>
-        <p>${esc(p.description || p.prompt || '').substring(0, 60)}${ghLink}</p>
-        <div class="progress-bar" onclick="event.stopPropagation();setProgress('${p.id}',event)">
-          <div class="progress-fill" style="width:${pct}%;background:${color}"></div>
+        <!-- Ideas -->
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <h3>Идеи</h3>
+            </div>
+            <div class="idea-input-row">
+                <input type="text" id="idea-input" placeholder="GitHub ссылка..." onkeypress="if(event.key==='Enter')analyzeIdea()">
+                <button class="btn-small" onclick="analyzeIdea()">OK</button>
+            </div>
+            <div id="ideas-list"></div>
         </div>
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${pct}%</div>
-        <div class="project-actions">
-          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();editProject('${p.id}')" title="Редактировать">&#9998;</button>
-          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();generateCode('${p.id}')" title="Генерировать код">&#9889;</button>
-          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openRefactor('${p.id}')" title="Рефакторинг">&#129302;</button>
-          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openTerminal('${p.id}')" title="Терминал">&#128424;</button>
-          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openFiles('${p.id}')" title="Файлы">&#128193;</button>
-          <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteProject('${p.id}')" title="Удалить">&#128465;</button>
+
+        <!-- Footer -->
+        <div class="sidebar-section sidebar-footer">
+            <button class="sidebar-btn" onclick="showStats()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+                Статистика
+            </button>
+            <button class="sidebar-btn" onclick="showHelp()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                Помощь
+            </button>
         </div>
-      </div>`;
-  });
-}
-
-async function selectProject(pid) {
-  currentProjectId = pid;
-  const p = projects[pid];
-  document.getElementById('chatTitle').textContent = p.name;
-  document.getElementById('modelBar').style.display = 'flex';
-  document.getElementById('inputArea').style.display = 'flex';
-  document.getElementById('threadsBar').style.display = 'flex';
-  renderProjects();
-  await loadThreads();
-  await loadChatHistory();
-  populateModelSelect(p.selected_model);
-  connectWS();
-}
-
-function openNewProject() {
-  document.getElementById('projectModalTitle').textContent = 'Новый проект';
-  document.getElementById('projectModalSave').textContent = 'Создать';
-  document.getElementById('projectModalSave').onclick = saveProject;
-  ['pName','pFolder','pGithub','pPrompt','pInstructions','pIdeas'].forEach(id => document.getElementById(id).value = '');
-  populateProjectModelSelect('');
-  openModal('projectModal');
-}
-
-let editingProjectId = null;
-function editProject(pid) {
-  const p = projects[pid];
-  editingProjectId = pid;
-  document.getElementById('projectModalTitle').textContent = 'Редактировать проект';
-  document.getElementById('projectModalSave').textContent = 'Сохранить';
-  document.getElementById('projectModalSave').onclick = updateProject;
-  document.getElementById('pName').value = p.name || '';
-  document.getElementById('pFolder').value = p.folder || '';
-  document.getElementById('pGithub').value = p.github_repo || '';
-  document.getElementById('pPrompt').value = p.prompt || '';
-  document.getElementById('pInstructions').value = p.instructions || '';
-  document.getElementById('pIdeas').value = p.ideas || '';
-  populateProjectModelSelect(p.selected_model);
-  openModal('projectModal');
-}
-
-async function saveProject() {
-  const data = {
-    name: document.getElementById('pName').value.trim(),
-    folder: document.getElementById('pFolder').value.trim(),
-    github_repo: document.getElementById('pGithub').value.trim(),
-    prompt: document.getElementById('pPrompt').value.trim(),
-    instructions: document.getElementById('pInstructions').value.trim(),
-    ideas: document.getElementById('pIdeas').value.trim(),
-    selected_model: document.getElementById('pModel').value,
-    progress: 0
-  };
-  if (!data.name) return alert('Введите название проекта');
-  const p = await api('/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
-  if (p && p.id) {
-    await loadProjects();
-    selectProject(p.id);
-    closeModal('projectModal');
-  }
-}
-
-async function updateProject() {
-  if (!editingProjectId) return;
-  const data = {
-    name: document.getElementById('pName').value.trim(),
-    folder: document.getElementById('pFolder').value.trim(),
-    github_repo: document.getElementById('pGithub').value.trim(),
-    prompt: document.getElementById('pPrompt').value.trim(),
-    instructions: document.getElementById('pInstructions').value.trim(),
-    ideas: document.getElementById('pIdeas').value.trim(),
-    selected_model: document.getElementById('pModel').value
-  };
-  await api(`/api/projects/${editingProjectId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
-  await loadProjects();
-  closeModal('projectModal');
-}
-
-async function deleteProject(pid) {
-  if (!confirm('Удалить проект?')) return;
-  await api(`/api/projects/${pid}`, {method:'DELETE'});
-  if (currentProjectId === pid) {
-    currentProjectId = null;
-    document.getElementById('chatTitle').textContent = 'Выберите проект';
-    document.getElementById('modelBar').style.display = 'none';
-    document.getElementById('inputArea').style.display = 'none';
-    document.getElementById('threadsBar').style.display = 'none';
-    document.getElementById('messages').innerHTML = '';
-  }
-  await loadProjects();
-}
-
-function setProgress(pid, e) {
-  const bar = e.currentTarget;
-  const rect = bar.getBoundingClientRect();
-  const pct = Math.round(((e.clientX - rect.left) / rect.width) * 100);
-  fetch(`/api/projects/${pid}`, {
-    method:'PUT', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({progress: pct})
-  });
-  projects[pid].progress = pct;
-  renderProjects();
-}
-
-async function generateCode(pid) {
-  const p = projects[pid];
-  if (!p.prompt && !p.instructions) return alert('Добавьте описание/промпт проекта');
-  selectProject(pid);
-  const msg = `Сгенерируй код для проекта "${p.name}". ${p.prompt ? 'Описание: ' + p.prompt : ''} ${p.instructions ? 'Инструкции: ' + p.instructions : ''}`;
-  document.getElementById('msgInput').value = msg;
-  sendMessage();
-}
-
-// ===== THREADS =====
-async function loadThreads() {
-  if (!currentProjectId) return;
-  threads = (await api(`/api/projects/${currentProjectId}/threads`)) || [];
-  if (threads.length > 0 && !threads.find(t => t.id === currentThreadId)) {
-    currentThreadId = threads[0].id;
-  }
-  renderThreads();
-}
-
-function renderThreads() {
-  const bar = document.getElementById('threadsBar');
-  bar.innerHTML = '';
-  threads.forEach(t => {
-    const active = t.id === currentThreadId ? 'active' : '';
-    bar.innerHTML += `
-      <div class="thread-tab ${active}" onclick="switchThread('${t.id}')" oncontextmenu="threadContext(event,'${t.id}')">
-        ${esc(t.name || t.id)}
-        ${threads.length > 1 ? `<span class="thread-close" onclick="event.stopPropagation();deleteThread('${t.id}')">&times;</span>` : ''}
-      </div>`;
-  });
-  bar.innerHTML += `<button class="thread-add" onclick="createThread()" title="Новый поток">+</button>`;
-}
-
-async function createThread() {
-  if (!currentProjectId) return;
-  const name = prompt('Название потока:', `Поток ${threads.length + 1}`);
-  if (!name) return;
-  const res = await api(`/api/projects/${currentProjectId}/threads`, {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
-  });
-  if (res && res.status === 'ok') {
-    currentThreadId = res.id;
-    await loadThreads();
-    await loadChatHistory();
-  }
-}
-
-async function switchThread(tid) {
-  if (tid === currentThreadId || isStreaming) return;
-  currentThreadId = tid;
-  renderThreads();
-  await loadChatHistory();
-}
-
-async function deleteThread(tid) {
-  if (threads.length <= 1) return;
-  if (!confirm('Удалить этот поток?')) return;
-  await api(`/api/projects/${currentProjectId}/threads/${tid}`, {method:'DELETE'});
-  if (currentThreadId === tid) currentThreadId = 'main';
-  await loadThreads();
-  await loadChatHistory();
-}
-
-let contextThreadId = null;
-function threadContext(e, tid) {
-  e.preventDefault();
-  contextThreadId = tid;
-  const menu = document.getElementById('threadMenu');
-  menu.style.display = 'block';
-  menu.style.left = e.clientX + 'px';
-  menu.style.top = e.clientY + 'px';
-}
-
-async function renameCurrentThread() {
-  document.getElementById('threadMenu').style.display = 'none';
-  if (!contextThreadId) return;
-  const t = threads.find(x => x.id === contextThreadId);
-  const name = prompt('Новое название:', t ? t.name : '');
-  if (!name) return;
-  await api(`/api/projects/${currentProjectId}/threads/${contextThreadId}`, {
-    method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
-  });
-  await loadThreads();
-}
-
-async function deleteCurrentThread() {
-  document.getElementById('threadMenu').style.display = 'none';
-  if (contextThreadId) deleteThread(contextThreadId);
-}
-
-// Close thread menu on click outside
-document.addEventListener('click', () => {
-  document.getElementById('threadMenu').style.display = 'none';
-});
-
-// ===== CHAT =====
-async function loadChatHistory() {
-  if (!currentProjectId) return;
-  const msgs = await api(`/api/chat/${currentProjectId}?thread_id=${currentThreadId}`);
-  const el = document.getElementById('messages');
-  el.innerHTML = '';
-  if (!msgs || msgs.length === 0) return;
-  let lastDate = '';
-  msgs.forEach(m => {
-    const d = (m.timestamp || '').substring(0, 10);
-    if (d && d !== lastDate) {
-      lastDate = d;
-      el.innerHTML += `<div class="date-sep">${d}</div>`;
-    }
-    if (m.role === 'user') {
-      el.innerHTML += `<div class="msg msg-user">${esc(m.content)}</div>`;
-    } else if (m.role === 'assistant') {
-      el.innerHTML += `<div class="msg msg-ai">${renderAI(m.content)}</div>`;
-    }
-  });
-  el.scrollTop = el.scrollHeight;
-}
-
-function connectWS() {
-  if (ws) ws.close();
-  ws = new WebSocket(`ws://${location.host}/ws/chat/${currentProjectId}`);
-  ws.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-    if (data.type === 'token') {
-      appendToken(data.content);
-    } else if (data.type === 'done') {
-      finishStream();
-    } else if (data.type === 'error') {
-      appendError(data.content);
-      finishStream();
-    }
-  };
-  ws.onclose = () => { isStreaming = false; };
-}
-
-function sendMessage() {
-  if (!currentProjectId || isStreaming) return;
-  const input = document.getElementById('msgInput');
-  let msg = input.value.trim();
-  if (!msg && !attachedFile) return;
-
-  // Append file content if attached
-  if (attachedFile) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      msg += `\n\n--- Файл: ${attachedFile.name} ---\n\`\`\`\n${reader.result.substring(0, 8000)}\n\`\`\``;
-      doSend(msg);
-    };
-    reader.readAsText(attachedFile);
-    removeFile();
-    return;
-  }
-  doSend(msg);
-}
-
-function doSend(msg) {
-  // Display user message
-  const el = document.getElementById('messages');
-  el.innerHTML += `<div class="msg msg-user">${esc(msg)}</div>`;
-  document.getElementById('msgInput').value = '';
-
-  // Create AI message container
-  const aiDiv = document.createElement('div');
-  aiDiv.className = 'msg msg-ai';
-  aiDiv.innerHTML = '<span class="cursor-blink"></span>';
-  el.appendChild(aiDiv);
-  el.scrollTop = el.scrollHeight;
-
-  isStreaming = true;
-  const model = document.getElementById('modelSelect').value;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({message: msg, model: model, thread_id: currentThreadId}));
-  } else {
-    connectWS();
-    setTimeout(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({message: msg, model: model, thread_id: currentThreadId}));
-      }
-    }, 500);
-  }
-}
-
-function appendToken(token) {
-  const el = document.getElementById('messages');
-  const aiDiv = el.querySelector('.msg-ai:last-child');
-  if (!aiDiv) return;
-  const cursor = aiDiv.querySelector('.cursor-blink');
-  const contentDiv = aiDiv.querySelector('.stream-content') || document.createElement('span');
-  if (!contentDiv.classList.contains('stream-content')) {
-    contentDiv.classList.add('stream-content');
-    if (cursor) cursor.before(contentDiv);
-    else aiDiv.appendChild(contentDiv);
-  }
-  contentDiv.textContent += token;
-  el.scrollTop = el.scrollHeight;
-}
-
-function finishStream() {
-  isStreaming = false;
-  const el = document.getElementById('messages');
-  const aiDiv = el.querySelector('.msg-ai:last-child');
-  if (!aiDiv) return;
-  const contentDiv = aiDiv.querySelector('.stream-content');
-  const cursor = aiDiv.querySelector('.cursor-blink');
-  if (cursor) cursor.remove();
-  if (contentDiv) {
-    const raw = contentDiv.textContent;
-    aiDiv.innerHTML = renderAI(raw);
-    el.scrollTop = el.scrollHeight;
-  }
-}
-
-function appendError(err) {
-  const el = document.getElementById('messages');
-  el.innerHTML += `<div class="msg msg-error">${esc(err)}</div>`;
-  el.scrollTop = el.scrollHeight;
-}
-
-async function clearChat() {
-  if (!currentProjectId) return;
-  if (!confirm('Очистить историю этого потока?')) return;
-  await api(`/api/chat/${currentProjectId}?thread_id=${currentThreadId}`, {method:'DELETE'});
-  document.getElementById('messages').innerHTML = '';
-}
-
-function handleKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-}
-
-// ===== RENDER AI CONTENT =====
-function renderAI(text) {
-  // Process code blocks
-  let html = esc(text);
-  // Code blocks with language
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => {
-    const ext = langToExt(lang);
-    const saveBtn = `<button class="btn btn-sm btn-ghost" onclick="saveCode(this,'${ext}')">&#128190; Сохранить</button>`;
-    const copyBtn = `<button class="btn btn-sm btn-ghost" onclick="copyCode(this)">&#128203; Копировать</button>`;
-    return `<div class="code-lang">${lang || 'code'}</div><pre><code>${code}</code></pre><div class="code-actions">${saveBtn}${copyBtn}</div>`;
-  });
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-  // Line breaks
-  html = html.replace(/\n/g, '<br>');
-  return html;
-}
-
-function langToExt(lang) {
-  const map = {python:'py',javascript:'js',typescript:'ts',html:'html',css:'css',json:'json',java:'java',cpp:'cpp',c:'c',go:'go',rust:'rs',rb:'rb',php:'php',sql:'sql',sh:'sh',bash:'sh',yaml:'yml',xml:'xml',jsx:'jsx',tsx:'tsx',vue:'vue'};
-  return map[lang.toLowerCase()] || lang || 'txt';
-}
-
-function copyCode(btn) {
-  const pre = btn.closest('.msg-ai').querySelector('pre code');
-  navigator.clipboard.writeText(pre.textContent);
-  btn.textContent = '✓ Скопировано';
-  setTimeout(() => btn.innerHTML = '&#128203; Копировать', 1500);
-}
-
-async function saveCode(btn, ext) {
-  const pre = btn.closest('.msg-ai').querySelector('pre code');
-  const name = prompt('Имя файла:', `file.${ext}`);
-  if (!name || !currentProjectId) return;
-  await api(`/api/projects/${currentProjectId}/save-file`, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({path: name, content: pre.textContent})
-  });
-  btn.textContent = '✓ Сохранено';
-  setTimeout(() => btn.innerHTML = '&#128190; Сохранить', 1500);
-}
-
-// ===== FILES =====
-async function openFiles(pid) {
-  const tree = await api(`/api/projects/${pid}/tree`);
-  const el = document.getElementById('fileTree');
-  el.innerHTML = '';
-  if (!tree || tree.length === 0) {
-    el.innerHTML = '<div style="color:var(--text-dim);padding:10px">Папка не задана или пуста</div>';
-    openModal('filesModal');
-    return;
-  }
-  tree.forEach(f => {
-    const icon = f.type === 'dir' ? '&#128193;' : '&#128196;';
-    const style = `padding-left:${f.level * 16 + 8}px`;
-    el.innerHTML += `<div class="file-tree-item" style="${style}" data-path="${esc(f.path)}" onclick="${f.type === 'file' ? `viewFile('${pid}','${esc(f.path)}')` : ''}">
-      <span class="icon">${icon}</span>${esc(f.name)}</div>`;
-  });
-  document.getElementById('fileViewer').style.display = 'none';
-  openModal('filesModal');
-}
-
-async function viewFile(pid, path) {
-  const data = await api(`/api/projects/${pid}/read-file?path=${encodeURIComponent(path)}`);
-  const el = document.getElementById('fileViewer');
-  if (!data || data.error) { el.innerHTML = '<div style="color:var(--danger)">' + (data?.error || 'Ошибка') + '</div>'; el.style.display = 'block'; return; }
-  el.style.display = 'block';
-  const lines = (data.lines || data.content.split('\n'));
-  el.innerHTML = lines.map((line, i) => `<div class="line"><span class="line-no">${i + 1}</span><span class="line-content">${esc(line)}</span></div>`).join('');
-}
-
-// ===== MODELS =====
-async function loadModels() {
-  models = (await api('/api/models')) || [];
-  populateModelSelect('');
-}
-
-function populateModelSelect(selected) {
-  const sel = document.getElementById('modelSelect');
-  sel.innerHTML = '';
-  const userModels = models.filter(m => m.type === 'user');
-  const freeModels = models.filter(m => m.type === 'free');
-  if (userModels.length) {
-    sel.innerHTML += '<optgroup label="Ваши модели">';
-    userModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
-    sel.innerHTML += '</optgroup>';
-  }
-  if (freeModels.length) {
-    sel.innerHTML += '<optgroup label="Бесплатные">';
-    freeModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
-    sel.innerHTML += '</optgroup>';
-  }
-  if (!sel.value && models.length) sel.value = models[0].id;
-}
-
-function populateProjectModelSelect(selected) {
-  const sel = document.getElementById('pModel');
-  sel.innerHTML = '<option value="">— Автовыбор —</option>';
-  models.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
-}
-
-// ===== SETTINGS =====
-async function openSettings() {
-  const providers = (await api('/api/providers')) || [];
-  const provSel = document.getElementById('keyProvider');
-  provSel.innerHTML = providers.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-  await refreshKeys();
-  await loadGithub();
-  openModal('settingsModal');
-}
-
-async function refreshKeys() {
-  const keys = (await api('/api/keys')) || [];
-  const el = document.getElementById('keysList');
-  el.innerHTML = '';
-  keys.forEach(k => {
-    el.innerHTML += `<div class="key-row">
-      <span class="key-provider">${esc(k.name || k.provider)}</span>
-      <span class="key-name">${k.models.length ? k.models.join(', ') : '••••••••'}</span>
-      <button class="btn btn-sm btn-danger" onclick="removeKey('${k.provider}')">Удалить</button>
-    </div>`;
-  });
-}
-
-async function addKey() {
-  const provider = document.getElementById('keyProvider').value;
-  const key = document.getElementById('keyValue').value.trim();
-  const name = document.getElementById('keyName').value.trim();
-  if (!key) return;
-  await api('/api/keys', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider, key, name})});
-  document.getElementById('keyValue').value = '';
-  document.getElementById('keyName').value = '';
-  await refreshKeys();
-  await loadModels();
-}
-
-async function removeKey(provider) {
-  await api(`/api/keys/${provider}`, {method:'DELETE'});
-  await refreshKeys();
-  await loadModels();
-}
-
-async function loadGithub() {
-  const data = (await api('/api/github/user')) || {};
-  document.getElementById('ghToken').value = data.token || '';
-  document.getElementById('ghUsername').value = data.username || '';
-}
-
-async function saveGithub() {
-  const token = document.getElementById('ghToken').value.trim();
-  const username = document.getElementById('ghUsername').value.trim();
-  await api('/api/github/token', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token, username})});
-  alert('Сохранено');
-}
-
-// ===== FILE ATTACH =====
-function handleFile(input) {
-  if (input.files[0]) {
-    attachedFile = input.files[0];
-    document.getElementById('fileName').textContent = attachedFile.name;
-    document.getElementById('filePreview').classList.add('show');
-  }
-}
-
-function removeFile() {
-  attachedFile = null;
-  document.getElementById('fileInput').value = '';
-  document.getElementById('filePreview').classList.remove('show');
-}
-
-// ===== QUICK BAR =====
-function renderQuickBar() {
-  const bar = document.getElementById('quickBar');
-  bar.innerHTML = '<div class="quick-group"><span>Ссылки:</span></div>';
-  const categories = {};
-  quickLinks.forEach(l => {
-    if (!categories[l.cat]) categories[l.cat] = [];
-    categories[l.cat].push(l);
-  });
-  Object.entries(categories).forEach(([cat, links]) => {
-    let html = `<div class="quick-group"><span>${esc(cat)}</span>`;
-    links.forEach(l => {
-      html += `<a href="${esc(l.url)}" target="_blank" class="quick-link" onclick="event.preventDefault();window.open('${esc(l.url)}','_blank')">
-        ${esc(l.name)}<span class="remove-link" onclick="event.stopPropagation();event.preventDefault();removeQuickLink(${quickLinks.indexOf(l)})">&times;</span>
-      </a>`;
-    });
-    html += '</div>';
-    bar.innerHTML += html;
-  });
-  bar.innerHTML += `<button class="btn btn-sm btn-ghost" onclick="addQuickLink()">+ Ссылка</button>`;
-}
-
-function addQuickLink() {
-  const name = prompt('Название:');
-  if (!name) return;
-  const url = prompt('URL:');
-  if (!url) return;
-  const cat = prompt('Категория:', 'Разное') || 'Разное';
-  quickLinks.push({name, url, cat});
-  localStorage.setItem('quickLinks', JSON.stringify(quickLinks));
-  renderQuickBar();
-}
-
-function removeQuickLink(idx) {
-  quickLinks.splice(idx, 1);
-  localStorage.setItem('quickLinks', JSON.stringify(quickLinks));
-  renderQuickBar();
-}
-
-// ===== MODALS =====
-function openModal(id) { document.getElementById(id).classList.add('show'); }
-function closeModal(id) { document.getElementById(id).classList.remove('show'); }
-
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('show');
-}
-
-// ===== UTILS =====
-function esc(s) {
-  if (!s) return '';
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-// ===== TERMINAL =====
-let termWS = null;
-let termRunning = false;
-let termHistoryIdx = -1;
-let termHistory = [];
-
-async function openTerminal(pid) {
-  if (pid) {
-    currentProjectId = pid;
-    selectProject(pid);
-  }
-  if (!currentProjectId) return alert('Сначала выберите проект');
-  document.getElementById('terminalOverlay').classList.add('show');
-  // Show CWD
-  const cwd = await api(`/api/projects/${currentProjectId}/terminal/cwd`);
-  if (cwd && cwd.cwd) {
-    document.getElementById('termCwd').textContent = cwd.cwd;
-  } else {
-    document.getElementById('termCwd').textContent = 'Папка не задана';
-  }
-  // Load history
-  termHistory = (await api(`/api/projects/${currentProjectId}/terminal/history`)) || [];
-  termHistoryIdx = termHistory.length;
-  // Connect terminal WS
-  if (termWS) termWS.close();
-  termWS = new WebSocket(`ws://${location.host}/ws/terminal/${currentProjectId}`);
-  termWS.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-    const out = document.getElementById('termOutput');
-    if (data.type === 'output') {
-      out.innerHTML += `<div class="term-line-stdout">${esc(data.content)}</div>`;
-    } else if (data.type === 'error') {
-      out.innerHTML += `<div class="term-line-stderr">${esc(data.content)}</div>`;
-    } else if (data.type === 'status') {
-      out.innerHTML += `<div class="term-line-status">${esc(data.content)}...</div>`;
-    } else if (data.type === 'done') {
-      out.innerHTML += `<div class="term-line-done">${esc(data.content)}</div>`;
-      termRunning = false;
-      document.getElementById('termRunBtn').disabled = false;
-      document.getElementById('termKillBtn').disabled = true;
-      document.getElementById('termInput').focus();
-    }
-    out.scrollTop = out.scrollHeight;
-  };
-  termWS.onclose = () => {
-    termRunning = false;
-    document.getElementById('termRunBtn').disabled = false;
-    document.getElementById('termKillBtn').disabled = true;
-  };
-  document.getElementById('termInput').focus();
-}
-
-function closeTerminal() {
-  document.getElementById('terminalOverlay').classList.remove('show');
-  if (termWS) { termWS.close(); termWS = null; }
-  // Save history
-  if (currentProjectId && termHistory.length) {
-    api(`/api/projects/${currentProjectId}/terminal/history`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({history: termHistory})
-    });
-  }
-}
-
-function handleTermKey(e) {
-  if (e.key === 'Enter') { e.preventDefault(); runTermCmd(); }
-  else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    if (termHistoryIdx > 0) {
-      termHistoryIdx--;
-      document.getElementById('termInput').value = termHistory[termHistoryIdx] || '';
-    }
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    if (termHistoryIdx < termHistory.length - 1) {
-      termHistoryIdx++;
-      document.getElementById('termInput').value = termHistory[termHistoryIdx] || '';
-    } else {
-      termHistoryIdx = termHistory.length;
-      document.getElementById('termInput').value = '';
-    }
-  }
-}
-
-function runTermCmd() {
-  if (!currentProjectId || termRunning) return;
-  const input = document.getElementById('termInput');
-  const cmd = input.value.trim();
-  if (!cmd) return;
-
-  // Display command
-  const out = document.getElementById('termOutput');
-  out.innerHTML += `<div class="term-line-cmd">$ ${esc(cmd)}</div>`;
-
-  // Add to history
-  termHistory.push(cmd);
-  termHistoryIdx = termHistory.length;
-  input.value = '';
-
-  // Send via WS
-  if (termWS && termWS.readyState === WebSocket.OPEN) {
-    termWS.send(JSON.stringify({action: 'run', command: cmd}));
-  } else {
-    openTerminal(currentProjectId);
-    setTimeout(() => {
-      if (termWS && termWS.readyState === WebSocket.OPEN) {
-        termWS.send(JSON.stringify({action: 'run', command: cmd}));
-      }
-    }, 500);
-  }
-  termRunning = true;
-  document.getElementById('termRunBtn').disabled = true;
-  document.getElementById('termKillBtn').disabled = false;
-  out.scrollTop = out.scrollHeight;
-}
-
-function killTermProcess() {
-  if (termWS && termWS.readyState === WebSocket.OPEN) {
-    termWS.send(JSON.stringify({action: 'kill'}));
-  }
-}
-
-function clearTerminal() {
-  document.getElementById('termOutput').innerHTML = '';
-}
-
-// ===== REFACTOR =====
-let refactorWS = null;
-let refactorFocus = 'full';
-let refactorRunning = false;
-let refactorStreamContent = '';
-
-async function openRefactor(pid) {
-  if (pid) {
-    currentProjectId = pid;
-    selectProject(pid);
-  }
-  if (!currentProjectId) return alert('Сначала выберите проект');
-  document.getElementById('refactorOverlay').classList.add('show');
-  // Populate model select
-  const sel = document.getElementById('refactorModel');
-  sel.innerHTML = '';
-  const userModels = models.filter(m => m.type === 'user');
-  const freeModels = models.filter(m => m.type === 'free');
-  if (userModels.length) {
-    sel.innerHTML += '<optgroup label="Ваши модели">';
-    userModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}">${esc(m.name || m.id)}</option>`; });
-    sel.innerHTML += '</optgroup>';
-  }
-  if (freeModels.length) {
-    sel.innerHTML += '<optgroup label="Бесплатные">';
-    freeModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}">${esc(m.name || m.id)}</option>`; });
-    sel.innerHTML += '</optgroup>';
-  }
-  // Reset output
-  document.getElementById('refactorOutput').innerHTML = '<div class="refactor-status"><div>Нажмите &#9654; Анализ для начала</div></div>';
-}
-
-function closeRefactor() {
-  document.getElementById('refactorOverlay').classList.remove('show');
-  if (refactorWS) { refactorWS.close(); refactorWS = null; }
-  refactorRunning = false;
-}
-
-function setRefactorFocus(focus, btn) {
-  refactorFocus = focus;
-  document.querySelectorAll('.focus-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-}
-
-function startRefactor() {
-  if (!currentProjectId || refactorRunning) return;
-  refactorRunning = true;
-  refactorStreamContent = '';
-  document.getElementById('refactorStartBtn').disabled = true;
-  const out = document.getElementById('refactorOutput');
-  out.innerHTML = '<div class="refactor-status"><div class="spinner"></div><div>Собираю файлы и анализирую...</div></div>';
-
-  // Connect WS
-  if (refactorWS) refactorWS.close();
-  refactorWS = new WebSocket(`ws://${location.host}/ws/refactor/${currentProjectId}`);
-  refactorWS.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-    if (data.type === 'status') {
-      out.innerHTML = `<div class="refactor-status"><div class="spinner"></div><div>${esc(data.content)}</div></div>`;
-    } else if (data.type === 'token') {
-      refactorStreamContent += data.content;
-      // Parse and render content as markdown-like
-      renderRefactorOutput(out, refactorStreamContent);
-    } else if (data.type === 'done') {
-      refactorRunning = false;
-      document.getElementById('refactorStartBtn').disabled = false;
-      renderRefactorOutput(out, refactorStreamContent);
-    } else if (data.type === 'error') {
-      refactorRunning = false;
-      document.getElementById('refactorStartBtn').disabled = false;
-      out.innerHTML += `<div style="color:var(--danger);padding:10px">${esc(data.content)}</div>`;
-    }
-  };
-  refactorWS.onopen = () => {
-    const model = document.getElementById('refactorModel').value;
-    refactorWS.send(JSON.stringify({model: model, focus: refactorFocus}));
-  };
-  refactorWS.onclose = () => {
-    refactorRunning = false;
-    document.getElementById('refactorStartBtn').disabled = false;
-  };
-}
-
-function renderRefactorOutput(el, text) {
-  let html = esc(text);
-  // Parse [FILE:path] tags
-  html = html.replace(/\[FILE:([^\]]+)\]/g, '<div class="refactor-item-title">&#128196; $1</div>');
-  // Headers with emojis
-  html = html.replace(/## (📊[^\n]*)/g, '<h3>$1</h3>');
-  html = html.replace(/## (🔴[^\n]*)/g, '<h3 style="color:var(--danger)">$1</h3>');
-  html = html.replace(/## (🟡[^\n]*)/g, '<h3 style="color:var(--warning)">$1</h3>');
-  html = html.replace(/## (🟢[^\n]*)/g, '<h3 style="color:var(--success)">$1</h3>');
-  html = html.replace(/## (📋[^\n]*)/g, '<h3 style="color:#6bb3f0">$1</h3>');
-  // Other ## headers
-  html = html.replace(/## (.*)/g, '<h3 style="color:var(--accent)">$1</h3>');
-  // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-  // Code blocks with language
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => {
-    const ext = langToExt(lang);
-    const applyBtn = `<div class="apply-code-btn"><button class="btn btn-sm btn-accent" onclick="applyRefactorCode(this,'${ext}')">&#128190; Применить к файлу</button> <button class="btn btn-sm btn-ghost" onclick="copyCode(this)">&#128203; Копировать</button></div>`;
-    return `<pre><code>${code}</code></pre>${applyBtn}`;
-  });
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Line breaks
-  html = html.replace(/\n/g, '<br>');
-  el.innerHTML = html;
-  el.scrollTop = el.scrollHeight;
-}
-
-async function applyRefactorCode(btn, ext) {
-  if (!currentProjectId) return;
-  // Find the file path from refactor-item-title before this code block
-  const pre = btn.closest('.refactor-output').querySelector('pre code');
-  const container = pre.closest('.refactor-output') || btn.parentElement.parentElement;
-  const allTitles = container.querySelectorAll('.refactor-item-title');
-  let filePath = '';
-  for (const t of allTitles) {
-    if (t.compareDocumentPosition(pre) & Node.DOCUMENT_POSITION_PRECEDING) {
-      filePath = t.textContent.replace(/^[^\w]*/, '').trim();
-    } else break;
-  }
-  if (!filePath) {
-    filePath = prompt('Путь к файлу:', `file.${ext}`);
-  }
-  if (!filePath) return;
-  if (!confirm(`Применить изменения к файлу ${filePath}?`)) return;
-  await api(`/api/projects/${currentProjectId}/refactor/apply`, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({path: filePath, content: pre.textContent})
-  });
-  btn.textContent = '✓ Применено!';
-  btn.disabled = true;
-}
-
-// ===== TOAST =====
-function toast(msg, type = 'info', duration = 3000) {
-  const container = document.getElementById('toastContainer');
-  const div = document.createElement('div');
-  div.className = `toast toast-${type}`;
-  div.textContent = msg;
-  container.appendChild(div);
-  setTimeout(() => { div.style.opacity = '0'; div.style.transition = 'opacity .3s'; setTimeout(() => div.remove(), 300); }, duration);
-}
-
-// ===== SEARCH =====
-async function openSearch() {
-  if (!currentProjectId) return toast('Сначала выберите проект', 'warning');
-  openModal('searchModal');
-  setTimeout(() => document.getElementById('searchQuery').focus(), 100);
-}
-
-async function doSearch() {
-  if (!currentProjectId) return;
-  const q = document.getElementById('searchQuery').value.trim();
-  if (!q) return;
-  const el = document.getElementById('searchResults');
-  const cnt = document.getElementById('searchCount');
-  el.innerHTML = '<div style="color:var(--text-dim);padding:10px">Ищу...</div>';
-  const data = await api(`/api/projects/${currentProjectId}/search?q=${encodeURIComponent(q)}`);
-  if (!data || data.error) { el.innerHTML = '<div style="color:var(--danger)">Ошибка поиска</div>'; return; }
-  cnt.textContent = `Найдено: ${data.count} результатов${data.truncated ? ' (показаны первые 100)' : ''}`;
-  if (data.results.length === 0) { el.innerHTML = '<div style="color:var(--text-dim)">Ничего не найдено</div>'; return; }
-  el.innerHTML = data.results.map(r =>
-    `<div class="search-result-item" onclick="viewSearchResult('${esc(r.file)}',${r.line})">
-      <span class="sr-file">${esc(r.file)}</span><span class="sr-line">:${r.line}</span><span class="sr-text">${esc(r.text)}</span>
-    </div>`
-  ).join('');
-}
-
-async function viewSearchResult(file, line) {
-  if (!currentProjectId) return;
-  closeModal('searchModal');
-  openFiles(currentProjectId);
-  setTimeout(() => viewFile(currentProjectId, file), 300);
-}
-
-// ===== GIT =====
-async function openGitModal() {
-  if (!currentProjectId) return toast('Сначала выберите проект', 'warning');
-  openModal('gitModal');
-  await loadGitStatus();
-  await loadGitLog();
-}
-
-async function loadGitStatus() {
-  const data = await api(`/api/projects/${currentProjectId}/git/status`);
-  const el = document.getElementById('gitStatus');
-  if (!data || data.error) { el.textContent = data?.error || 'Нет git'; return; }
-  el.textContent = (data.stdout || data.stderr || '').trim() || 'Нет изменений';
-}
-
-async function loadGitLog() {
-  const data = await api(`/api/projects/${currentProjectId}/git/log?n=15`);
-  const el = document.getElementById('gitLog');
-  if (!data || !data.commits) { el.textContent = 'Нет коммитов'; return; }
-  el.innerHTML = data.commits.map(c =>
-    `<div class="git-log-item"><span class="gl-hash">${c.hash}</span><span class="gl-author">${esc(c.author)}</span><span class="gl-date">${esc(c.date)}</span><span class="gl-msg">${esc(c.message)}</span></div>`
-  ).join('');
-}
-
-async function gitCommit() {
-  const msg = document.getElementById('gitCommitMsg').value.trim();
-  if (!msg) return toast('Введите сообщение коммита', 'warning');
-  const data = await api(`/api/projects/${currentProjectId}/git/commit`, {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: msg})
-  });
-  if (data && data.returncode === 0) { toast('Коммит создан!', 'success'); document.getElementById('gitCommitMsg').value = ''; }
-  else toast(data?.stderr || 'Ошибка коммита', 'error');
-  await loadGitStatus(); await loadGitLog();
-}
-
-async function gitPush() {
-  toast('Push...', 'info');
-  const data = await api(`/api/projects/${currentProjectId}/git/push`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
-  if (data && data.returncode === 0) toast('Push выполнен!', 'success');
-  else toast(data?.stderr || 'Ошибка push', 'error');
-}
-
-async function gitPull() {
-  toast('Pull...', 'info');
-  const data = await api(`/api/projects/${currentProjectId}/git/pull`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
-  if (data && data.returncode === 0) toast('Pull выполнен!', 'success');
-  else toast(data?.stderr || 'Ошибка pull', 'error');
-  await loadGitStatus();
-}
-
-// ===== TEMPLATES =====
-async function openTemplates() {
-  const data = (await api('/api/templates')) || [];
-  const grid = document.getElementById('templateGrid');
-  const icons = {'fastapi':'⚡','react':'⚛️','python-cli':'🖥','nextjs':'▲','python-lib':'📦'};
-  grid.innerHTML = data.map(t =>
-    `<div class="template-card" onclick="applyTemplate('${t.id}')">
-      <div style="font-size:28px;margin-bottom:6px">${icons[t.id]||'📄'}</div>
-      <h4>${esc(t.name)}</h4>
-      <p>${esc(t.description)}</p>
-    </div>`
-  ).join('');
-  openModal('templatesModal');
-}
-
-async function applyTemplate(tid) {
-  if (!currentProjectId) return toast('Сначала выберите проект', 'warning');
-  const data = await api(`/api/templates/${tid}`);
-  if (!data || data.error) return toast('Шаблон не найден', 'error');
-  let count = 0;
-  for (const [path, content] of Object.entries(data.files)) {
-    await api(`/api/projects/${currentProjectId}/save-file`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({path, content})
-    });
-    count++;
-  }
-  toast(`Шаблон "${data.name}" — ${count} файлов создано`, 'success');
-  closeModal('templatesModal');
-  openFiles(currentProjectId);
-}
-
-// ===== PACKAGES =====
-let pkgManager = 'pip';
-let pendingDiffData = null;
-
-async function openPackages() {
-  if (!currentProjectId) return toast('Сначала выберите проект', 'warning');
-  openModal('packagesModal');
-  await loadPackages();
-}
-
-function setPkgMgr(mgr, btn) {
-  pkgManager = mgr;
-  document.querySelectorAll('.pkg-mgr-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  loadPackages();
-}
-
-async function loadPackages() {
-  const data = await api(`/api/projects/${currentProjectId}/packages/list?manager=${pkgManager}`);
-  const el = document.getElementById('pkgList');
-  if (!data || data.error) { el.textContent = data?.error || 'Ошибка'; return; }
-  if (data.packages.length === 0) { el.textContent = 'Нет пакетов'; return; }
-  el.innerHTML = data.packages.map(p =>
-    `<div class="pkg-item"><span class="pkg-name">${esc(p.name)}</span><span class="pkg-ver">${esc(p.version)}</span></div>`
-  ).join('');
-}
-
-async function installPkg() {
-  const input = document.getElementById('pkgInput');
-  const pkgs = input.value.trim();
-  if (!pkgs) return;
-  const outEl = document.getElementById('pkgOutput');
-  outEl.style.display = 'block';
-  outEl.textContent = `Установка ${pkgs}...\n`;
-  const data = await api(`/api/projects/${currentProjectId}/packages/install`, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({packages: pkgs, manager: pkgManager})
-  });
-  if (data && data.success) {
-    outEl.textContent = data.output;
-    toast('Пакеты установлены!', 'success');
-    input.value = '';
-    await loadPackages();
-  } else {
-    outEl.textContent = data?.error || data?.output || 'Ошибка установки';
-    toast('Ошибка установки', 'error');
-  }
-}
-
-// ===== DIFF VIEWER =====
-function showDiff(filePath, oldContent, newContent) {
-  pendingDiffData = {filePath, oldContent, newContent};
-  document.getElementById('diffInfo').textContent = filePath;
-  const viewer = document.getElementById('diffViewer');
-  const oldLines = (oldContent || '').split('\n');
-  const newLines = (newContent || '').split('\n');
-  const maxLines = Math.max(oldLines.length, newLines.length);
-  let html = '';
-  for (let i = 0; i < maxLines; i++) {
-    const oldL = oldLines[i] || '';
-    const newL = newLines[i] || '';
-    if (oldL === newL) {
-      html += `<div class="diff-line diff-line-context"> ${esc(oldL)}</div>`;
-    } else {
-      if (oldL) html += `<div class="diff-line diff-line-removed">-${esc(oldL)}</div>`;
-      if (newL) html += `<div class="diff-line diff-line-added">+${esc(newL)}</div>`;
-    }
-  }
-  viewer.innerHTML = html || '<div style="color:var(--text-dim)">Нет различий</div>';
-  openModal('diffModal');
-}
-
-async function applyDiff() {
-  if (!pendingDiffData || !currentProjectId) return;
-  await api(`/api/projects/${currentProjectId}/save-file`, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({path: pendingDiffData.filePath, content: pendingDiffData.newContent})
-  });
-  toast('Изменения применены!', 'success');
-  closeModal('diffModal');
-}
-
-// ===== START =====
-init();
-</script>
+    </div>
+
+    <!-- MAIN AREA -->
+    <div class="main">
+        <!-- Header -->
+        <div class="chat-header">
+            <span id="current-project-name">Общий чат</span>
+            <div class="header-actions">
+                <button class="btn-icon" onclick="clearChat()" title="Очистить чат">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Chat -->
+        <div class="chat-box" id="chat-box">
+            <div class="msg system">Подключение к серверу...</div>
+        </div>
+
+        <!-- Input -->
+        <div class="input-area">
+            <textarea id="user-input" placeholder="Введите задачу или промпт... (Shift+Enter = новая строка)" rows="1"
+                      onkeydown="handleKeyDown(event)"></textarea>
+            <button class="send-btn" onclick="sendMessage()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+        </div>
+
+        <!-- Bottom Bar -->
+        <div class="bottom-bar">
+            <button onclick="insertCommand('/terminal ')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                Terminal
+            </button>
+            <button onclick="insertCommand('/git_pull')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Pull
+            </button>
+            <button onclick="insertCommand('/git_push')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 9v-4a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v4"/><polyline points="17 14 12 9 7 14"/><line x1="12" y1="9" x2="12" y2="21"/></svg>
+                Push
+            </button>
+            <button onclick="insertCommand('/ideas ')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 4 12.9V17H8v-2.1A7 7 0 0 1 12 2z"/></svg>
+                Ideas
+            </button>
+            <button onclick="insertCommand('/clear')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                Clear
+            </button>
+            <button onclick="insertCommand('/help')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                Help
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span id="modal-title">Модальное окно</span>
+                <button class="btn-icon" onclick="closeModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════
+        // WebSocket Connection
+        // ═══════════════════════════════════════════════════════
+        const ws = new WebSocket("ws://" + window.location.host + "/ws");
+        const chatBox = document.getElementById("chat-box");
+        let currentAiDiv = null;
+        let currentAiText = "";
+        let currentProjectId = null;
+
+        // Configure marked.js
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: true,
+            gfm: true
+        });
+
+        ws.onopen = () => {
+            clearSystemMessages();
+            addMessage("system", "Fosved Coder v2.0 — подключено. Вставьте API ключ в config.yaml и пишите задачи.");
+            loadProjects();
+            loadIdeas();
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === "chunk") {
+                if (!currentAiDiv) {
+                    currentAiDiv = document.createElement("div");
+                    currentAiDiv.className = "msg ai";
+                    chatBox.appendChild(currentAiDiv);
+                }
+                currentAiText += data.content;
+                currentAiDiv.innerHTML = renderMarkdown(currentAiText);
+                addCopyButtons(currentAiDiv);
+                chatBox.scrollTop = chatBox.scrollHeight;
+
+            } else if (data.type === "done") {
+                currentAiDiv = null;
+                currentAiText = "";
+
+            } else if (data.type === "error") {
+                addMessage("error", data.content);
+                currentAiDiv = null;
+                currentAiText = "";
+
+            } else if (data.type === "system") {
+                addMessage("system", data.content);
+
+            } else if (data.type === "command_result") {
+                addMessage("terminal", data.content);
+
+            } else if (data.type === "idea_result") {
+                addMessage("idea", data.content);
+
+            } else {
+                addMessage(data.type || "system", data.content || "");
+            }
+        };
+
+        ws.onclose = () => {
+            addMessage("error", "Соединение потеряно. Перезагрузите страницу (F5).");
+        };
+
+        // ═══════════════════════════════════════════════════════
+        // Message Handling
+        // ═══════════════════════════════════════════════════════
+        function addMessage(type, text) {
+            const div = document.createElement("div");
+            div.className = "msg " + type;
+
+            if (type === "ai") {
+                div.innerHTML = renderMarkdown(text);
+                addCopyButtons(div);
+            } else if (type === "terminal") {
+                const pre = document.createElement("pre");
+                const code = document.createElement("code");
+                code.textContent = text;
+                pre.appendChild(code);
+                div.appendChild(pre);
+            } else if (type === "idea") {
+                div.innerHTML = renderMarkdown(text);
+            } else {
+                div.textContent = text;
+            }
+
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function renderMarkdown(text) {
+            try {
+                return marked.parse(text);
+            } catch (e) {
+                return text;
+            }
+        }
+
+        function addCopyButtons(container) {
+            container.querySelectorAll("pre").forEach(pre => {
+                if (pre.querySelector(".copy-btn")) return;
+                const btn = document.createElement("button");
+                btn.className = "copy-btn";
+                btn.textContent = "Копировать";
+                btn.onclick = () => {
+                    const code = pre.querySelector("code");
+                    navigator.clipboard.writeText(code.textContent).then(() => {
+                        btn.textContent = "Скопировано!";
+                        setTimeout(() => btn.textContent = "Копировать", 2000);
+                    });
+                };
+                pre.style.position = "relative";
+                pre.appendChild(btn);
+            });
+        }
+
+        function clearSystemMessages() {
+            chatBox.querySelectorAll(".msg.system, .msg.error").forEach(m => m.remove());
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // User Input
+        // ═══════════════════════════════════════════════════════
+        function sendMessage() {
+            const input = document.getElementById("user-input");
+            const text = input.value.trim();
+            if (!text) return;
+
+            addMessage("user", text);
+            ws.send(text);
+            input.value = "";
+            input.style.height = "auto";
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function insertCommand(cmd) {
+            const input = document.getElementById("user-input");
+            input.value = cmd;
+            input.focus();
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Projects
+        // ═══════════════════════════════════════════════════════
+        async function loadProjects() {
+            try {
+                const resp = await fetch("/api/v1/projects");
+                const projects = await resp.json();
+                const list = document.getElementById("projects-list");
+                list.innerHTML = '<div class="project-item active" data-id="null" onclick="selectProject(null, this)">Общий чат</div>';
+                projects.forEach(p => {
+                    const div = document.createElement("div");
+                    div.className = "project-item";
+                    div.dataset.id = p.id;
+                    div.innerHTML = `<span class="project-name">${escapeHtml(p.name)}</span><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="10" height="10"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>`;
+                    div.onclick = () => selectProject(p.id, div);
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error("Failed to load projects:", e);
+            }
+        }
+
+        async function selectProject(projectId, element) {
+            currentProjectId = projectId;
+            document.querySelectorAll(".project-item").forEach(el => el.classList.remove("active"));
+            element.classList.add("active");
+            document.getElementById("current-project-name").textContent =
+                projectId ? element.querySelector(".project-name").textContent : "Общий чат";
+            clearSystemMessages();
+            addMessage("system", "Переключение проекта... Загрузка истории.");
+        }
+
+        async function createProject() {
+            const name = prompt("Имя нового проекта:");
+            if (!name || !name.trim()) return;
+            try {
+                const resp = await fetch("/api/v1/projects", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({name: name.trim()})
+                });
+                if (resp.ok) {
+                    await loadProjects();
+                    addMessage("system", `Проект "${name.trim()}" создан.`);
+                } else {
+                    const err = await resp.json();
+                    addMessage("error", `Ошибка: ${err.detail}`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка создания проекта: ${e}`);
+            }
+        }
+
+        async function deleteProject(id, name) {
+            if (!confirm(`Удалить проект "${name}" и всю историю чата?`)) return;
+            try {
+                const resp = await fetch(`/api/v1/projects/${id}`, {method: "DELETE"});
+                if (resp.ok) {
+                    await loadProjects();
+                    if (currentProjectId === id) selectProject(null, document.querySelector('.project-item'));
+                    addMessage("system", `Проект "${name}" удалён.`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка удаления: ${e}`);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Ideas
+        // ═══════════════════════════════════════════════════════
+        async function loadIdeas() {
+            try {
+                const resp = await fetch("/api/v1/ideas");
+                const ideas = await resp.json();
+                const list = document.getElementById("ideas-list");
+                list.innerHTML = "";
+                if (ideas.length === 0) {
+                    list.innerHTML = '<div class="idea-empty">Нет идей. Вставьте ссылку на GitHub репозиторий.</div>';
+                    return;
+                }
+                ideas.forEach(i => {
+                    const div = document.createElement("div");
+                    div.className = "idea-item";
+                    div.innerHTML = `
+                        <div class="idea-name" onclick="showIdeaDetail(${i.id})">${escapeHtml(i.name)}</div>
+                        <div class="idea-summary">${escapeHtml(i.summary).substring(0, 80)}...</div>
+                        <button class="btn-delete" onclick="deleteIdea(${i.id}, '${escapeHtml(i.name)}')" title="Удалить">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="10" height="10"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>`;
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error("Failed to load ideas:", e);
+            }
+        }
+
+        async function analyzeIdea() {
+            const input = document.getElementById("idea-input");
+            const url = input.value.trim();
+            if (!url) return;
+            input.value = "";
+            addMessage("system", `Анализирую репозиторий: ${url}...`);
+
+            try {
+                const resp = await fetch("/api/v1/ideas", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({repo_url: url})
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    addMessage("idea", data.analysis);
+                    await loadIdeas();
+                } else {
+                    const err = await resp.json();
+                    addMessage("error", `Ошибка: ${err.detail}`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка анализа: ${e}`);
+            }
+        }
+
+        async function showIdeaDetail(id) {
+            try {
+                const resp = await fetch(`/api/v1/ideas`);
+                const ideas = await resp.json();
+                const idea = ideas.find(i => i.id === id);
+                if (idea) {
+                    showModal("Идея: " + idea.name, renderMarkdown(idea.summary));
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка загрузки идеи: ${e}`);
+            }
+        }
+
+        async function deleteIdea(id, name) {
+            if (!confirm(`Удалить идею "${name}"?`)) return;
+            try {
+                const resp = await fetch(`/api/v1/ideas/${id}`, {method: "DELETE"});
+                if (resp.ok) {
+                    await loadIdeas();
+                    addMessage("system", `Идея "${name}" удалена.`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка удаления: ${e}`);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Chat Actions
+        // ═══════════════════════════════════════════════════════
+        function clearChat() {
+            ws.send("/clear");
+            chatBox.querySelectorAll(".msg").forEach(m => m.remove());
+            addMessage("system", "Чат очищен.");
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Stats & Help
+        // ═══════════════════════════════════════════════════════
+        async function showStats() {
+            try {
+                const resp = await fetch("/api/v1/stats");
+                const stats = await resp.json();
+                const configResp = await fetch("/api/v1/config");
+                const config = await configResp.json();
+
+                const html = `
+                    <div class="stats-grid">
+                        <div class="stat-card"><div class="stat-value">${stats.projects_count}</div><div class="stat-label">Проекты</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.ideas_count}</div><div class="stat-label">Идеи</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.messages_count}</div><div class="stat-label">Сообщений</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.routing_decisions}</div><div class="stat-label">Роутингов</div></div>
+                    </div>
+                    <div class="config-info">
+                        <strong>Модель:</strong> ${config.llm.default_model}<br>
+                        <strong>Роутер:</strong> ${config.llm.router_model}<br>
+                        <strong>API Base:</strong> ${config.llm.api_base}<br>
+                        <strong>API Key:</strong> ${config.llm.api_key}
+                    </div>`;
+                showModal("Статистика системы", html);
+            } catch (e) {
+                showModal("Ошибка", "Не удалось загрузить статистику.");
+            }
+        }
+
+        function showHelp() {
+            showModal("Помощь — Fosved Coder v2.0", `
+                <h3>Команды чата:</h3>
+                <ul>
+                    <li><code>/terminal &lt;cmd&gt;</code> — выполнить shell-команду</li>
+                    <li><code>/git_pull</code> — git pull</li>
+                    <li><code>/git_push</code> — git push</li>
+                    <li><code>/ideas &lt;github_url&gt;</code> — проанализировать репозиторий</li>
+                    <li><code>/clear</code> — очистить историю чата</li>
+                    <li><code>/help</code> — эта справка</li>
+                </ul>
+                <h3>Проекты:</h3>
+                <ul>
+                    <li>Нажмите <strong>+</strong> чтобы создать проект</li>
+                    <li>Клик по проекту — переключение контекста</li>
+                    <li>Каждый проект имеет отдельную историю чата</li>
+                </ul>
+                <h3>Идеи:</h3>
+                <ul>
+                    <li>Вставьте ссылку на GitHub репозиторий</li>
+                    <li>ИИ проанализирует структуру и архитектуру</li>
+                    <li>Результат используется как контекст при генерации кода</li>
+                </ul>
+            `);
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Modal
+        // ═══════════════════════════════════════════════════════
+        function showModal(title, content) {
+            document.getElementById("modal-title").textContent = title;
+            document.getElementById("modal-body").innerHTML = content;
+            document.getElementById("modal-overlay").classList.add("active");
+        }
+
+        function closeModal() {
+            document.getElementById("modal-overlay").classList.remove("active");
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Utility
+        // ═══════════════════════════════════════════════════════
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
 </body>
 </html>
