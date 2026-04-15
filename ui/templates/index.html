@@ -11,6 +11,9 @@
 </head>
 <body>
 
+    <!-- ═══════════ TOAST CONTAINER ═══════════ -->
+    <div id="toast-container"></div>
+
     <!-- HEADER -->
     <header>
         <div class="logo"><img src="https://z-cdn-media.chatglm.cn/files/aad38a03-a896-4e99-96a9-69372b91084b.jpg?auth_key=1876148891-a0e5423e9d3d49c8ac35cbcf3dc1fc64-0-9dd38e9bbc11d8836da531dcd7230db3" alt="Logo"></div>
@@ -98,13 +101,165 @@
                 </div>
             </div>
             <!-- Bottom Bar -->
-            <div style="height:38px; background:var(--accent); display:flex; align-items:center; padding:0 8px; gap:4px; flex-shrink:0;">
-                <button onclick="insertCommand('/terminal ')" style="padding:5px 12px; background:rgba(255,255,255,0.1); border:none; color:white; cursor:pointer; font-size:12px; border-radius:4px;">🛠 Terminal</button>
-                <button onclick="insertCommand('/git_pull')" style="padding:5px 12px; background:rgba(255,255,255,0.1); border:none; color:white; cursor:pointer; font-size:12px; border-radius:4px;">📥 Pull</button>
-                <button onclick="insertCommand('/git_push')" style="padding:5px 12px; background:rgba(255,255,255,0.1); border:none; color:white; cursor:pointer; font-size:12px; border-radius:4px;">📤 Push</button>
-                <button onclick="insertCommand('/ideas ')" style="padding:5px 12px; background:rgba(255,255,255,0.1); border:none; color:white; cursor:pointer; font-size:12px; border-radius:4px;">💡 Ideas</button>
-                <button onclick="insertCommand('/clear')" style="padding:5px 12px; background:rgba(255,255,255,0.1); border:none; color:white; cursor:pointer; font-size:12px; border-radius:4px;">🧹 Clear</button>
+            <div class="bottom-bar">
+                <button onclick="insertCommand('/terminal ')" class="bottom-bar-btn">🛠 Terminal</button>
+                <button onclick="insertCommand('/git_pull')" class="bottom-bar-btn">📥 Pull</button>
+                <button onclick="insertCommand('/git_push')" class="bottom-bar-btn">📤 Push</button>
+                <button onclick="insertCommand('/ideas ')" class="bottom-bar-btn">💡 Ideas</button>
+                <button onclick="insertCommand('/clear')" class="bottom-bar-btn">🧹 Clear</button>
+                <button onclick="togglePanel('search')" class="bottom-bar-btn">🔍 Search</button>
+                <button onclick="togglePanel('git')" class="bottom-bar-btn">🔀 Git</button>
+                <button onclick="togglePanel('packages')" class="bottom-bar-btn">📦 Packages</button>
+                <button onclick="togglePanel('files')" class="bottom-bar-btn">📁 Files</button>
+                <button onclick="showArchivePanel()" class="bottom-bar-btn">🗃️ Archive</button>
             </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ SEARCH PANEL ═══════════ -->
+    <div class="slide-panel" id="panel-search">
+        <div class="slide-panel-header">
+            <span class="slide-panel-title">🔍 Поиск по файлам</span>
+            <div style="display:flex;gap:6px;">
+                <button class="btn-small btn-outline" onclick="closePanel('search')">Закрыть</button>
+            </div>
+        </div>
+        <div class="slide-panel-body">
+            <div class="search-controls">
+                <input type="text" id="search-query" placeholder="Текст для поиска..." class="panel-input" style="flex:2" onkeypress="if(event.key==='Enter')searchFiles()">
+                <input type="text" id="search-pattern" placeholder="Фильтр: *.py" class="panel-input" style="flex:1">
+                <button class="btn-small" onclick="searchFiles()">🔍 Найти</button>
+            </div>
+            <div id="search-results" class="panel-output">
+                <div class="panel-placeholder">Введите запрос и нажмите "Найти"</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ GIT PANEL ═══════════ -->
+    <div class="slide-panel" id="panel-git">
+        <div class="slide-panel-header">
+            <span class="slide-panel-title">🔀 Git</span>
+            <div style="display:flex;gap:6px;">
+                <button class="btn-small btn-outline" onclick="closePanel('git')">Закрыть</button>
+            </div>
+        </div>
+        <div class="slide-panel-body">
+            <div class="git-controls">
+                <button class="btn-small" onclick="gitAction('status')">Status</button>
+                <button class="btn-small" onclick="gitAction('log')">Log</button>
+                <button class="btn-small" onclick="gitAction('diff')">Diff</button>
+                <button class="btn-small" onclick="gitAction('commit')">Commit</button>
+                <button class="btn-small" onclick="gitAction('push')">Push</button>
+                <button class="btn-small" onclick="gitAction('pull')">Pull</button>
+            </div>
+            <!-- Commit form (hidden by default) -->
+            <div id="git-commit-form" style="display:none; margin:8px 0; padding:10px; background:var(--bg-primary); border:1px solid var(--border); border-radius:6px;">
+                <input type="text" id="git-commit-msg" placeholder="Сообщение коммита..." class="panel-input" style="width:100%;margin-bottom:8px;">
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
+                    <input type="checkbox" id="git-auto-add" checked> Автоматически добавить все файлы (git add -A)
+                </label>
+                <button class="btn-small" onclick="doGitCommit()" style="margin-top:8px;">Отправить коммит</button>
+            </div>
+            <div id="git-output" class="panel-output">
+                <div class="panel-placeholder">Выберите действие Git</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ PACKAGE MANAGER PANEL ═══════════ -->
+    <div class="slide-panel" id="panel-packages">
+        <div class="slide-panel-header">
+            <span class="slide-panel-title">📦 Пакеты</span>
+            <div style="display:flex;gap:6px;">
+                <button class="btn-small btn-outline" onclick="closePanel('packages')">Закрыть</button>
+            </div>
+        </div>
+        <div class="slide-panel-body">
+            <div class="pkg-controls">
+                <input type="text" id="pkg-command" class="panel-input" style="flex:1" value="pip install " onkeypress="if(event.key==='Enter')runPackageCmd()">
+                <button class="btn-small" onclick="runPackageCmd()">▶ Запуск</button>
+            </div>
+            <div class="pkg-quick-btns">
+                <button class="btn-small btn-outline" onclick="setPkgCmd('pip install ')">pip install</button>
+                <button class="btn-small btn-outline" onclick="setPkgCmd('npm install ')">npm install</button>
+                <button class="btn-small btn-outline" onclick="runPackageCmdDirect('pip list')">pip list</button>
+                <button class="btn-small btn-outline" onclick="runPackageCmdDirect('npm list')">npm list</button>
+            </div>
+            <div id="pkg-output" class="panel-output">
+                <div class="panel-placeholder">Введите команду для управления пакетами</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ FILE MANAGER PANEL ═══════════ -->
+    <div class="slide-panel slide-panel-right" id="panel-files">
+        <div class="slide-panel-header">
+            <span class="slide-panel-title">📁 Файлы</span>
+            <div style="display:flex;gap:6px;">
+                <button class="btn-small" onclick="loadFileTree()">↻</button>
+                <button class="btn-small btn-outline" onclick="closePanel('files')">Закрыть</button>
+            </div>
+        </div>
+        <div class="slide-panel-body">
+            <div id="file-tree" class="file-tree">
+                <div class="panel-placeholder">Загрузка дерева файлов...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ ARCHIVE PANEL (modal) ═══════════ -->
+    <div class="modal" id="archive-modal" onclick="if(event.target===this)closeArchiveModal()">
+        <div class="modal-content" style="width:720px;max-width:95vw;" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2 id="archive-modal-title" style="margin-bottom:0">🗃️ Архивы</h2>
+                <button class="btn-add" onclick="closeArchiveModal()" style="background:var(--bg-tertiary);font-size:16px;">✕</button>
+            </div>
+            <div id="archive-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- ═══════════ ARCHIVE PROJECT MODAL ═══════════ -->
+    <div class="modal" id="archive-project-modal" onclick="if(event.target===this)closeArchiveProjectModal()">
+        <div class="modal-content" style="width:500px;max-width:95vw;" onclick="event.stopPropagation()">
+            <h2>🗃️ Архивировать проект</h2>
+            <div class="form-group">
+                <label>Описание (необязательно)</label>
+                <textarea id="archive-desc" placeholder="Зачем архивируете?" style="height:60px;resize:vertical;"></textarea>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+                <button class="btn-small btn-outline" onclick="closeArchiveProjectModal()" style="flex:1;padding:10px;">Отмена</button>
+                <button class="btn-small" onclick="doArchiveProject()" style="flex:1;padding:10px;">Архивировать</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ DIFF VIEWER MODAL ═══════════ -->
+    <div class="modal" id="diff-modal" onclick="if(event.target===this)closeDiffModal()">
+        <div class="modal-content" style="width:90vw;max-width:1200px;" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2 id="diff-modal-title" style="margin-bottom:0;font-size:16px;">↩️ Diff</h2>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-small btn-outline" id="diff-toggle-view" onclick="toggleDiffView()">Side-by-side</button>
+                    <button class="btn-add" onclick="closeDiffModal()" style="background:var(--bg-tertiary);font-size:16px;">✕</button>
+                </div>
+            </div>
+            <div id="diff-modal-body" style="overflow:auto;max-height:70vh;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:0;">
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ FILE VIEWER MODAL ═══════════ -->
+    <div class="modal" id="file-viewer-modal" onclick="if(event.target===this)closeFileViewerModal()">
+        <div class="modal-content" style="width:90vw;max-width:1000px;" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h2 id="file-viewer-title" style="margin-bottom:0;font-size:14px;color:var(--text-secondary);">📄 File</h2>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-small" onclick="saveFileFromViewer()">💾 Сохранить</button>
+                    <button class="btn-add" onclick="closeFileViewerModal()" style="background:var(--bg-tertiary);font-size:16px;">✕</button>
+                </div>
+            </div>
+            <textarea id="file-viewer-content" style="width:100%;height:60vh;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:16px;font-family:'Cascadia Code',Consolas,monospace;font-size:13px;line-height:1.5;resize:none;outline:none;" spellcheck="false"></textarea>
         </div>
     </div>
 
@@ -112,6 +267,18 @@
     <div class="modal" id="project-modal">
         <div class="modal-content">
             <h2>Создать новый проект</h2>
+            <div class="form-group">
+                <label>Шаблон</label>
+                <select id="proj-template" class="priority-select" onchange="onTemplateChange()" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;">
+                    <option value="">(Custom)</option>
+                    <option value="fastapi">FastAPI</option>
+                    <option value="flask">Flask</option>
+                    <option value="react">React</option>
+                    <option value="nextjs">Next.js</option>
+                    <option value="python-cli">Python CLI</option>
+                </select>
+                <div id="template-desc" style="font-size:12px;color:var(--text-secondary);margin-top:6px;display:none;padding:8px;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;line-height:1.4;"></div>
+            </div>
             <div class="form-group">
                 <label>Название проекта</label>
                 <input type="text" id="proj-name" placeholder="Например: WisdomOfDay">
@@ -155,6 +322,17 @@
     let allModels = [];
     let activeModelId = null;
     let attachedFile = null;
+    let diffViewMode = "unified"; // "unified" or "sidebyside"
+    let currentFileViewPath = null;
+    let openPanels = new Set();
+
+    const templateDescriptions = {
+        "fastapi": "Современный Python веб-фреймворк для API. Включает: main.py, requirements.txt, Dockerfile, тесты. Автоматическая генерация OpenAPI документации.",
+        "flask": "Лёгкий Python веб-фреймворк. Включает: app.py, requirements.txt, базовые шаблоны. Подходит для небольших проектов и микросервисов.",
+        "react": "Библиотека JavaScript для UI. Включает: React + Vite, компоненты, роутинг. SPA приложение с современным стеком.",
+        "nextjs": "React-фреймворк с SSR/SSG. Включает: Next.js, TypeScript, Tailwind CSS, App Router. Полноценное веб-приложение.",
+        "python-cli": "CLI приложение на Python. Включает: click/argparse, модульную структуру, setup.py, тесты. Консольная утилита."
+    };
 
     marked.setOptions({
         highlight: function(code, lang) {
@@ -163,6 +341,26 @@
         },
         breaks: true, gfm: true
     });
+
+    // ═══════════════════════════════════════════════════════
+    // Toast Notifications
+    // ═══════════════════════════════════════════════════════
+    function showToast(message, type) {
+        type = type || "info";
+        const container = document.getElementById("toast-container");
+        const toast = document.createElement("div");
+        toast.className = "toast toast-" + type;
+        toast.textContent = message;
+        container.appendChild(toast);
+        // Trigger slide-in
+        requestAnimationFrame(() => { toast.classList.add("toast-visible"); });
+        // Auto-dismiss
+        setTimeout(() => {
+            toast.classList.remove("toast-visible");
+            toast.classList.add("toast-hiding");
+            setTimeout(() => { toast.remove(); }, 400);
+        }, 4000);
+    }
 
     // ═══════════════════════════════════════════════════════
     // WebSocket
@@ -191,6 +389,7 @@
             currentAiDiv = null; currentAiText = "";
         } else if (data.type === "error") {
             addMessage("error", data.content);
+            showToast(data.content, "error");
             currentAiDiv = null; currentAiText = "";
         } else if (data.type === "system") {
             addMessage("system", data.content);
@@ -239,16 +438,14 @@
         const text = input.value.trim();
         if (!text && !attachedFile) return;
 
-        // If priority models are set, first one is auto-selected
         if (!activeModelId && priorityModels.length) {
             activeModelId = priorityModels[0];
         }
-        if (!activeModelId) { addMessage("system", "⚠️ Сначала выберите модель ИИ в сайдбаре или настройте приоритетные модели (⚡)."); return; }
+        if (!activeModelId) { showToast("Сначала выберите модель ИИ", "error"); return; }
 
         let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
         addMessage("user", displayText);
 
-        // If priority models exist, send them all so server knows the fallback chain
         let payload = { type: "chat", prompt: text, model: activeModelId };
         if (priorityModels.length) {
             payload.priority_models = priorityModels;
@@ -276,14 +473,14 @@
         try {
             const res = await fetch("/upload", { method: "POST", body: formData });
             attachedFile = await res.json();
-            addMessage("system", "📎 Файл готов: " + attachedFile.filename);
-        } catch(e) { addMessage("system", "Ошибка загрузки файла"); }
+            showToast("Файл готов: " + attachedFile.filename, "success");
+        } catch(e) { showToast("Ошибка загрузки файла", "error"); }
     }
 
     // ═══════════════════════════════════════════════════════
     // MODELS & PRIORITY
     // ═══════════════════════════════════════════════════════
-    let priorityModels = []; // up to 3 model IDs in priority order
+    let priorityModels = [];
 
     async function loadModels() {
         try {
@@ -423,21 +620,14 @@
     }
 
     function updatePriorityFromSelects() {
-        // Live-update visuals in modal
-        const slotLabels = ['Основная', 'Резервная', 'Фоллбэк'];
         for (let i = 0; i < 3; i++) {
             const sel = document.getElementById(`priority-slot-${i}`);
             if (!sel) continue;
-            // Disable options that are selected in other slots
             document.querySelectorAll('.priority-select').forEach(s => {
-                Array.from(s.options).forEach(opt => {
-                    opt.disabled = false;
-                });
+                Array.from(s.options).forEach(opt => { opt.disabled = false; });
             });
             document.querySelectorAll('.priority-select').forEach(s => {
                 if (s.id !== sel.id && s.value) {
-                    const otherSel = document.getElementById(`priority-slot-${s.id.split('-')[2]}`);
-                    // disable in others
                     document.querySelectorAll('.priority-select').forEach(s2 => {
                         if (s2.id !== s.id) {
                             const opt = s2.querySelector(`option[value="${s.value}"]`);
@@ -458,20 +648,18 @@
         priorityModels = models;
         closeGenericModal();
 
-        // Save to project if one is selected
         if (currentProjectId) {
             try {
                 await fetch('/api/v1/projects/models', {
                     method: 'PUT', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ project_id: currentProjectId, model_ids: models })
                 });
-                addMessage('system', `Приоритетные модели сохранены (${models.length}/3).`);
-            } catch(e) { addMessage('error', 'Ошибка сохранения моделей'); }
+                showToast(`Приоритетные модели сохранены (${models.length}/3)`, "success");
+            } catch(e) { showToast("Ошибка сохранения моделей", "error"); }
         } else {
-            addMessage('system', `Приоритетные модели выбраны (${models.length}/3). При выборе проекта они сохранятся автоматически.`);
+            showToast(`Приоритетные модели выбраны (${models.length}/3)`, "info");
         }
 
-        // Auto-select first priority model
         if (models.length && !activeModelId) {
             selectModel(models[0]);
         }
@@ -493,7 +681,7 @@
                 const div = document.createElement("div");
                 div.className = "project-item"; div.dataset.id = p.id;
                 const progressHtml = p.progress > 0 ? `<div class="project-progress"><div class="project-progress-fill" style="width:${p.progress}%"></div><span class="project-progress-text">${p.progress}%</span></div>` : '';
-                div.innerHTML = `<div class="project-info"><span class="project-name">📁 ${escapeHtml(p.name)}</span>${progressHtml}</div><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">✕</button>`;
+                div.innerHTML = `<div class="project-info"><span class="project-name">📁 ${escapeHtml(p.name)}</span>${progressHtml}</div><div style="display:flex;gap:4px;"><button class="btn-delete" onclick="event.stopPropagation();archiveProjectModal(${p.id},'${escapeHtml(p.name)}')" title="Архивировать" style="opacity:1;font-size:12px;">🗃</button><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">✕</button></div>`;
                 div.onclick = () => selectProject(p.id, div);
                 list.appendChild(div);
             });
@@ -519,7 +707,6 @@
                     document.getElementById("header-progress-text").textContent = p.progress + "%";
                 } else { progressBar.style.display = "none"; }
 
-                // Load priority models for this project
                 if (p && p.selected_models) {
                     try {
                         const models = JSON.parse(p.selected_models);
@@ -556,9 +743,55 @@
 
     function openProjectModal() { document.getElementById("project-modal").classList.add("active"); }
 
+    // ═══════════════════════════════════════════════════════
+    // TEMPLATE SELECTOR
+    // ═══════════════════════════════════════════════════════
+    function onTemplateChange() {
+        const sel = document.getElementById("proj-template").value;
+        const descEl = document.getElementById("template-desc");
+        if (sel && templateDescriptions[sel]) {
+            descEl.textContent = templateDescriptions[sel];
+            descEl.style.display = "block";
+        } else {
+            descEl.style.display = "none";
+        }
+    }
+
     async function createProject() {
+        const template = document.getElementById("proj-template").value;
         const name = document.getElementById("proj-name").value.trim();
-        if (!name) { alert("Введите название проекта"); return; }
+        if (!name) { showToast("Введите название проекта", "error"); return; }
+
+        // If template is selected, use template endpoint
+        if (template) {
+            const desc = document.getElementById("proj-desc").value.trim();
+            const prompt = document.getElementById("proj-prompt").value.trim();
+            const ideas = document.getElementById("proj-ideas").value.trim();
+            try {
+                const resp = await fetch("/api/v1/projects/create-from-template", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ template: template, name: name, description: desc, base_prompt: prompt, ideas: ideas })
+                });
+                if (resp.ok) {
+                    await loadProjects();
+                    showToast(`Проект "${name}" создан из шаблона "${template}"`, "success");
+                    document.getElementById("project-modal").classList.remove("active");
+                    document.getElementById("proj-name").value = "";
+                    document.getElementById("proj-desc").value = "";
+                    document.getElementById("proj-prompt").value = "";
+                    document.getElementById("proj-ideas").value = "";
+                    document.getElementById("proj-template").value = "";
+                    document.getElementById("template-desc").style.display = "none";
+                } else {
+                    const err = await resp.json();
+                    showToast(`Ошибка: ${err.detail}`, "error");
+                }
+            } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
+            return;
+        }
+
+        // Custom project (original flow)
         try {
             const resp = await fetch("/api/v1/projects", {
                 method: "POST",
@@ -567,17 +800,19 @@
             });
             if (resp.ok) {
                 await loadProjects();
-                addMessage("system", `Проект "${name.trim()}" создан.`);
+                showToast(`Проект "${name.trim()}" создан`, "success");
                 document.getElementById("project-modal").classList.remove("active");
                 document.getElementById("proj-name").value = "";
                 document.getElementById("proj-desc").value = "";
                 document.getElementById("proj-prompt").value = "";
                 document.getElementById("proj-ideas").value = "";
+                document.getElementById("proj-template").value = "";
+                document.getElementById("template-desc").style.display = "none";
             } else {
                 const err = await resp.json();
-                addMessage("error", `Ошибка: ${err.detail}`);
+                showToast(`Ошибка: ${err.detail}`, "error");
             }
-        } catch(e) { addMessage("error", `Ошибка: ${e}`); }
+        } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
     }
 
     async function deleteProject(id, name) {
@@ -587,9 +822,9 @@
             if (resp.ok) {
                 await loadProjects();
                 if (currentProjectId === id) selectProject(null, document.querySelector('.project-item'));
-                addMessage("system", `"${name}" удалён.`);
+                showToast(`"${name}" удалён`, "success");
             }
-        } catch(e) { addMessage("error", `Ошибка: ${e}`); }
+        } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -611,12 +846,13 @@
 
     async function analyzeIdea() {
         const input = document.getElementById("idea-input"); const url = input.value.trim(); if (!url) return;
-        input.value = ""; addMessage("system", "Анализирую: " + url + "...");
+        input.value = "";
+        showToast("Анализирую: " + url + "...", "info");
         try {
             const resp = await fetch("/api/v1/ideas", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({repo_url: url}) });
-            if (resp.ok) { const data = await resp.json(); addMessage("idea", data.analysis); await loadIdeas(); }
-            else { const err = await resp.json(); addMessage("error", `Ошибка: ${err.detail}`); }
-        } catch(e) { addMessage("error", `Ошибка: ${e}`); }
+            if (resp.ok) { const data = await resp.json(); addMessage("idea", data.analysis); await loadIdeas(); showToast("Анализ завершён", "success"); }
+            else { const err = await resp.json(); showToast(`Ошибка: ${err.detail}`, "error"); }
+        } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
     }
 
     async function showIdeaDetail(id) {
@@ -624,13 +860,13 @@
             const resp = await fetch("/api/v1/ideas"); const ideas = await resp.json();
             const idea = ideas.find(i => i.id === id);
             if (idea) openGenericModal("Идея: " + idea.name, renderMarkdown(idea.summary));
-        } catch(e) { addMessage("error", `Ошибка: ${e}`); }
+        } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
     }
 
     async function deleteIdea(id, name) {
         if (!confirm(`Удалить "${name}"?`)) return;
-        try { const resp = await fetch(`/api/v1/ideas/${id}`, {method: "DELETE"}); if (resp.ok) { await loadIdeas(); addMessage("system", `"${name}" удалена.`); } }
-        catch(e) { addMessage("error", `Ошибка: ${e}`); }
+        try { const resp = await fetch(`/api/v1/ideas/${id}`, {method: "DELETE"}); if (resp.ok) { await loadIdeas(); showToast(`"${name}" удалена`, "success"); } }
+        catch(e) { showToast(`Ошибка: ${e}`, "error"); }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -711,7 +947,7 @@
     async function addKey(providerId) {
         const apiKey = document.getElementById("new-api-key").value.trim();
         const modelsStr = document.getElementById("new-models").value.trim();
-        if (!apiKey) { alert("Введите API ключ"); return; }
+        if (!apiKey) { showToast("Введите API ключ", "error"); return; }
         const models = modelsStr ? modelsStr.split(",").map(m=>m.trim()).filter(Boolean) : [];
         openGenericModal("Проверка...", '<div class="key-validating">Проверяем ключ...</div>');
         try {
@@ -720,18 +956,18 @@
                 body: JSON.stringify({provider: providerId, api_key: apiKey, models: models})
             });
             const data = await resp.json();
-            if (resp.ok) { await loadModels(); showKeysModal(); }
+            if (resp.ok) { await loadModels(); showKeysModal(); showToast("Ключ добавлен", "success"); }
             else { openGenericModal("Ошибка", '<div class="key-error">Ошибка: ' + (data.detail||data.error) + '</div>'); }
         } catch(e) { openGenericModal("Ошибка", '<div class="key-error">Ошибка сети: ' + e + '</div>'); }
     }
 
     async function removeKey(providerId) {
         if (!confirm("Удалить ключ?")) return;
-        try { await fetch(`/api/v1/keys/${providerId}`,{method:"DELETE"}); await loadModels(); showKeysModal(); } catch(e) { alert("Ошибка: "+e); }
+        try { await fetch(`/api/v1/keys/${providerId}`,{method:"DELETE"}); await loadModels(); showKeysModal(); showToast("Ключ удалён", "success"); } catch(e) { showToast("Ошибка: "+e, "error"); }
     }
 
     async function revalidateKey(providerId) {
-        try { await fetch(`/api/v1/models/validate/${providerId}`,{method:"POST"}); await loadModels(); showKeysModal(); } catch(e) { alert("Ошибка: "+e); }
+        try { await fetch(`/api/v1/models/validate/${providerId}`,{method:"POST"}); await loadModels(); showKeysModal(); showToast("Ключ проверен", "success"); } catch(e) { showToast("Ошибка: "+e, "error"); }
     }
 
     function showAddGithubToken() {
@@ -747,15 +983,15 @@
 
     async function saveGithubToken() {
         const token = document.getElementById("gh-token").value.trim();
-        if (!token) { alert("Введите токен"); return; }
+        if (!token) { showToast("Введите токен", "error"); return; }
         try {
             const resp = await fetch("/api/v1/keys/github", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({token,enabled:true})});
-            if (resp.ok) showKeysModal(); else { const err=await resp.json(); alert("Ошибка: "+(err.detail||"Неизвестная ошибка")); }
-        } catch(e) { alert("Ошибка: "+e); }
+            if (resp.ok) { showKeysModal(); showToast("Токен сохранён", "success"); } else { const err=await resp.json(); showToast("Ошибка: "+(err.detail||"Неизвестная ошибка"), "error"); }
+        } catch(e) { showToast("Ошибка: "+e, "error"); }
     }
 
     async function toggleGitHub(enabled) {
-        try { await fetch("/api/v1/keys/github/toggle",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})}); showKeysModal(); } catch(e) { alert("Ошибка: "+e); }
+        try { await fetch("/api/v1/keys/github/toggle",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})}); showKeysModal(); } catch(e) { showToast("Ошибка: "+e, "error"); }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -800,10 +1036,20 @@
                 <li><code>/ideas &lt;url&gt;</code> — анализ репозитория</li>
                 <li><code>/clear</code> — очистить чат</li>
             </ul>
+            <h3>Нижняя панель</h3>
+            <ul>
+                <li><code>🔍 Search</code> — поиск по файлам проекта</li>
+                <li><code>🔀 Git</code> — git операции (status, log, diff, commit, push, pull)</li>
+                <li><code>📦 Packages</code> — управление пакетами (pip/npm)</li>
+                <li><code>📁 Files</code> — файловый менеджер</li>
+                <li><code>🗃️ Archive</code> — архивация и просмотр архивов</li>
+            </ul>
             <h3>Проекты</h3>
             <ul>
                 <li>Каждый проект хранит свои приоритетные модели</li>
                 <li>Нажмите "+ Новый" для создания</li>
+                <li>Поддержка шаблонов: FastAPI, Flask, React, Next.js, Python CLI</li>
+                <li>Кнопка 🗃 рядом с проектом — архивировать</li>
             </ul>
         `);
     }
@@ -822,9 +1068,635 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    // Utility
+    // UTILITY
     // ═══════════════════════════════════════════════════════
     function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
+
+    function requireProject() {
+        if (!currentProjectId) {
+            showToast("Сначала выберите проект", "error");
+            return false;
+        }
+        return true;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // SLIDE PANELS (shared toggle logic)
+    // ═══════════════════════════════════════════════════════
+    function togglePanel(name) {
+        const panel = document.getElementById("panel-" + name);
+        if (!panel) return;
+        if (openPanels.has(name)) {
+            closePanel(name);
+        } else {
+            openPanel(name);
+        }
+    }
+
+    function openPanel(name) {
+        const panel = document.getElementById("panel-" + name);
+        if (!panel) return;
+        // Close other bottom panels (not file manager which is right-side)
+        openPanels.forEach(p => {
+            if (p !== name && p !== "files") closePanel(p);
+        });
+        panel.classList.add("active");
+        openPanels.add(name);
+        // Auto-load data for specific panels
+        if (name === "files") loadFileTree();
+    }
+
+    function closePanel(name) {
+        const panel = document.getElementById("panel-" + name);
+        if (!panel) return;
+        panel.classList.remove("active");
+        openPanels.delete(name);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 🔍 SEARCH PANEL
+    // ═══════════════════════════════════════════════════════
+    async function searchFiles() {
+        if (!requireProject()) return;
+        const query = document.getElementById("search-query").value.trim();
+        if (!query) { showToast("Введите текст для поиска", "error"); return; }
+        const pattern = document.getElementById("search-pattern").value.trim();
+        const resultsEl = document.getElementById("search-results");
+        resultsEl.innerHTML = '<div class="panel-placeholder">Поиск...</div>';
+
+        try {
+            const params = new URLSearchParams({ query: query });
+            if (pattern) params.append("pattern", pattern);
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/search-files?${params}`, { method: "POST" });
+            if (!resp.ok) {
+                const err = await resp.json();
+                resultsEl.innerHTML = `<div class="panel-placeholder" style="color:var(--red)">Ошибка: ${escapeHtml(err.detail || 'Неизвестная ошибка')}</div>`;
+                return;
+            }
+            const data = await resp.json();
+            const results = data.results || [];
+            if (!results.length) {
+                resultsEl.innerHTML = '<div class="panel-placeholder">Ничего не найдено</div>';
+                return;
+            }
+            let html = '';
+            results.forEach(r => {
+                const lineText = escapeHtml((r.matching_text || r.line || '').substring(0, 120));
+                html += `<div class="search-result-item" onclick="openFileAtLine('${escapeHtml(r.file_path)}', ${r.line_number || 1})">
+                    <div class="search-result-path">${escapeHtml(r.file_path)}</div>
+                    <div class="search-result-line">строка ${r.line_number || '?'}</div>
+                    <div class="search-result-text">${lineText}</div>
+                </div>`;
+            });
+            resultsEl.innerHTML = html;
+            showToast(`Найдено: ${results.length} совпадений`, "success");
+        } catch(e) {
+            resultsEl.innerHTML = `<div class="panel-placeholder" style="color:var(--red)">Ошибка: ${escapeHtml(String(e))}</div>`;
+            showToast("Ошибка поиска", "error");
+        }
+    }
+
+    async function openFileAtLine(filePath, lineNumber) {
+        try {
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/read-file?path=${encodeURIComponent(filePath)}`);
+            if (!resp.ok) { showToast("Не удалось открыть файл", "error"); return; }
+            const data = await resp.json();
+            const content = data.content || "";
+            currentFileViewPath = filePath;
+            document.getElementById("file-viewer-title").textContent = "📄 " + filePath;
+            document.getElementById("file-viewer-content").value = content;
+            document.getElementById("file-viewer-modal").classList.add("active");
+            // Scroll to line
+            const textarea = document.getElementById("file-viewer-content");
+            setTimeout(() => {
+                const lines = content.substring(0, content.length).split('\n');
+                let pos = 0;
+                for (let i = 0; i < Math.min(lineNumber - 1, lines.length); i++) {
+                    pos += lines[i].length + 1;
+                }
+                textarea.focus();
+                textarea.setSelectionRange(pos, pos);
+            }, 100);
+        } catch(e) {
+            showToast("Ошибка: " + e, "error");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 🔀 GIT PANEL
+    // ═══════════════════════════════════════════════════════
+    function gitAction(action) {
+        if (!requireProject()) return;
+        const commitForm = document.getElementById("git-commit-form");
+        commitForm.style.display = "none";
+
+        if (action === "commit") {
+            commitForm.style.display = "block";
+            document.getElementById("git-commit-msg").value = "";
+            document.getElementById("git-commit-msg").focus();
+            return;
+        }
+
+        const outputEl = document.getElementById("git-output");
+        outputEl.innerHTML = '<div class="panel-placeholder">Выполняется...</div>';
+
+        fetch(`/api/v1/projects/${currentProjectId}/git`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ action: action })
+        })
+        .then(resp => resp.json())
+        .then(data => {
+            const result = data.result || data.output || JSON.stringify(data, null, 2);
+            if (action === "log") {
+                renderGitLog(outputEl, data);
+            } else if (action === "status") {
+                renderGitStatus(outputEl, data);
+            } else if (action === "diff") {
+                if (data.diff || data.output) {
+                    showDiffModal("Git Diff", data.diff || data.output);
+                    outputEl.innerHTML = '<div class="panel-placeholder">Diff открыт в отдельном окне</div>';
+                } else {
+                    outputEl.innerHTML = '<pre class="panel-pre">' + escapeHtml(result) + '</pre>';
+                }
+            } else {
+                outputEl.innerHTML = '<pre class="panel-pre">' + escapeHtml(result) + '</pre>';
+                showToast(`${action} выполнен`, "success");
+            }
+        })
+        .catch(e => {
+            outputEl.innerHTML = `<div class="panel-placeholder" style="color:var(--red)">Ошибка: ${escapeHtml(String(e))}</div>`;
+            showToast("Ошибка git операции", "error");
+        });
+    }
+
+    function renderGitLog(container, data) {
+        const commits = data.commits || data.log || [];
+        if (!commits.length) {
+            container.innerHTML = '<div class="panel-placeholder">Нет коммитов</div>';
+            return;
+        }
+        let html = '<div class="git-log-list">';
+        commits.forEach(c => {
+            html += `<div class="git-log-item">
+                <div class="git-log-hash">${escapeHtml(c.hash || c.commit || '???').substring(0, 8)}</div>
+                <div class="git-log-msg">${escapeHtml(c.message || c.msg || '')}</div>
+                <div class="git-log-date">${escapeHtml(c.date || c.author || '')}</div>
+            </div>`;
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function renderGitStatus(container, data) {
+        const files = data.files || data.modified || [];
+        const branch = data.branch || data.current || "";
+        let html = '';
+        if (branch) html += `<div style="padding:6px 10px;font-size:12px;color:var(--green);font-weight:600;">Branch: ${escapeHtml(branch)}</div>`;
+        if (!files.length) {
+            html += '<div class="panel-placeholder">Нет изменений</div>';
+        } else {
+            html += '<div class="git-status-list">';
+            files.forEach(f => {
+                const status = f.status || f.type || '?';
+                const colorMap = { 'M': 'var(--amber)', 'A': 'var(--green)', 'D': 'var(--red)', 'R': 'var(--blue)', '?': 'var(--text-secondary)' };
+                html += `<div class="git-status-item">
+                    <span class="git-status-badge" style="color:${colorMap[status] || 'var(--text-secondary)'}">[${escapeHtml(status)}]</span>
+                    <span class="git-status-file">${escapeHtml(f.path || f.file || f)}</span>
+                </div>`;
+            });
+            html += '</div>';
+        }
+        container.innerHTML = html;
+    }
+
+    async function doGitCommit() {
+        if (!requireProject()) return;
+        const msg = document.getElementById("git-commit-msg").value.trim();
+        if (!msg) { showToast("Введите сообщение коммита", "error"); return; }
+        const autoAdd = document.getElementById("git-auto-add").checked;
+        const outputEl = document.getElementById("git-output");
+        outputEl.innerHTML = '<div class="panel-placeholder">Коммит...</div>';
+
+        try {
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/git`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ action: "commit", message: msg, auto_add: autoAdd })
+            });
+            const data = await resp.json();
+            const result = data.result || data.output || JSON.stringify(data, null, 2);
+            outputEl.innerHTML = '<pre class="panel-pre">' + escapeHtml(result) + '</pre>';
+            document.getElementById("git-commit-form").style.display = "none";
+            showToast("Коммит выполнен", "success");
+        } catch(e) {
+            outputEl.innerHTML = `<div class="panel-placeholder" style="color:var(--red)">Ошибка: ${escapeHtml(String(e))}</div>`;
+            showToast("Ошибка коммита", "error");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // ↩️ DIFF VIEWER MODAL
+    // ═══════════════════════════════════════════════════════
+    function showDiffModal(title, diffText) {
+        document.getElementById("diff-modal-title").textContent = "↩️ " + (title || "Diff");
+        renderDiffContent(diffText);
+        document.getElementById("diff-modal").classList.add("active");
+    }
+
+    function closeDiffModal() {
+        document.getElementById("diff-modal").classList.remove("active");
+    }
+
+    function toggleDiffView() {
+        const body = document.getElementById("diff-modal-body");
+        const btn = document.getElementById("diff-toggle-view");
+        if (diffViewMode === "unified") {
+            diffViewMode = "sidebyside";
+            btn.textContent = "Unified";
+        } else {
+            diffViewMode = "unified";
+            btn.textContent = "Side-by-side";
+        }
+        const diffText = body.dataset.rawDiff || "";
+        if (diffText) renderDiffContent(diffText);
+    }
+
+    function renderDiffContent(diffText) {
+        const body = document.getElementById("diff-modal-body");
+        body.dataset.rawDiff = diffText;
+
+        if (diffViewMode === "unified") {
+            renderUnifiedDiff(body, diffText);
+        } else {
+            renderSideBySideDiff(body, diffText);
+        }
+    }
+
+    function renderUnifiedDiff(container, diffText) {
+        const lines = diffText.split('\n');
+        let html = '<table class="diff-table"><tbody>';
+        let lineNum = 0;
+        lines.forEach(line => {
+            lineNum++;
+            let cls = 'diff-line';
+            let escaped = escapeHtml(line);
+            if (line.startsWith('+++') || line.startsWith('---')) {
+                cls += ' diff-header';
+            } else if (line.startsWith('@@')) {
+                cls += ' diff-hunk';
+            } else if (line.startsWith('+')) {
+                cls += ' diff-add';
+            } else if (line.startsWith('-')) {
+                cls += ' diff-del';
+            } else {
+                cls += ' diff-ctx';
+            }
+            html += `<tr class="${cls}"><td class="diff-ln">${lineNum}</td><td class="diff-code"><pre>${escaped}</pre></td></tr>`;
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function renderSideBySideDiff(container, diffText) {
+        const lines = diffText.split('\n');
+        let leftHtml = '';
+        let rightHtml = '';
+        let leftNum = 0, rightNum = 0;
+        lines.forEach(line => {
+            if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) {
+                leftHtml += `<div class="diff-sbs-line diff-sbs-header"><pre>${escapeHtml(line)}</pre></div>`;
+                rightHtml += `<div class="diff-sbs-line diff-sbs-header"><pre>${escapeHtml(line)}</pre></div>`;
+                if (line.startsWith('@@')) {
+                    const m = line.match(/@@\s*-(\d+)/);
+                    const m2 = line.match(/\+(\d+)/);
+                    if (m) leftNum = parseInt(m[1]) - 1;
+                    if (m2) rightNum = parseInt(m2[1]) - 1;
+                }
+            } else if (line.startsWith('-')) {
+                leftNum++;
+                leftHtml += `<div class="diff-sbs-line diff-sbs-del"><span class="diff-sbs-num">${leftNum}</span><pre>${escapeHtml(line.substring(1))}</pre></div>`;
+                rightHtml += `<div class="diff-sbs-line diff-sbs-empty"></div>`;
+            } else if (line.startsWith('+')) {
+                rightNum++;
+                rightHtml += `<div class="diff-sbs-line diff-sbs-empty"></div>`;
+                rightHtml += `<div class="diff-sbs-line diff-sbs-add"><span class="diff-sbs-num">${rightNum}</span><pre>${escapeHtml(line.substring(1))}</pre></div>`;
+            } else {
+                leftNum++; rightNum++;
+                leftHtml += `<div class="diff-sbs-line diff-sbs-ctx"><span class="diff-sbs-num">${leftNum}</span><pre>${escapeHtml(line)}</pre></div>`;
+                rightHtml += `<div class="diff-sbs-line diff-sbs-ctx"><span class="diff-sbs-num">${rightNum}</span><pre>${escapeHtml(line)}</pre></div>`;
+            }
+        });
+        container.innerHTML = `<div style="display:flex;height:100%;">
+            <div style="flex:1;overflow:auto;border-right:1px solid var(--border);">${leftHtml}</div>
+            <div style="flex:1;overflow:auto;">${rightHtml}</div>
+        </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 📦 PACKAGE MANAGER PANEL
+    // ═══════════════════════════════════════════════════════
+    function setPkgCmd(cmd) {
+        document.getElementById("pkg-command").value = cmd;
+        document.getElementById("pkg-command").focus();
+    }
+
+    function runPackageCmd() {
+        const cmd = document.getElementById("pkg-command").value.trim();
+        if (!cmd) { showToast("Введите команду", "error"); return; }
+        executePackageCmd(cmd);
+    }
+
+    function runPackageCmdDirect(cmd) {
+        executePackageCmd(cmd);
+    }
+
+    function executePackageCmd(cmd) {
+        if (!requireProject()) return;
+        const outputEl = document.getElementById("pkg-output");
+        outputEl.innerHTML = '<div class="panel-placeholder">Выполняется: ' + escapeHtml(cmd) + '</div>';
+
+        fetch(`/api/v1/projects/${currentProjectId}/packages`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ command: cmd })
+        })
+        .then(resp => resp.json())
+        .then(data => {
+            const output = data.output || data.result || data.stdout || JSON.stringify(data, null, 2);
+            outputEl.innerHTML = '<pre class="panel-pre">' + escapeHtml(output) + '</pre>';
+            showToast("Команда выполнена", "success");
+        })
+        .catch(e => {
+            outputEl.innerHTML = `<div class="panel-placeholder" style="color:var(--red)">Ошибка: ${escapeHtml(String(e))}</div>`;
+            showToast("Ошибка выполнения команды", "error");
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 📁 FILE MANAGER PANEL
+    // ═══════════════════════════════════════════════════════
+    async function loadFileTree() {
+        if (!requireProject()) return;
+        const treeEl = document.getElementById("file-tree");
+        treeEl.innerHTML = '<div class="panel-placeholder">Загрузка...</div>';
+
+        try {
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/tree`);
+            if (!resp.ok) {
+                treeEl.innerHTML = '<div class="panel-placeholder" style="color:var(--red)">Ошибка загрузки</div>';
+                return;
+            }
+            const data = await resp.json();
+            const tree = data.tree || data.files || data;
+            treeEl.innerHTML = renderFileTree(tree, 0);
+        } catch(e) {
+            treeEl.innerHTML = `<div class="panel-placeholder" style="color:var(--red)">Ошибка: ${escapeHtml(String(e))}</div>`;
+        }
+    }
+
+    function renderFileTree(items, depth) {
+        if (!items || !Array.isArray(items)) return '<div class="panel-placeholder">Пусто</div>';
+        let html = '';
+        const sortedItems = items.slice().sort((a, b) => {
+            const aDir = (a.type === 'dir' || a.type === 'directory' || a.children) ? 0 : 1;
+            const bDir = (b.type === 'dir' || b.type === 'directory' || b.children) ? 0 : 1;
+            return aDir - bDir || (a.name || '').localeCompare(b.name || '');
+        });
+
+        sortedItems.forEach(item => {
+            const name = item.name || item.path || 'unknown';
+            const path = item.path || name;
+            const isDir = item.type === 'dir' || item.type === 'directory' || item.children;
+            const indent = depth * 16;
+
+            if (isDir) {
+                html += `<div class="file-tree-dir" style="padding-left:${indent + 8}px;" onclick="toggleTreeDir(this)" data-opened="false">
+                    <span class="file-tree-icon">📁</span>
+                    <span class="file-tree-name">${escapeHtml(name)}</span>
+                </div>
+                <div class="file-tree-children" style="display:none;">
+                    ${renderFileTree(item.children || [], depth + 1)}
+                </div>`;
+            } else {
+                const icon = getFileIcon(name);
+                html += `<div class="file-tree-file" style="padding-left:${indent + 8}px;" onclick="openFileInViewer('${escapeHtml(path)}')">
+                    <span class="file-tree-icon">${icon}</span>
+                    <span class="file-tree-name">${escapeHtml(name)}</span>
+                </div>`;
+            }
+        });
+
+        return html;
+    }
+
+    function getFileIcon(filename) {
+        const ext = (filename.split('.').pop() || '').toLowerCase();
+        const iconMap = {
+            'py': '🐍', 'js': '📜', 'ts': '📘', 'jsx': '⚛️', 'tsx': '⚛️',
+            'json': '📋', 'md': '📝', 'txt': '📄', 'html': '🌐', 'css': '🎨',
+            'scss': '🎨', 'sql': '🗃️', 'sh': '⚡', 'bash': '⚡', 'yml': '⚙️', 'yaml': '⚙️',
+            'toml': '⚙️', 'ini': '⚙️', 'cfg': '⚙️', 'env': '🔐',
+            'jpg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'svg': '🖼️',
+            'dockerfile': '🐳', 'lock': '🔒', 'gitignore': '🚫'
+        };
+        return iconMap[ext] || '📄';
+    }
+
+    function toggleTreeDir(element) {
+        const children = element.nextElementSibling;
+        if (!children) return;
+        const isOpen = element.dataset.opened === "true";
+        if (isOpen) {
+            children.style.display = "none";
+            element.dataset.opened = "false";
+            element.querySelector(".file-tree-icon").textContent = "📁";
+        } else {
+            children.style.display = "block";
+            element.dataset.opened = "true";
+            element.querySelector(".file-tree-icon").textContent = "📂";
+        }
+    }
+
+    async function openFileInViewer(filePath) {
+        if (!requireProject()) return;
+        try {
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/read-file?path=${encodeURIComponent(filePath)}`);
+            if (!resp.ok) { showToast("Не удалось открыть файл", "error"); return; }
+            const data = await resp.json();
+            currentFileViewPath = filePath;
+            document.getElementById("file-viewer-title").textContent = "📄 " + filePath;
+            document.getElementById("file-viewer-content").value = data.content || "";
+            document.getElementById("file-viewer-modal").classList.add("active");
+        } catch(e) {
+            showToast("Ошибка: " + e, "error");
+        }
+    }
+
+    function closeFileViewerModal() {
+        document.getElementById("file-viewer-modal").classList.remove("active");
+        currentFileViewPath = null;
+    }
+
+    async function saveFileFromViewer() {
+        if (!currentFileViewPath || !requireProject()) return;
+        const content = document.getElementById("file-viewer-content").value;
+        try {
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/save-file`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ path: currentFileViewPath, content: content })
+            });
+            if (resp.ok) {
+                showToast("Файл сохранён: " + currentFileViewPath, "success");
+            } else {
+                const err = await resp.json();
+                showToast("Ошибка сохранения: " + (err.detail || ""), "error");
+            }
+        } catch(e) {
+            showToast("Ошибка: " + e, "error");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 🗃️ ARCHIVE
+    // ═══════════════════════════════════════════════════════
+    let archiveProjectId = null;
+
+    function archiveProjectModal(projectId, projectName) {
+        archiveProjectId = projectId;
+        document.getElementById("archive-desc").value = "";
+        document.getElementById("archive-project-modal").classList.add("active");
+    }
+
+    function closeArchiveProjectModal() {
+        document.getElementById("archive-project-modal").classList.remove("active");
+        archiveProjectId = null;
+    }
+
+    async function doArchiveProject() {
+        if (!archiveProjectId) return;
+        const desc = document.getElementById("archive-desc").value.trim();
+        closeArchiveProjectModal();
+        try {
+            const resp = await fetch("/api/v1/projects/archive", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ project_id: archiveProjectId, description: desc })
+            });
+            if (resp.ok) {
+                await loadProjects();
+                showToast("Проект архивирован", "success");
+            } else {
+                const err = await resp.json();
+                showToast("Ошибка: " + (err.detail || ""), "error");
+            }
+        } catch(e) {
+            showToast("Ошибка: " + e, "error");
+        }
+    }
+
+    async function showArchivePanel() {
+        document.getElementById("archive-modal").classList.add("active");
+        document.getElementById("archive-modal-title").textContent = "🗃️ Архивы";
+        document.getElementById("archive-modal-body").innerHTML = '<div class="panel-placeholder">Загрузка...</div>';
+
+        try {
+            const resp = await fetch("/api/v1/projects/archives");
+            if (!resp.ok) {
+                document.getElementById("archive-modal-body").innerHTML = '<div class="panel-placeholder" style="color:var(--red)">Ошибка загрузки архивов</div>';
+                return;
+            }
+            const data = await resp.json();
+            const archives = data.archives || data || [];
+            if (!archives.length) {
+                document.getElementById("archive-modal-body").innerHTML = '<div class="panel-placeholder">Нет архивов</div>';
+                return;
+            }
+            let html = '<div class="archive-list">';
+            archives.forEach(a => {
+                const date = a.created_at || a.date || '';
+                const fileCount = a.file_count || a.files_count || '?';
+                html += `<div class="archive-item" onclick="showArchiveDetail(${a.id})">
+                    <div class="archive-item-header">
+                        <span class="archive-item-name">📁 ${escapeHtml(a.project_name || a.name || 'Unknown')}</span>
+                        <span class="archive-item-date">${escapeHtml(date.substring(0, 10))}</span>
+                    </div>
+                    <div class="archive-item-desc">${escapeHtml(a.description || 'Без описания')}</div>
+                    <div class="archive-item-meta">${fileCount} файлов</div>
+                </div>`;
+            });
+            html += '</div>';
+            document.getElementById("archive-modal-body").innerHTML = html;
+        } catch(e) {
+            document.getElementById("archive-modal-body").innerHTML = `<div class="panel-placeholder" style="color:var(--red)">Ошибка: ${escapeHtml(String(e))}</div>`;
+        }
+    }
+
+    async function showArchiveDetail(archiveId) {
+        try {
+            const resp = await fetch(`/api/v1/projects/archives/${archiveId}`);
+            if (!resp.ok) { showToast("Ошибка загрузки", "error"); return; }
+            const data = await resp.json();
+            let html = `<div style="margin-bottom:16px;">
+                <h3>${escapeHtml(data.project_name || data.name || 'Archive')}</h3>
+                <p style="color:var(--text-secondary);font-size:13px;margin:6px 0;">${escapeHtml(data.description || '')}</p>
+                <p style="color:var(--text-secondary);font-size:12px;">Файлов: ${data.file_count || '?'} | Дата: ${data.created_at || '?'}</p>
+            </div>`;
+            if (data.base_prompt || data.master_prompt) {
+                html += `<div style="margin-bottom:12px;">
+                    <h3>Мастер-промпт</h3>
+                    <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;color:var(--text-secondary);white-space:pre-wrap;line-height:1.5;">${escapeHtml(data.base_prompt || data.master_prompt || '')}</div>
+                </div>`;
+            }
+            html += `<div style="display:flex;gap:8px;">
+                <button class="btn-small" onclick="downloadArchive(${archiveId})">📥 Скачать</button>
+                <button class="btn-small btn-danger" onclick="deleteArchive(${archiveId})">Удалить архив</button>
+            </div>`;
+            document.getElementById("archive-modal-body").innerHTML = html;
+        } catch(e) {
+            showToast("Ошибка: " + e, "error");
+        }
+    }
+
+    async function downloadArchive(archiveId) {
+        try {
+            const resp = await fetch(`/api/v1/projects/archives/${archiveId}/download`);
+            if (!resp.ok) { showToast("Ошибка скачивания", "error"); return; }
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'archive_' + archiveId + '.zip';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast("Архив скачан", "success");
+        } catch(e) {
+            showToast("Ошибка: " + e, "error");
+        }
+    }
+
+    async function deleteArchive(archiveId) {
+        if (!confirm("Удалить архив?")) return;
+        try {
+            const resp = await fetch(`/api/v1/projects/archives/${archiveId}`, { method: "DELETE" });
+            if (resp.ok) {
+                showToast("Архив удалён", "success");
+                showArchivePanel();
+            } else {
+                const err = await resp.json();
+                showToast("Ошибка: " + (err.detail || ""), "error");
+            }
+        } catch(e) {
+            showToast("Ошибка: " + e, "error");
+        }
+    }
+
+    function closeArchiveModal() {
+        document.getElementById("archive-modal").classList.remove("active");
+    }
     </script>
 </body>
 </html>

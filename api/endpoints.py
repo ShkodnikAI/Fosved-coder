@@ -1,17 +1,25 @@
 """
 Fosved Coder v2.0 — REST API Endpoints
 Включает управление ключами, моделями, проектами, идеями, чатом.
+Поиск файлов, гит, шаблоны, пакеты, архив.
 """
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
+import os
+import subprocess
+import shutil
+import tempfile
+from datetime import datetime
 
 from core.memory import (
     CONFIG, create_project, get_all_projects, get_project,
     delete_project, update_project_progress, update_project_models,
     get_all_ideas, delete_idea, get_message_count,
-    save_routing_stat, get_routing_stats,
+    save_routing_stat, get_routing_stats, get_history, save_message,
+    save_project_archive, get_all_archives, get_archive,
 )
 from core.keys_manager import keys_manager, PROVIDER_DEFS
 
@@ -48,6 +56,31 @@ class UpdateModelsRequest(BaseModel):
 
 class AddIdeaRequest(BaseModel):
     repo_url: str
+
+class SearchFilesRequest(BaseModel):
+    project_id: int
+    query: str
+    file_pattern: str = ""
+    max_results: int = 50
+
+class GitOperationRequest(BaseModel):
+    project_id: int
+    operation: str  # commit, push, pull, log, status, diff
+    message: str = ""
+    auto_add: bool = False
+
+class RunPackageRequest(BaseModel):
+    project_id: int
+    command: str  # "pip install flask", "npm install express", "pip list", "npm list"
+
+class CreateFromTemplateRequest(BaseModel):
+    name: str
+    template: str  # fastapi, react, nextjs, python-cli, flask
+    path: str = ""
+
+class ArchiveProjectRequest(BaseModel):
+    project_id: int
+    description: str
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -159,6 +192,572 @@ async def update_models(req: UpdateModelsRequest):
 
 
 # ═══════════════════════════════════════════════════════════════
+# FILE OPERATIONS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/projects/{project_id}/tree")
+async def get_project_tree(project_id: int):
+    """Получить дерево файлов проекта."""
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    project_path = project["path"]
+    if not os.path.isdir(project_path):
+        return {"tree": [], "error": "Папка проекта не найдена"}
+
+    tree = []
+    skip_dirs = {'.git', '__pycache__', 'node_modules', '.next', 'venv', '.venv', '.idea', '.vscode', 'dist', 'build', '.cache'}
+    skip_exts = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin'}
+
+    for root, dirs, files in os.walk(project_path):
+        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
+        rel_root = os.path.relpath(root, project_path)
+        for f in files:
+            if any(f.endswith(ext) for ext in skip_exts):
+                continue
+            rel_path = os.path.join(rel_root, f) if rel_root != '.' else f
+            full_path = os.path.join(root, f)
+            try:
+                size = os.path.getsize(full_path)
+            except OSError:
+                size = 0
+            tree.append({
+                "path": rel_path.replace("\\", "/"),
+                "size": size,
+                "is_dir": False,
+            })
+
+    return {"tree": tree}
+
+@router.get("/projects/{project_id}/read-file")
+async def read_file(project_id: int, path: str):
+    """Прочитать содержимое файла проекта."""
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    full_path = os.path.join(project["path"], path)
+    # Security: prevent path traversal
+    real_path = os.path.realpath(full_path)
+    real_project = os.path.realpath(project["path"])
+    if not real_path.startswith(real_project):
+        raise HTTPException(403, "Доступ запрещён")
+    if not os.path.isfile(full_path):
+        raise HTTPException(404, "Файл не найден")
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return {"path": path, "content": content, "size": os.path.getsize(full_path)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.post("/projects/{project_id}/save-file")
+async def save_file(project_id: int, path: str, content: str = ""):
+    """Сохранить/создать файл в проекте."""
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    full_path = os.path.join(project["path"], path)
+    real_path = os.path.realpath(full_path)
+    real_project = os.path.realpath(project["path"])
+    if not real_path.startswith(real_project):
+        raise HTTPException(403, "Доступ запрещён")
+    try:
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return {"success": True, "path": path}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@router.post("/projects/{project_id}/search-files")
+async def search_files(req: SearchFilesRequest):
+    """Поиск текста/кода по файлам проекта (grep)."""
+    project = await get_project(req.project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    project_path = project["path"]
+    if not os.path.isdir(project_path):
+        return {"results": [], "query": req.query, "total": 0}
+
+    query = req.query.lower()
+    file_pattern = req.file_pattern.lower() if req.file_pattern else ""
+    results = []
+    skip_dirs = {'.git', '__pycache__', 'node_modules', '.next', 'venv', '.venv', '.idea', '.vscode', 'dist', 'build', '.cache'}
+    skip_exts = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'}
+    max_file_size = 500 * 1024  # 500 KB
+
+    for root, dirs, files in os.walk(project_path):
+        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
+        for f in files:
+            if any(f.endswith(ext) for ext in skip_exts):
+                continue
+            if file_pattern and file_pattern not in f.lower():
+                continue
+
+            full_path = os.path.join(root, f)
+            try:
+                if os.path.getsize(full_path) > max_file_size:
+                    continue
+                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    lines = fh.readlines()
+                rel_path = os.path.relpath(full_path, project_path).replace("\\", "/")
+                for line_num, line in enumerate(lines, 1):
+                    if query in line.lower():
+                        results.append({
+                            "file": rel_path,
+                            "line": line_num,
+                            "text": line.rstrip()[:200],
+                            "match_start": max(0, line.lower().find(query) - 40),
+                        })
+                        if len(results) >= req.max_results:
+                            return {"results": results, "query": req.query, "total": len(results), "truncated": True}
+            except (OSError, PermissionError):
+                continue
+
+    return {"results": results, "query": req.query, "total": len(results)}
+
+
+# ═══════════════════════════════════════════════════════════════
+# GIT OPERATIONS
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/projects/{project_id}/git")
+async def git_operation(req: GitOperationRequest):
+    """Git операции: commit, push, pull, log, status, diff."""
+    project = await get_project(req.project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    cwd = project["path"]
+    if not os.path.isdir(os.path.join(cwd, ".git")):
+        raise HTTPException(400, "Проект не является Git репозиторием")
+
+    try:
+        if req.operation == "status":
+            result = subprocess.run(["git", "status", "--short"], capture_output=True, text=True, cwd=cwd, timeout=10)
+            lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
+            return {"operation": "status", "output": lines, "raw": result.stdout}
+
+        elif req.operation == "log":
+            result = subprocess.run(
+                ["git", "log", "--oneline", "-20", "--format=%h|%ai|%s"],
+                capture_output=True, text=True, cwd=cwd, timeout=10
+            )
+            commits = []
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    parts = line.split("|", 2)
+                    if len(parts) == 3:
+                        commits.append({"hash": parts[0], "date": parts[1].strip(), "message": parts[2].strip()})
+            return {"operation": "log", "commits": commits}
+
+        elif req.operation == "diff":
+            result = subprocess.run(["git", "diff", "--stat"], capture_output=True, text=True, cwd=cwd, timeout=10)
+            diff_full = subprocess.run(["git", "diff"], capture_output=True, text=True, cwd=cwd, timeout=15)
+            return {"operation": "diff", "stat": result.stdout, "diff": diff_full.stdout[:10000]}
+
+        elif req.operation == "commit":
+            if not req.message:
+                raise HTTPException(400, "Сообщение коммита обязательно")
+            if req.auto_add:
+                subprocess.run(["git", "add", "-A"], capture_output=True, text=True, cwd=cwd, timeout=10)
+            result = subprocess.run(
+                ["git", "commit", "-m", req.message],
+                capture_output=True, text=True, cwd=cwd, timeout=15
+            )
+            return {"operation": "commit", "output": result.stdout.strip() or result.stderr.strip(), "success": result.returncode == 0}
+
+        elif req.operation == "push":
+            result = subprocess.run(["git", "push"], capture_output=True, text=True, cwd=cwd, timeout=30)
+            return {"operation": "push", "output": result.stdout.strip() or result.stderr.strip(), "success": result.returncode == 0}
+
+        elif req.operation == "pull":
+            result = subprocess.run(["git", "pull"], capture_output=True, text=True, cwd=cwd, timeout=30)
+            return {"operation": "pull", "output": result.stdout.strip() or result.stderr.strip(), "success": result.returncode == 0}
+
+        else:
+            raise HTTPException(400, f"Неизвестная операция: {req.operation}")
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(408, "Операция превысила таймаут")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# PACKAGE MANAGER
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/projects/{project_id}/packages")
+async def run_package_command(req: RunPackageRequest):
+    """Управление пакетами: pip install, npm install, и т.д."""
+    project = await get_project(req.project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    cwd = project["path"]
+    os.makedirs(cwd, exist_ok=True)
+
+    cmd = req.command.strip()
+    if not cmd:
+        raise HTTPException(400, "Команда не указана")
+
+    # Security: only allow safe package commands
+    allowed_prefixes = ["pip install", "pip uninstall", "pip list", "pip show",
+                         "npm install", "npm uninstall", "npm list", "npm run",
+                         "python -m pip", "python3 -m pip", "uv pip"]
+    if not any(cmd.startswith(p) for p in allowed_prefixes):
+        raise HTTPException(400, f"Команда не разрешена. Разрешены: pip, npm")
+
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, cwd=cwd, timeout=120
+        )
+        return {
+            "command": cmd,
+            "stdout": result.stdout[-5000:] if len(result.stdout) > 5000 else result.stdout,
+            "stderr": result.stderr[-2000:] if len(result.stderr) > 2000 else result.stderr,
+            "exit_code": result.returncode,
+            "success": result.returncode == 0,
+        }
+    except subprocess.TimeoutExpired:
+        raise HTTPException(408, "Установка превысила таймаут (120 сек)")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# PROJECT TEMPLATES
+# ═══════════════════════════════════════════════════════════════
+
+TEMPLATES = {
+    "fastapi": {
+        "name": "FastAPI",
+        "description": "FastAPI + Uvicorn + SQLAlchemy",
+        "files": {
+            "main.py": '''"""FastAPI Application"""
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="{name}", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to {name}", "version": "0.1.0"}
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+''',
+            "requirements.txt": "fastapi\nuvicorn\nsqlalchemy\npydantic\n",
+            ".gitignore": "__pycache__/\n*.pyc\n.env\nvenv/\n",
+        }
+    },
+    "flask": {
+        "name": "Flask",
+        "description": "Flask + SQLAlchemy",
+        "files": {
+            "app.py": '''"""Flask Application"""
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = "change-me"
+
+@app.route("/")
+def root():
+    return jsonify({"message": "Welcome to {name}", "version": "0.1.0"})
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
+''',
+            "requirements.txt": "flask\nflask-sqlalchemy\n",
+            ".gitignore": "__pycache__/\n*.pyc\n.env\nvenv/\n",
+        }
+    },
+    "react": {
+        "name": "React",
+        "description": "React + Vite",
+        "files": {
+            "package.json": '''{{
+  "name": "{name}",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {{
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }},
+  "devDependencies": {{
+    "@vitejs/plugin-react": "^4.2.0",
+    "vite": "^5.0.0"
+  }},
+  "scripts": {{
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }}
+}}
+''',
+            "index.html": '''<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width"/>
+<title>{name}</title></head>
+<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>
+</html>''',
+            "src/main.jsx": '''import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App'
+ReactDOM.createRoot(document.getElementById('root')).render(<App />)''',
+            "src/App.jsx": '''import React from 'react'
+export default function App() {
+  return <div><h1>{name}</h1><p>Welcome!</p></div>
+}''',
+            ".gitignore": "node_modules/\ndist/\n.env\n",
+        }
+    },
+    "nextjs": {
+        "name": "Next.js",
+        "description": "Next.js 14 App Router",
+        "files": {
+            "package.json": '''{{
+  "name": "{name}",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {{
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  }},
+  "dependencies": {{
+    "next": "^14.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }}
+}}
+''',
+            "app/layout.js": '''export const metadata = {{ title: "{name}" }}
+export default function RootLayout({{ children }}) {{
+  return <html><body>{{children}}</body></html>
+}}''',
+            "app/page.js": '''export default function Home() {{
+  return <main><h1>{name}</h1><p>Welcome!</p></main>
+}}''',
+            ".gitignore": "node_modules/\n.next/\n.env*\n",
+        }
+    },
+    "python-cli": {
+        "name": "Python CLI",
+        "description": "Python CLI приложение с argparse",
+        "files": {
+            "main.py": '''"""{name} — CLI Application"""
+import argparse
+import sys
+
+def main():
+    parser = argparse.ArgumentParser(description="{name}")
+    parser.add_argument("--version", action="version", version="{name} 0.1.0")
+    parser.add_argument("command", nargs="?", default="hello", help="Command to run")
+    args = parser.parse_args()
+
+    if args.command == "hello":
+        print("Hello from {name}!")
+    else:
+        print(f"Unknown command: {{args.command}}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+''',
+            "requirements.txt": "",
+            ".gitignore": "__pycache__/\n*.pyc\nvenv/\n",
+        }
+    },
+}
+
+@router.get("/templates")
+async def list_templates():
+    """Список доступных шаблонов."""
+    return {"templates": [
+        {"id": tid, "name": t["name"], "description": t["description"]}
+        for tid, t in TEMPLATES.items()
+    ]}
+
+@router.post("/projects/create-from-template")
+async def create_from_template(req: CreateFromTemplateRequest):
+    """Создать проект из шаблона."""
+    template = TEMPLATES.get(req.template)
+    if not template:
+        raise HTTPException(400, f"Шаблон '{req.template}' не найден")
+
+    projects_dir = CONFIG["system"]["projects_dir"]
+    project_path = req.path or f"{projects_dir}/{req.name.replace(' ', '_').lower()}"
+
+    # Create project in DB
+    result = await create_project(req.name, project_path)
+    if not result:
+        raise HTTPException(400, "Проект с таким именем уже существует")
+
+    # Write template files
+    os.makedirs(project_path, exist_ok=True)
+    for file_path, content in template["files"].items():
+        full_path = os.path.join(project_path, file_path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content.format(name=req.name))
+
+    # Init git
+    subprocess.run(["git", "init"], capture_output=True, cwd=project_path, timeout=5)
+    subprocess.run(["git", "add", "-A"], capture_output=True, cwd=project_path, timeout=5)
+    subprocess.run(["git", "commit", "-m", f"Init: {req.name} from {template['name']} template"],
+                   capture_output=True, cwd=project_path, timeout=10)
+
+    return {"success": True, "project": result, "template": template["name"]}
+
+
+# ═══════════════════════════════════════════════════════════════
+# PROJECT ARCHIVE
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/projects/archive")
+async def archive_project(req: ArchiveProjectRequest):
+    """Архивировать проект: создать мастер-промпт, запаковать файлы."""
+    project = await get_project(req.project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    project_path = project["path"]
+    if not os.path.isdir(project_path):
+        raise HTTPException(400, "Папка проекта не найдена")
+
+    # 1. Собрать историю чата проекта
+    history = await get_history(req.project_id, limit=200)
+
+    # 2. Собрать структуру файлов
+    file_list = []
+    for root, dirs, files in os.walk(project_path):
+        dirs[:] = [d for d in dirs if d not in {'.git', '__pycache__', 'node_modules', '.next', 'venv', '.venv', '.idea', '.vscode', 'dist', 'build'} and not d.startswith('.')]
+        for f in files:
+            rel = os.path.relpath(os.path.join(root, f), project_path).replace("\\", "/")
+            file_list.append(rel)
+
+    # 3. Создать мастер-промпт на основе истории
+    master_prompt = _generate_master_prompt(project["name"], history, file_list)
+
+    # 4. Создать ZIP архив
+    archives_dir = os.path.join(CONFIG["system"].get("archives_dir", "./archives"))
+    os.makedirs(archives_dir, exist_ok=True)
+    archive_name = f"{project['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    zip_path = os.path.join(archives_dir, f"{archive_name}.zip")
+
+    shutil.make_archive(zip_path.replace(".zip", ""), "zip", project_path)
+
+    # 5. Сохранить в БД
+    archive_record = await save_project_archive(
+        project_id=req.project_id,
+        project_name=project["name"],
+        description=req.description,
+        master_prompt=master_prompt,
+        file_list=json.dumps(file_list),
+        file_count=len(file_list),
+        archive_path=zip_path,
+    )
+
+    return {
+        "success": True,
+        "archive_id": archive_record["id"],
+        "archive_name": archive_name,
+        "file_count": len(file_list),
+        "description": req.description,
+    }
+
+@router.get("/archives")
+async def list_archives():
+    """Список всех архивов."""
+    return await get_all_archives()
+
+@router.get("/archives/{archive_id}")
+async def get_archive_detail(archive_id: int):
+    """Детали архива (с мастер-промптом)."""
+    archive = await get_archive(archive_id)
+    if not archive:
+        raise HTTPException(404, "Архив не найден")
+    return archive
+
+@router.get("/archives/{archive_id}/download")
+async def download_archive(archive_id: int):
+    """Скачать ZIP архив."""
+    archive = await get_archive(archive_id)
+    if not archive:
+        raise HTTPException(404, "Архив не найден")
+    zip_path = archive.get("archive_path", "")
+    if not zip_path or not os.path.isfile(zip_path):
+        raise HTTPException(404, "ZIP файл не найден")
+    return FileResponse(zip_path, filename=os.path.basename(zip_path), media_type="application/zip")
+
+
+def _generate_master_prompt(project_name: str, history: list, file_list: list) -> str:
+    """Сгенерировать мастер-промпт из истории чата и файлов проекта."""
+    lines = [
+        f"# МАСТЕР-ПРОМПТ ПРОЕКТА: {project_name}",
+        f"# Дата архивации: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        "## Описание проекта",
+    ]
+
+    # Извлечь важные моменты из истории (первые и последние сообщения)
+    user_messages = [m for m in history if m["role"] == "user"]
+    ai_messages = [m for m in history if m["role"] == "ai"]
+
+    if user_messages:
+        lines.append("### Ключевые задачи (из истории):")
+        for msg in user_messages[:10]:
+            text = msg["content"][:200]
+            lines.append(f"- {text}")
+        lines.append("")
+
+    if ai_messages:
+        lines.append("### Решения и подходы:")
+        for msg in ai_messages[-5:]:
+            text = msg["content"][:300]
+            lines.append(f"- {text}")
+        lines.append("")
+
+    lines.extend([
+        "## Структура проекта",
+        f"Всего файлов: {len(file_list)}",
+        "",
+    ])
+    for f in sorted(file_list)[:50]:
+        lines.append(f"- {f}")
+    if len(file_list) > 50:
+        lines.append(f"... и ещё {len(file_list) - 50} файлов")
+    lines.append("")
+
+    lines.extend([
+        "## Технический контекст",
+        "При возобновлении работы над этим проектом, учти:",
+        "- Все ранее найденные ошибки и их решения описаны выше",
+        "- Структура файлов отражает финальное состояние проекта",
+        "- Используй этот промпт как контекст для продолжения разработки",
+        "",
+    ])
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════
 # IDEAS
 # ═══════════════════════════════════════════════════════════════
 
@@ -181,9 +780,11 @@ async def delete_idea_endpoint(idea_id: int):
 async def get_stats():
     projects = await get_all_projects()
     ideas = await get_all_ideas()
+    archives = await get_all_archives()
     return {
         "projects_count": len(projects),
         "ideas_count": len(ideas),
+        "archives_count": len(archives),
         "messages_count": await get_message_count(None),
         "routing_decisions": len(await get_routing_stats()),
     }

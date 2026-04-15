@@ -9,6 +9,7 @@ system:
   db_url: "sqlite+aiosqlite:///fosved_coder.db"
   projects_dir: "./projects"
   ideas_cache_dir: "./.cache/ideas"
+  archives_dir: "./archives"
   max_iterations: 3
   max_context_files: 20
   max_idea_files: 10

@@ -59,6 +59,18 @@ class RoutingStat(Base):
     success: Mapped[bool] = mapped_column(default=True)
     timestamp: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
+class ProjectArchive(Base):
+    __tablename__ = "project_archives"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(index=True)
+    project_name: Mapped[str]
+    description: Mapped[str] = mapped_column(Text, default="")
+    master_prompt: Mapped[str] = mapped_column(Text, default="")
+    file_list: Mapped[str] = mapped_column(Text, default="[]")
+    file_count: Mapped[int] = mapped_column(default=0)
+    archive_path: Mapped[str] = mapped_column(default="")
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
 # ═══════════════════════════════════════════════════════════════
 # INIT
 # ═══════════════════════════════════════════════════════════════
@@ -310,56 +322,60 @@ async def get_routing_stats(limit: int = 100) -> list[dict]:
             for s in result.scalars().all()
         ]
 
-# ── Missing imports stubs (added for endpoints.py) ──────────────────────
-import json as _json
+# ═══════════════════════════════════════════════════════════════
+# PROJECT ARCHIVES CRUD
+# ═══════════════════════════════════════════════════════════════
 
-async def update_project_progress(project_id, progress):
-    """Update the progress percentage of a project."""
-    try:
-        db_path = str(CONFIG["system"]["db_path"])
-        import aiosqlite
-        async with aiosqlite.connect(db_path) as db:
-            await db.execute("UPDATE projects SET progress = ? WHERE id = ?", (progress, project_id))
-            await db.commit()
-            return True
-    except Exception:
-        return False
-
-async def update_project_models(project_id, model_ids):
-    """Update the model list associated with a project."""
-    try:
-        db_path = str(CONFIG["system"]["db_path"])
-        import aiosqlite
-        async with aiosqlite.connect(db_path) as db:
-            await db.execute("UPDATE projects SET models = ? WHERE id = ?", (_json.dumps(model_ids), project_id))
-            await db.commit()
-            return True
-    except Exception:
-        return False
-
-async def save_routing_stat(stat_data):
-    """Save a routing decision statistic."""
-    try:
-        db_path = str(CONFIG["system"]["db_path"])
-        import aiosqlite
-        async with aiosqlite.connect(db_path) as db:
-            await db.execute(
-                "INSERT INTO routing_stats (provider, model, timestamp) VALUES (?, ?, ?)",
-                (stat_data.get("provider",""), stat_data.get("model",""), stat_data.get("timestamp",""))
+async def save_project_archive(
+    project_id: int, project_name: str, description: str,
+    master_prompt: str, file_list: str, file_count: int, archive_path: str
+) -> dict:
+    """Save a project archive. Returns dict representation."""
+    async with async_session() as session:
+        async with session.begin():
+            archive = ProjectArchive(
+                project_id=project_id, project_name=project_name,
+                description=description, master_prompt=master_prompt,
+                file_list=file_list, file_count=file_count, archive_path=archive_path,
             )
-            await db.commit()
-    except Exception:
-        pass  # table may not exist yet
+            session.add(archive)
+            session.flush()
+            return {
+                "id": archive.id, "project_id": project_id,
+                "project_name": project_name, "description": description,
+                "file_count": file_count, "archive_path": archive_path,
+                "created_at": str(archive.created_at),
+            }
 
-async def get_routing_stats():
-    """Retrieve recent routing statistics."""
-    try:
-        db_path = str(CONFIG["system"]["db_path"])
-        import aiosqlite
-        async with aiosqlite.connect(db_path) as db:
-            cursor = await db.execute("SELECT * FROM routing_stats ORDER BY id DESC LIMIT 100")
-            rows = await cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            return [dict(zip(columns, row)) for row in rows]
-    except Exception:
-        return []
+async def get_all_archives() -> list[dict]:
+    """Get all archives as list of dicts."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ProjectArchive).order_by(ProjectArchive.created_at.desc())
+        )
+        return [
+            {
+                "id": a.id, "project_id": a.project_id,
+                "project_name": a.project_name, "description": a.description,
+                "file_count": a.file_count,
+                "created_at": str(a.created_at),
+            }
+            for a in result.scalars().all()
+        ]
+
+async def get_archive(archive_id: int) -> dict | None:
+    """Get single archive by ID (with master prompt)."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ProjectArchive).where(ProjectArchive.id == archive_id)
+        )
+        a = result.scalar_one_or_none()
+        if a:
+            return {
+                "id": a.id, "project_id": a.project_id,
+                "project_name": a.project_name, "description": a.description,
+                "master_prompt": a.master_prompt, "file_list": a.file_list,
+                "file_count": a.file_count, "archive_path": a.archive_path,
+                "created_at": str(a.created_at),
+            }
+        return None
