@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from core.keys_manager import keys_manager, PROVIDER_DEFS
+from core import chat_history
 import urllib.request, urllib.error, json as _json
 
 router = APIRouter(prefix="/api", tags=["api"])

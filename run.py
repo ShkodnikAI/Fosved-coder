@@ -82,6 +82,7 @@ async def ws_endpoint(ws: WebSocket):
             messages.append({"role": "user", "content": message})
 
             from core.chat import stream_chat
+from core import chat_history
 
             async def on_token(content):
                 if not stop_event.is_set():

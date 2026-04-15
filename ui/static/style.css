@@ -7,6 +7,10 @@ body{font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;background:#1a1a1a;
 .header-actions{display:flex;gap:8px}
 .btn-stop{background:#c0392b;color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px}
 .btn-stop:hover{background:#e74c3c}
+.btn-clear-chat{background:transparent;color:#888;border:1px solid #444;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+.btn-clear-chat:hover{background:#333;color:#e74c3c;border-color:#e74c3c}
+.chat-date-sep{text-align:center;color:#555;font-size:11px;padding:8px 0;border-bottom:1px solid #2a2a2a;margin:4px 0}
+
 
 .main-layout{display:flex;height:calc(100vh - 56px)}
 

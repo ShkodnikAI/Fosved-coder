@@ -161,6 +161,7 @@ function connectWS() {
     ws.onopen = function() {
         console.log('WS connected');
         updateConnectionStatus(true);
+        loadChatHistory();
     };
     ws.onclose = function() {
         console.log('WS disconnected');
@@ -457,10 +458,85 @@ function selectProject(id) {
     if (!p) return;
     selectedModelId = p.selected_model || '';
     renderProjects();
-    var html = '<div class="msg-system">Project: '+esc(p.name)+'</div>';
-    if (p.instructions) html += '<div class="msg msg-ai"><strong>Instructions:</strong><br>'+marked.parse(p.instructions)+'</div>';
-    if (p.selected_model) html += '<div class="msg msg-ai"><strong>Model:</strong> '+esc(p.selected_model)+'</div>';
-    document.getElementById('chat-messages').innerHTML = html;
+    loadChatHistory();
+}
+
+function loadChatHistory() {
+    var pid = selectedProjectId || '';
+    fetch('/api/chat/' + encodeURIComponent(pid))
+        .then(function(r){ return r.json(); })
+        .then(function(messages) {
+            var el = document.getElementById('chat-messages');
+            el.innerHTML = '';
+            if (!messages || !messages.length) {
+                if (selectedProjectId) {
+                    var p = allProjects.find(function(x){return x.id===selectedProjectId;});
+                    if (p) {
+                        appendMsg('system', 'Project: ' + p.name);
+                        if (p.instructions) appendMsgHtml('ai', '<strong>Instructions:</strong><br>' + marked.parse(p.instructions));
+                        if (p.selected_model) appendMsgHtml('ai', '<strong>Model:</strong> ' + esc(p.selected_model));
+                    }
+                } else {
+                    appendMsg('system', 'Connected to Fosved Coder');
+                }
+                return;
+            }
+            // Show project header if project selected
+            if (selectedProjectId) {
+                var p = allProjects.find(function(x){return x.id===selectedProjectId;});
+                if (p) appendMsg('system', 'Project: ' + p.name);
+            }
+            // Show messages
+            var lastDate = '';
+            messages.forEach(function(m) {
+                // Date separator
+                var ts = m.timestamp || '';
+                var dateStr = ts.substring(0, 10);
+                if (dateStr && dateStr !== lastDate) {
+                    lastDate = dateStr;
+                    var dateEl = document.createElement('div');
+                    dateEl.className = 'chat-date-sep';
+                    dateEl.textContent = dateStr;
+                    el.appendChild(dateEl);
+                }
+                if (m.role === 'user') {
+                    appendMsg('user', m.content);
+                } else if (m.role === 'ai') {
+                    appendMsgHtml('ai', marked.parse(m.content || '(empty)'));
+                } else if (m.role === 'system') {
+                    appendMsg('system', m.content);
+                }
+            });
+            el.scrollTop = el.scrollHeight;
+        })
+        .catch(function(e) { console.error('loadHistory', e); });
+}
+
+function appendMsgHtml(role, html) {
+    var el = document.getElementById('chat-messages');
+    var div = document.createElement('div');
+    div.className = 'msg msg-' + role;
+    div.innerHTML = html;
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+}
+
+function clearChat() {
+    var pid = selectedProjectId || '';
+    if (!confirm('Clear chat history?')) return;
+    fetch('/api/chat/' + encodeURIComponent(pid), {method:'DELETE'})
+        .then(function(r){
+            if(r.ok) {
+                document.getElementById('chat-messages').innerHTML = '';
+                if (selectedProjectId) {
+                    var p = allProjects.find(function(x){return x.id===selectedProjectId;});
+                    if (p) appendMsg('system', 'Project: ' + p.name);
+                } else {
+                    appendMsg('system', 'Chat cleared');
+                }
+            }
+        })
+        .catch(function(){});
 }
 
 /* ======== KEYS ======== */
