@@ -1,0 +1,27 @@
+{
+  "providers": {
+    "claude": {
+      "api_key": "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",
+      "models": [],
+      "is_active": true
+    },
+    "grok": {
+      "api_key": "xai-qSsTVUEtZeh7EPYq79JTjvkOmaBFabOwFOS6fNxcohBk3xvCQUi7wLWTO2mB7GJPuRXa1Ou80DqcpiYk",
+      "models": [],
+      "is_active": true
+    },
+    "openai": {
+      "api_key": "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",
+      "models": [],
+      "is_active": true
+    },
+    "custom": {
+      "api_key": "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",
+      "models": [
+        "openrouter API Keys"
+      ],
+      "is_active": true
+    }
+  },
+  "github_token": "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"
+}

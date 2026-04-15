@@ -1,476 +1,620 @@
-<!DOCTYPE html>
-<html lang="ru">
+﻿<!DOCTYPE html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fosved Coder v2.0</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <!-- Markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- Code syntax highlighting -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fosved Coder</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
-    <!-- LEFT SIDEBAR -->
-    <div class="sidebar">
-        <div class="sidebar-section">
-            <div class="sidebar-header">
-                <h3>Проекты</h3>
-                <button class="btn-icon" onclick="createProject()" title="Новый проект">+</button>
-            </div>
-            <div id="projects-list">
-                <div class="project-item active" data-id="null" onclick="selectProject(null, this)">
-                    Общий чат
-                </div>
-            </div>
-        </div>
 
-        <div class="sidebar-section">
-            <div class="sidebar-header">
-                <h3>Идеи (База знаний)</h3>
-            </div>
-            <div class="idea-input-row">
-                <input type="text" id="idea-input" placeholder="GitHub ссылка..." onkeypress="if(event.key==='Enter')analyzeIdea()">
-                <button class="btn-small" onclick="analyzeIdea()">OK</button>
-            </div>
-            <div id="ideas-list"></div>
-        </div>
-
-        <div class="sidebar-section sidebar-footer">
-            <button class="sidebar-btn" onclick="showStats()">📊 Статистика</button>
-            <button class="sidebar-btn" onclick="showHelp()">❓ Помощь</button>
-        </div>
+<header class="header">
+    <div class="logo">⚡</div>
+    <div class="header-title">FOSVED CODER</div>
+    <div class="header-actions">
+        <button class="btn-stop" onclick="stopAction()" title="Stop">⏹ Stop</button>
     </div>
+</header>
 
-    <!-- MAIN AREA -->
-    <div class="main">
-        <!-- Header -->
-        <div class="chat-header">
-            <span id="current-project-name">Общий чат</span>
-            <div class="header-actions">
-                <button class="btn-icon" onclick="clearChat()" title="Очистить чат">🗑</button>
+<div class="main-layout">
+    <aside class="sidebar">
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <span class="sidebar-title">📁 Projects</span>
+                <button class="btn-add" onclick="openNewProject()">+</button>
             </div>
+            <div id="projects-list" class="sidebar-list"></div>
         </div>
-
-        <!-- Chat -->
-        <div class="chat-box" id="chat-box">
-            <div class="msg system">Подключение к серверу...</div>
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <span class="sidebar-title" id="models-title">🤖 AI Models</span>
+                <button class="btn-add" onclick="openManageKeys()">🔑</button>
+            </div>
+            <div id="models-list" class="sidebar-list"></div>
         </div>
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <span class="sidebar-title">🔗 GitHub</span>
+            </div>
+            <div class="github-form">
+                <input type="password" id="github-token" placeholder="Paste token..." class="input-sm">
+                <button class="btn-sm" onclick="saveGithubToken()">Save</button>
+            </div>
+            <div id="github-user-info"></div>
+        </div>
+    </aside>
 
-        <!-- Input -->
+    <main class="content">
+        <div id="chat-messages"></div>
+        <div class="chat-file-preview" id="chat-files"></div>
         <div class="input-area">
-            <textarea id="user-input" placeholder="Введите задачу или промпт... (Shift+Enter = новая строка)" rows="1"
-                      onkeydown="handleKeyDown(event)"></textarea>
-            <button class="send-btn" onclick="sendMessage()">➤</button>
-        </div>
-
-        <!-- Bottom Bar -->
-        <div class="bottom-bar">
-            <button onclick="insertCommand('/terminal ')">🛠 Terminal</button>
-            <button onclick="insertCommand('/git_pull')">📥 Pull</button>
-            <button onclick="insertCommand('/git_push')">📤 Push</button>
-            <button onclick="insertCommand('/ideas ')">💡 Ideas</button>
-            <button onclick="insertCommand('/clear')">🧹 Clear</button>
-            <button onclick="insertCommand('/help')">❓ Help</button>
-        </div>
-    </div>
-
-    <!-- MODAL -->
-    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
-        <div class="modal" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <span id="modal-title">Модальное окно</span>
-                <button class="btn-icon" onclick="closeModal()">✕</button>
+            <div class="input-wrapper">
+                <button class="btn-attach" onclick="document.getElementById('chat-file-input').click()" title="Attach">📎</button>
+                <input type="file" id="chat-file-input" style="display:none" multiple onchange="addChatFiles(this)">
+                <textarea id="user-input" placeholder="Ask AI anything..." rows="6"></textarea>
+                <button class="btn-send" onclick="sendMessage()">➤</button>
             </div>
-            <div class="modal-body" id="modal-body"></div>
+        </div>
+        <div class="quick-bar" id="quick-bar"></div>
+    </main>
+</div>
+
+<!-- MODAL: New/Edit Project -->
+<div class="modal" id="modal-project" style="display:none">
+    <div class="modal-overlay" onclick="closeModal('modal-project')"></div>
+    <div class="modal-box modal-wide">
+        <h2 id="proj-modal-title">New Project</h2>
+        <input type="hidden" id="proj-edit-id" value="">
+        <label>Project Name</label>
+        <input id="proj-name" placeholder="My project">
+        <label>Description</label>
+        <textarea id="proj-desc" rows="2" placeholder="Short description"></textarea>
+        <label>Prompt</label>
+        <textarea id="proj-prompt" rows="3" placeholder="Initial prompt for AI..."></textarea>
+        <label>Instructions</label>
+        <textarea id="proj-instructions" rows="3" placeholder="Important rules, constraints, coding style..."></textarea>
+        <label>Attach prompt file (optional)</label>
+        <div class="file-upload-area">
+            <input type="file" id="proj-file" onchange="previewFile(this,'proj-preview')">
+            <div id="proj-preview" class="file-preview"></div>
+        </div>
+        <label>Ideas</label>
+        <div class="idea-input-row">
+            <input type="text" id="proj-idea-input" placeholder="Add an idea...">
+            <button class="btn-sm btn-accent" onclick="addProjIdea()">+ Add</button>
+        </div>
+        <div id="proj-ideas-list" class="idea-tags"></div>
+        <label>AI Model for this project</label>
+        <select id="proj-model-select" class="input-full"><option value="">-- Auto --</option></select>
+        <div class="modal-buttons">
+            <button class="btn-primary" onclick="saveProject()">Save</button>
+            <button class="btn-cancel" onclick="closeModal('modal-project')">Cancel</button>
         </div>
     </div>
+</div>
 
-    <script>
-        // ═══════════════════════════════════════════════════════
-        // WebSocket Connection
-        // ═══════════════════════════════════════════════════════
-        const ws = new WebSocket("ws://" + window.location.host + "/ws");
-        const chatBox = document.getElementById("chat-box");
-        let currentAiDiv = null;
-        let currentAiText = "";
-        let currentProjectId = null;
+<!-- MODAL: Manage Keys -->
+<div class="modal" id="modal-keys" style="display:none">
+    <div class="modal-overlay" onclick="closeModal('modal-keys')"></div>
+    <div class="modal-box modal-wide">
+        <h2>Manage API Keys</h2>
+        <label>Provider</label>
+        <select id="key-provider" class="input-full"><option value="">-- Select --</option></select>
+        <label>API Key</label>
+        <input type="password" id="key-api-key" class="input-full" placeholder="sk-...">
+        <label>Models (add one by one)</label>
+        <div class="model-input-row">
+            <input type="text" id="key-model-input" placeholder="e.g. gpt-4o, claude-3-opus">
+            <button class="btn-sm btn-accent" onclick="addTempModel()">+ Add</button>
+        </div>
+        <div id="key-models-list" class="model-tags"></div>
+        <hr>
+        <h3>Saved Keys</h3>
+        <div id="saved-keys-list"></div>
+        <div class="modal-buttons">
+            <button class="btn-primary" onclick="saveKey()">Save Key</button>
+            <button class="btn-cancel" onclick="closeModal('modal-keys')">Cancel</button>
+        </div>
+    </div>
+</div>
 
-        // Configure marked.js
-        marked.setOptions({
-            highlight: function(code, lang) {
-                if (lang && hljs.getLanguage(lang)) {
-                    return hljs.highlight(code, { language: lang }).value;
-                }
-                return hljs.highlightAuto(code).value;
-            },
-            breaks: true,
-            gfm: true
+<!-- MODAL: Link Manager -->
+<div class="modal" id="modal-link" style="display:none">
+    <div class="modal-overlay" onclick="closeModal('modal-link')"></div>
+    <div class="modal-box modal-wide">
+        <h2 id="link-modal-title">Manage Links</h2>
+        <div id="link-list"></div>
+        <hr>
+        <h3>Add Link</h3>
+        <label>Label</label>
+        <input id="link-label" class="input-full" placeholder="e.g. My Server">
+        <label>URL</label>
+        <input id="link-url" class="input-full" placeholder="http://...">
+        <div class="modal-buttons">
+            <button class="btn-primary" onclick="saveLink()">Save</button>
+            <button class="btn-cancel" onclick="closeModal('modal-link')">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+var tempKeyModels = [];
+var tempProjIdeas = [];
+var currentLinkCategory = '';
+var chatAttachedFiles = [];
+var allLinks = JSON.parse(localStorage.getItem('fosved_links') || '{}');
+var allProjects = [];
+var allModels = [];
+var selectedProjectId = '';
+var selectedModelId = '';
+var ws = null;
+var isGenerating = false;
+var currentAiMsg = '';
+
+/* ======== WEBSOCKET ======== */
+function connectWS() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+    ws.onopen = function() {
+        console.log('WS connected');
+        updateConnectionStatus(true);
+    };
+    ws.onclose = function() {
+        console.log('WS disconnected');
+        updateConnectionStatus(false);
+        setTimeout(connectWS, 3000);
+    };
+    ws.onerror = function() {};
+    ws.onmessage = function(event) {
+        var data;
+        try { data = JSON.parse(event.data); } catch(e) { return; }
+        var dtype = data.type || '';
+        if (dtype === 'token') {
+            currentAiMsg += data.content;
+            updateStreamingMsg(currentAiMsg);
+        } else if (dtype === 'done') {
+            isGenerating = false;
+            currentAiMsg = '';
+        } else if (dtype === 'error') {
+            isGenerating = false;
+            currentAiMsg = '';
+            appendMsg('system', 'Error: ' + data.message);
+        }
+    };
+}
+
+function updateConnectionStatus(connected) {
+    var el = document.getElementById('chat-messages');
+    if (!el.children.length) {
+        appendMsg('system', connected ? 'Connected to Fosved Coder' : 'Disconnected, reconnecting...');
+    }
+}
+
+function updateStreamingMsg(text) {
+    var el = document.getElementById('chat-messages');
+    var last = el.querySelector('.msg-streaming');
+    if (!last) {
+        last = document.createElement('div');
+        last.className = 'msg msg-ai msg-streaming';
+        el.appendChild(last);
+    }
+    last.innerHTML = marked.parse(text) + '<span class="cursor-blink">▊</span>';
+    el.scrollTop = el.scrollHeight;
+}
+
+function finishStreaming() {
+    var el = document.getElementById('chat-messages');
+    var last = el.querySelector('.msg-streaming');
+    if (last) {
+        last.classList.remove('msg-streaming');
+        last.innerHTML = marked.parse(currentAiMsg);
+    }
+}
+
+function wsSend(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(obj));
+    } else {
+        appendMsg('system', 'Not connected. Reconnecting...');
+        appendMsg('ai', 'Waiting for connection...');
+    }
+}
+
+/* ======== CHAT ======== */
+function sendMessage() {
+    var input = document.getElementById('user-input');
+    var text = input.value.trim();
+    if (!text && !chatAttachedFiles.length) return;
+    if (isGenerating) { appendMsg('system', 'Please wait for the current response to finish.'); return; }
+
+    if (text) appendMsg('user', text);
+
+    /* show attached files */
+    chatAttachedFiles.forEach(function(f) {
+        var el = document.getElementById('chat-messages');
+        var div = document.createElement('div'); div.className = 'msg msg-file';
+        var h = '<div class="msg-file-card">';
+        if (f.type.indexOf('image') === 0) h += '<img src="' + URL.createObjectURL(f) + '">';
+        h += '<div class="msg-file-info"><strong>' + esc(f.name) + '</strong><div class="size">' + (f.size/1024).toFixed(1) + ' KB</div></div></div>';
+        div.innerHTML = h; el.appendChild(div);
+    });
+
+    input.value = '';
+    chatAttachedFiles = [];
+    renderChatFiles();
+
+    /* determine model */
+    var model = selectedModelId || '';
+    if (!model && selectedProjectId) {
+        var proj = allProjects.find(function(p){return p.id === selectedProjectId;});
+        if (proj && proj.selected_model) model = proj.selected_model;
+    }
+    if (!model && allModels.length > 0) {
+        model = allModels[0].model_id;
+    }
+
+    isGenerating = true;
+    currentAiMsg = '';
+    wsSend({ type: 'chat', message: text, project_id: selectedProjectId, model: model });
+}
+
+function stopAction() {
+    if (isGenerating) {
+        wsSend({ type: 'stop' });
+        isGenerating = false;
+        finishStreaming();
+        appendMsg('system', 'Generation stopped.');
+    }
+}
+
+function appendMsg(role, text) {
+    var el = document.getElementById('chat-messages');
+    var div = document.createElement('div');
+    div.className = 'msg msg-' + role;
+    div.innerHTML = role === 'ai' ? marked.parse(text) : esc(text);
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+}
+
+/* ======== INIT ======== */
+function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadProjects();
+    loadModels();
+    loadGithubToken();
+    loadGithubUser();
+    renderQuickBar();
+    updateKeyStatus();
+    connectWS();
+});
+
+/* ======== KEY STATUS ======== */
+function updateKeyStatus() {
+    fetch('/api/keys').then(function(r){return r.json();}).then(function(keys) {
+        var el = document.getElementById('models-title');
+        if (keys && keys.length > 0) {
+            var active = keys.filter(function(k){return k.is_active;}).length;
+            el.innerHTML = '🤖 AI Models <span class="sidebar-badge">' + active + ' key' + (active>1?'s':'') + '</span>';
+        } else {
+            el.innerHTML = '🤖 AI Models <span class="sidebar-badge warn">no keys</span>';
+        }
+    }).catch(function(){});
+}
+
+/* ======== PROJECTS ======== */
+function loadProjects() {
+    fetch('/api/projects').then(function(r){return r.json();}).then(function(list) {
+        allProjects = list || [];
+        renderProjects();
+    }).catch(function(){});
+}
+
+function renderProjects() {
+    var el = document.getElementById('projects-list');
+    if (!allProjects.length) { el.innerHTML = '<div class="empty-hint">No projects yet</div>'; return; }
+    el.innerHTML = allProjects.map(function(p) {
+        var sel = p.id === selectedProjectId ? ' selected' : '';
+        var ideas = (p.ideas||[]).map(function(i){ return '<span class="idea-chip">'+esc(i)+'</span>'; }).join('');
+        var model = p.selected_model ? '<div class="project-model">Model: '+esc(p.selected_model)+'</div>' : '';
+        return '<div class="project-item'+sel+'" onclick="selectProject(\''+p.id+'\')">' +
+            '<div class="project-top"><div class="project-name">'+esc(p.name)+'</div>' +
+            '<div class="project-btns">' +
+            '<button class="project-btn-edit" onclick="event.stopPropagation();editProject(\''+p.id+'\')" title="Edit">✏</button>' +
+            '<button class="project-delete" onclick="event.stopPropagation();deleteProject(\''+p.id+'\')" title="Delete">✕</button>' +
+            '</div></div>' +
+            (ideas?'<div class="project-ideas">'+ideas+'</div>':'') + model +
+            '<div class="project-status">'+esc(p.status||'idle')+'</div></div>';
+    }).join('');
+}
+
+function openNewProject() {
+    document.getElementById('proj-modal-title').textContent = 'New Project';
+    document.getElementById('proj-edit-id').value = '';
+    document.getElementById('proj-name').value = '';
+    document.getElementById('proj-desc').value = '';
+    document.getElementById('proj-prompt').value = '';
+    document.getElementById('proj-instructions').value = '';
+    document.getElementById('proj-file').value = '';
+    document.getElementById('proj-preview').innerHTML = '';
+    document.getElementById('proj-preview').style.display = 'none';
+    tempProjIdeas = [];
+    renderProjIdeas();
+    loadModelSelect('');
+    openModal('modal-project');
+}
+
+function editProject(id) {
+    var p = allProjects.find(function(x){return x.id===id;});
+    if (!p) return;
+    document.getElementById('proj-modal-title').textContent = 'Edit Project';
+    document.getElementById('proj-edit-id').value = p.id;
+    document.getElementById('proj-name').value = p.name||'';
+    document.getElementById('proj-desc').value = p.description||'';
+    document.getElementById('proj-prompt').value = p.prompt||'';
+    document.getElementById('proj-instructions').value = p.instructions||'';
+    document.getElementById('proj-file').value = '';
+    document.getElementById('proj-preview').innerHTML = '';
+    document.getElementById('proj-preview').style.display = 'none';
+    tempProjIdeas = p.ideas ? p.ideas.slice() : [];
+    renderProjIdeas();
+    loadModelSelect(p.selected_model||'');
+    openModal('modal-project');
+}
+
+function loadModelSelect(current) {
+    var sel = document.getElementById('proj-model-select');
+    sel.innerHTML = '<option value="">-- Auto --</option>';
+    if (allModels) {
+        allModels.forEach(function(m) {
+            var opt = document.createElement('option');
+            opt.value = m.model_id;
+            opt.textContent = m.model_id + ' (' + m.provider + ')' + (m.type==='free'?' FREE':'');
+            if (m.model_id === current) opt.selected = true;
+            sel.appendChild(opt);
         });
+    }
+}
 
-        ws.onopen = () => {
-            clearSystemMessages();
-            addMessage("system", "Fosved Coder v2.0 — подключено. Вставьте API ключ в config.yaml и пишите задачи.");
-            loadProjects();
-            loadIdeas();
-        };
+function addProjIdea() {
+    var inp = document.getElementById('proj-idea-input');
+    var v = inp.value.trim(); if (!v) return;
+    tempProjIdeas.push(v); inp.value = ''; renderProjIdeas();
+}
+function removeProjIdea(i) { tempProjIdeas.splice(i,1); renderProjIdeas(); }
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
+function renderProjIdeas() {
+    var el = document.getElementById('proj-ideas-list');
+    if (!tempProjIdeas.length) { el.innerHTML='<span style="color:#666;font-size:11px">No ideas yet</span>'; return; }
+    el.innerHTML = tempProjIdeas.map(function(idea,i){
+        return '<span class="idea-tag">'+esc(idea)+' <button onclick="removeProjIdea('+i+')">✕</button></span>';
+    }).join('');
+}
 
-            if (data.type === "chunk") {
-                if (!currentAiDiv) {
-                    currentAiDiv = document.createElement("div");
-                    currentAiDiv.className = "msg ai";
-                    chatBox.appendChild(currentAiDiv);
-                }
-                currentAiText += data.content;
-                currentAiDiv.innerHTML = renderMarkdown(currentAiText);
-                addCopyButtons(currentAiDiv);
-                chatBox.scrollTop = chatBox.scrollHeight;
+function saveProject() {
+    var editId = document.getElementById('proj-edit-id').value;
+    var name = document.getElementById('proj-name').value.trim();
+    if (!name) { alert('Enter name'); return; }
+    var data = {
+        name: name,
+        description: document.getElementById('proj-desc').value.trim(),
+        prompt: document.getElementById('proj-prompt').value.trim(),
+        instructions: document.getElementById('proj-instructions').value.trim(),
+        ideas: tempProjIdeas,
+        selected_model: document.getElementById('proj-model-select').value,
+    };
+    if (editId) {
+        fetch('/api/projects/'+editId, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+        .then(function(r){ if(r.ok){closeModal('modal-project');loadProjects();} else r.text().then(function(t){alert(t);}); })
+        .catch(function(e){alert(e.message);});
+    } else {
+        var fd = new FormData();
+        fd.append('name',data.name); fd.append('description',data.description);
+        fd.append('prompt',data.prompt); fd.append('instructions',data.instructions);
+        fd.append('ideas_json',JSON.stringify(data.ideas)); fd.append('selected_model',data.selected_model);
+        var fi = document.getElementById('proj-file');
+        if (fi.files&&fi.files.length>0) fd.append('prompt_file',fi.files[0]);
+        fetch('/api/projects',{method:'POST',body:fd})
+        .then(function(r){ if(r.ok){closeModal('modal-project');loadProjects();} else r.text().then(function(t){alert(t);}); })
+        .catch(function(e){alert(e.message);});
+    }
+}
 
-            } else if (data.type === "done") {
-                currentAiDiv = null;
-                currentAiText = "";
+function deleteProject(id) {
+    if (!confirm('Delete?')) return;
+    fetch('/api/projects/'+id,{method:'DELETE'}).then(function(){loadProjects();}).catch(function(e){alert(e.message);});
+}
 
-            } else if (data.type === "error") {
-                addMessage("error", data.content);
-                currentAiDiv = null;
-                currentAiText = "";
+function selectProject(id) {
+    selectedProjectId = id;
+    var p = allProjects.find(function(x){return x.id===id;});
+    if (!p) return;
+    selectedModelId = p.selected_model || '';
+    renderProjects();
+    var html = '<div class="msg-system">Project: '+esc(p.name)+'</div>';
+    if (p.instructions) html += '<div class="msg msg-ai"><strong>Instructions:</strong><br>'+marked.parse(p.instructions)+'</div>';
+    if (p.selected_model) html += '<div class="msg msg-ai"><strong>Model:</strong> '+esc(p.selected_model)+'</div>';
+    document.getElementById('chat-messages').innerHTML = html;
+}
 
-            } else if (data.type === "system") {
-                addMessage("system", data.content);
+/* ======== KEYS ======== */
+function openManageKeys() {
+    tempKeyModels=[]; renderModelTags(); document.getElementById('key-api-key').value='';
+    loadProviders(); loadSavedKeys(); openModal('modal-keys');
+}
+function loadProviders() {
+    fetch('/api/providers').then(function(r){return r.json();}).then(function(list){
+        var sel=document.getElementById('key-provider');
+        sel.innerHTML='<option value="">-- Select --</option>';
+        list.forEach(function(p){sel.innerHTML+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});
+    }).catch(function(){});
+}
+function loadSavedKeys() {
+    fetch('/api/keys').then(function(r){return r.json();}).then(function(list){
+        var el=document.getElementById('saved-keys-list');
+        if(!list||!list.length){el.innerHTML='<div class="empty-hint">No keys</div>';return;}
+        el.innerHTML=list.map(function(k){
+            return '<div class="key-item"><span class="key-provider">'+esc(k.provider_name)+'</span>'+
+            '<span class="key-models">'+esc((k.models||[]).join(', '))+'</span>'+
+            '<button class="btn-del" onclick="deleteKey(\''+k.provider_id+'\')">✕</button></div>';
+        }).join('');
+    }).catch(function(){});
+}
+function addTempModel(){var i=document.getElementById('key-model-input');var v=i.value.trim();if(!v)return;tempKeyModels.push(v);i.value='';renderModelTags();}
+function removeTempModel(i){tempKeyModels.splice(i,1);renderModelTags();}
+function renderModelTags(){
+    var el=document.getElementById('key-models-list');
+    if(!tempKeyModels.length){el.innerHTML='<span style="color:#666;font-size:11px">No models</span>';return;}
+    el.innerHTML=tempKeyModels.map(function(m,i){return '<span class="model-tag">'+esc(m)+' <button onclick="removeTempModel('+i+')">✕</button></span>';}).join('');
+}
+function saveKey(){
+    var p=document.getElementById('key-provider').value;var k=document.getElementById('key-api-key').value.trim();
+    if(!p){alert('Select provider');return;}if(!k){alert('Enter key');return;}
+    var fd=new FormData();fd.append('provider_id',p);fd.append('api_key',k);fd.append('models_json',JSON.stringify(tempKeyModels));
+    fetch('/api/keys',{method:'POST',body:fd}).then(function(r){
+        if(r.ok){alert('Key saved!');tempKeyModels=[];renderModelTags();document.getElementById('key-api-key').value='';loadSavedKeys();loadModels();updateKeyStatus();}
+        else r.text().then(function(t){alert(t);});
+    }).catch(function(e){alert(e.message);});
+}
+function deleteKey(pid){
+    if(!confirm('Delete?'))return;
+    fetch('/api/keys/'+pid,{method:'DELETE'}).then(function(){loadSavedKeys();loadModels();updateKeyStatus();}).catch(function(e){alert(e.message);});
+}
 
-            } else if (data.type === "command_result") {
-                addMessage("terminal", data.content);
+/* ======== MODELS ======== */
+function loadModels(){
+    fetch('/api/models').then(function(r){return r.json();}).then(function(list){
+        allModels=list||[];
+        var el=document.getElementById('models-list');
+        if(!allModels.length){el.innerHTML='<div class="empty-hint">No models</div>';return;}
+        el.innerHTML=allModels.map(function(m){
+            var dot,badge,bt;
+            if(m.type==='free'){dot='green';badge='free';bt='FREE';}
+            else if(m.has_key&&m.available){dot='green';badge='user';bt='KEY';}
+            else if(m.has_key&&!m.available){dot='yellow';badge='user';bt='OFF';}
+            else{dot='red';badge='locked';bt='NO KEY';}
+            return '<div class="model-item"><span class="model-dot '+dot+'"></span>'+
+            '<span class="model-name">'+esc(m.model_id)+'</span>'+
+            '<span class="model-badge '+badge+'">'+bt+'</span>'+
+            '<span class="model-provider">'+esc(m.provider)+'</span></div>';
+        }).join('');
+    }).catch(function(){});
+}
 
-            } else if (data.type === "idea_result") {
-                addMessage("idea", data.content);
-
-            } else {
-                addMessage(data.type || "system", data.content || "");
-            }
-        };
-
-        ws.onclose = () => {
-            addMessage("error", "Соединение потеряно. Перезагрузите страницу (F5).");
-        };
-
-        // ═══════════════════════════════════════════════════════
-        // Message Handling
-        // ═══════════════════════════════════════════════════════
-        function addMessage(type, text) {
-            const div = document.createElement("div");
-            div.className = "msg " + type;
-
-            if (type === "ai") {
-                div.innerHTML = renderMarkdown(text);
-                addCopyButtons(div);
-            } else if (type === "terminal") {
-                const pre = document.createElement("pre");
-                const code = document.createElement("code");
-                code.textContent = text;
-                pre.appendChild(code);
-                div.appendChild(pre);
-            } else if (type === "idea") {
-                div.innerHTML = renderMarkdown(text);
-            } else {
-                div.textContent = text;
-            }
-
-            chatBox.appendChild(div);
-            chatBox.scrollTop = chatBox.scrollHeight;
+/* ======== GITHUB ======== */
+function loadGithubToken(){
+    fetch('/api/github/token').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('github-token').value=d.token||'';
+    }).catch(function(){});
+}
+function saveGithubToken(){
+    var t=document.getElementById('github-token').value.trim();
+    fetch('/api/github/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})})
+    .then(function(r){if(r.ok){alert('Saved!');loadGithubUser();}else r.text().then(function(x){alert(x);});})
+    .catch(function(e){alert(e.message);});
+}
+function loadGithubUser(){
+    fetch('/api/github/user').then(function(r){return r.json();}).then(function(d){
+        var el=document.getElementById('github-user-info');
+        if(!d.user||d.user==='invalid token'){el.innerHTML='';return;}
+        var repos='';
+        if(d.repos&&d.repos.length){
+            repos='<div class="github-repos">'+d.repos.map(function(r){
+                return '<a class="github-repo" href="'+esc(r.url)+'" target="_blank">'+esc(r.name)+'</a>';
+            }).join('')+'</div>';
         }
+        el.innerHTML='<div class="github-user"><span>👤</span><span class="github-user-name">'+esc(d.user)+'</span></div>'+repos;
+    }).catch(function(){});
+}
 
-        function renderMarkdown(text) {
-            try {
-                return marked.parse(text);
-            } catch (e) {
-                return text;
-            }
-        }
+/* ======== FILE PREVIEW ======== */
+function previewFile(input,pid){
+    var el=document.getElementById(pid);el.innerHTML='';
+    if(input.files&&input.files[0]){
+        var f=input.files[0];var card=document.createElement('div');card.className='file-card';
+        if(f.type.indexOf('image')===0){var img=document.createElement('img');img.src=URL.createObjectURL(f);card.appendChild(img);}
+        var info=document.createElement('div');info.className='file-info';
+        info.innerHTML='<strong>'+esc(f.name)+'</strong><br>'+(f.size/1024).toFixed(1)+' KB';
+        card.appendChild(info);el.appendChild(card);el.style.display='block';
+    }else{el.style.display='none';}
+}
 
-        function addCopyButtons(container) {
-            container.querySelectorAll("pre").forEach(pre => {
-                if (pre.querySelector(".copy-btn")) return;
-                const btn = document.createElement("button");
-                btn.className = "copy-btn";
-                btn.textContent = "Копировать";
-                btn.onclick = () => {
-                    const code = pre.querySelector("code");
-                    navigator.clipboard.writeText(code.textContent).then(() => {
-                        btn.textContent = "Скопировано!";
-                        setTimeout(() => btn.textContent = "Копировать", 2000);
-                    });
-                };
-                pre.style.position = "relative";
-                pre.appendChild(btn);
-            });
-        }
+/* ======== CHAT FILES ======== */
+function addChatFiles(input){
+    if(!input.files)return;for(var i=0;i<input.files.length;i++)chatAttachedFiles.push(input.files[i]);
+    input.value='';renderChatFiles();
+}
+function removeChatFile(idx){chatAttachedFiles.splice(idx,1);renderChatFiles();}
+function renderChatFiles(){
+    var el=document.getElementById('chat-files');
+    if(!chatAttachedFiles.length){el.className='chat-file-preview';el.innerHTML='';return;}
+    el.className='chat-file-preview has-files';
+    el.innerHTML=chatAttachedFiles.map(function(f,idx){
+        var thumb=f.type.indexOf('image')===0?'<img src="'+URL.createObjectURL(f)+'">':'';
+        return '<div class="chat-file-card">'+thumb+'<span>'+esc(f.name)+' ('+(f.size/1024).toFixed(1)+' KB)</span>'+
+        '<button class="chat-file-remove" onclick="removeChatFile('+idx+')">✕</button></div>';
+    }).join('');
+}
 
-        function clearSystemMessages() {
-            chatBox.querySelectorAll(".msg.system, .msg.error").forEach(m => m.remove());
-        }
+/* ======== QUICK BAR ======== */
+var CATS=[
+    {id:'github',name:'GitHub',ico:'🐙'},{id:'server',name:'Server',ico:'🖥'},
+    {id:'database',name:'Database',ico:'🗄'},{id:'website',name:'Website',ico:'🌐'},
+    {id:'docs',name:'Docs',ico:'📋'},{id:'custom',name:'Custom',ico:'🔗'}
+];
+function openLinkModal(cat){
+    currentLinkCategory=cat;var c=CATS.find(function(x){return x.id===cat;});
+    document.getElementById('link-modal-title').textContent=c.name+' Links';
+    document.getElementById('link-label').value='';document.getElementById('link-url').value='';
+    renderLinkList(cat);openModal('modal-link');
+}
+function renderLinkList(cat){
+    var el=document.getElementById('link-list');var links=allLinks[cat]||[];
+    if(!links.length){el.innerHTML='<div class="empty-hint">No links</div>';return;}
+    el.innerHTML=links.map(function(lk,idx){
+        return '<div class="key-item"><span class="key-provider">'+esc(lk.label)+'</span>'+
+        '<span class="key-models"><a href="'+esc(lk.url)+'" target="_blank" style="color:#C8A97E;text-decoration:none">'+esc(lk.url)+'</a></span>'+
+        '<button class="btn-del" onclick="removeLink(\''+cat+'\','+idx+')">✕</button></div>';
+    }).join('');
+}
+function saveLink(){
+    var label=document.getElementById('link-label').value.trim();var url=document.getElementById('link-url').value.trim();
+    if(!label||!url){alert('Enter label and URL');return;}
+    if(!allLinks[currentLinkCategory])allLinks[currentLinkCategory]=[];
+    allLinks[currentLinkCategory].push({label:label,url:url});
+    localStorage.setItem('fosved_links',JSON.stringify(allLinks));
+    renderLinkList(currentLinkCategory);renderQuickBar();
+    document.getElementById('link-label').value='';document.getElementById('link-url').value='';
+}
+function removeLink(cat,idx){
+    allLinks[cat].splice(idx,1);localStorage.setItem('fosved_links',JSON.stringify(allLinks));
+    renderLinkList(cat);renderQuickBar();
+}
+function renderQuickBar(){
+    document.getElementById('quick-bar').innerHTML=CATS.map(function(c){
+        var links=allLinks[c.id]||[];
+        var h='<div class="qb-group"><button class="qb-cat" onclick="openLinkModal(\''+c.id+'\')">'+
+        '<span class="qb-ico">'+c.ico+'</span> '+esc(c.name)+'</button>';
+        links.forEach(function(lk,idx){
+            h+='<button class="qb-link" onclick="window.open(\''+esc(lk.url).replace(/'/g,"\\'")+'\',\'_blank\')">'+
+            esc(lk.label)+'<span class="qb-link-x" onclick="event.stopPropagation();removeLink(\''+c.id+'\','+idx+')">×</span></button>';
+        });
+        return h+'</div>';
+    }).join('');
+}
 
-        // ═══════════════════════════════════════════════════════
-        // User Input
-        // ═══════════════════════════════════════════════════════
-        function sendMessage() {
-            const input = document.getElementById("user-input");
-            const text = input.value.trim();
-            if (!text) return;
+/* ======== KEY HANDLERS ======== */
+document.addEventListener('keydown',function(e){
+    if(e.target.id==='key-model-input'&&e.key==='Enter'){e.preventDefault();addTempModel();}
+    if(e.target.id==='proj-idea-input'&&e.key==='Enter'){e.preventDefault();addProjIdea();}
+    if(e.target.id==='user-input'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}
+});
+</script>
 
-            addMessage("user", text);
-            ws.send(text);
-            input.value = "";
-            input.style.height = "auto";
-        }
-
-        function handleKeyDown(e) {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        }
-
-        function insertCommand(cmd) {
-            const input = document.getElementById("user-input");
-            input.value = cmd;
-            input.focus();
-        }
-
-        // ═══════════════════════════════════════════════════════
-        // Projects
-        // ═══════════════════════════════════════════════════════
-        async function loadProjects() {
-            try {
-                const resp = await fetch("/api/v1/projects");
-                const projects = await resp.json();
-                const list = document.getElementById("projects-list");
-                list.innerHTML = '<div class="project-item active" data-id="null" onclick="selectProject(null, this)">Общий чат</div>';
-                projects.forEach(p => {
-                    const div = document.createElement("div");
-                    div.className = "project-item";
-                    div.dataset.id = p.id;
-                    div.innerHTML = `<span class="project-name">${escapeHtml(p.name)}</span><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">✕</button>`;
-                    div.onclick = () => selectProject(p.id, div);
-                    list.appendChild(div);
-                });
-            } catch (e) {
-                console.error("Failed to load projects:", e);
-            }
-        }
-
-        async function selectProject(projectId, element) {
-            currentProjectId = projectId;
-            document.querySelectorAll(".project-item").forEach(el => el.classList.remove("active"));
-            element.classList.add("active");
-            document.getElementById("current-project-name").textContent =
-                projectId ? element.querySelector(".project-name").textContent : "Общий чат";
-            clearSystemMessages();
-            addMessage("system", "Переключение проекта... Загрузка истории.");
-        }
-
-        async function createProject() {
-            const name = prompt("Имя нового проекта:");
-            if (!name || !name.trim()) return;
-            try {
-                const resp = await fetch("/api/v1/projects", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({name: name.trim()})
-                });
-                if (resp.ok) {
-                    await loadProjects();
-                    addMessage("system", `Проект "${name.trim()}" создан.`);
-                } else {
-                    const err = await resp.json();
-                    addMessage("error", `Ошибка: ${err.detail}`);
-                }
-            } catch (e) {
-                addMessage("error", `Ошибка создания проекта: ${e}`);
-            }
-        }
-
-        async function deleteProject(id, name) {
-            if (!confirm(`Удалить проект "${name}" и всю историю чата?`)) return;
-            try {
-                const resp = await fetch(`/api/v1/projects/${id}`, {method: "DELETE"});
-                if (resp.ok) {
-                    await loadProjects();
-                    if (currentProjectId === id) selectProject(null, document.querySelector('.project-item'));
-                    addMessage("system", `Проект "${name}" удалён.`);
-                }
-            } catch (e) {
-                addMessage("error", `Ошибка удаления: ${e}`);
-            }
-        }
-
-        // ═══════════════════════════════════════════════════════
-        // Ideas
-        // ═══════════════════════════════════════════════════════
-        async function loadIdeas() {
-            try {
-                const resp = await fetch("/api/v1/ideas");
-                const ideas = await resp.json();
-                const list = document.getElementById("ideas-list");
-                list.innerHTML = "";
-                if (ideas.length === 0) {
-                    list.innerHTML = '<div class="idea-empty">Нет идей. Вставьте ссылку на GitHub репозиторий.</div>';
-                    return;
-                }
-                ideas.forEach(i => {
-                    const div = document.createElement("div");
-                    div.className = "idea-item";
-                    div.innerHTML = `
-                        <div class="idea-name" onclick="showIdeaDetail(${i.id})">${escapeHtml(i.name)}</div>
-                        <div class="idea-summary">${escapeHtml(i.summary).substring(0, 80)}...</div>
-                        <button class="btn-delete" onclick="deleteIdea(${i.id}, '${escapeHtml(i.name)}')" title="Удалить">✕</button>`;
-                    list.appendChild(div);
-                });
-            } catch (e) {
-                console.error("Failed to load ideas:", e);
-            }
-        }
-
-        async function analyzeIdea() {
-            const input = document.getElementById("idea-input");
-            const url = input.value.trim();
-            if (!url) return;
-            input.value = "";
-            addMessage("system", `Анализирую репозиторий: ${url}...`);
-
-            try {
-                const resp = await fetch("/api/v1/ideas", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({repo_url: url})
-                });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    addMessage("idea", data.analysis);
-                    await loadIdeas();
-                } else {
-                    const err = await resp.json();
-                    addMessage("error", `Ошибка: ${err.detail}`);
-                }
-            } catch (e) {
-                addMessage("error", `Ошибка анализа: ${e}`);
-            }
-        }
-
-        async function showIdeaDetail(id) {
-            try {
-                const resp = await fetch(`/api/v1/ideas`);
-                const ideas = await resp.json();
-                const idea = ideas.find(i => i.id === id);
-                if (idea) {
-                    showModal("Идея: " + idea.name, renderMarkdown(idea.summary));
-                }
-            } catch (e) {
-                addMessage("error", `Ошибка загрузки идеи: ${e}`);
-            }
-        }
-
-        async function deleteIdea(id, name) {
-            if (!confirm(`Удалить идею "${name}"?`)) return;
-            try {
-                const resp = await fetch(`/api/v1/ideas/${id}`, {method: "DELETE"});
-                if (resp.ok) {
-                    await loadIdeas();
-                    addMessage("system", `Идея "${name}" удалена.`);
-                }
-            } catch (e) {
-                addMessage("error", `Ошибка удаления: ${e}`);
-            }
-        }
-
-        // ═══════════════════════════════════════════════════════
-        // Chat Actions
-        // ═══════════════════════════════════════════════════════
-        function clearChat() {
-            ws.send("/clear");
-            chatBox.querySelectorAll(".msg").forEach(m => m.remove());
-            addMessage("system", "Чат очищен.");
-        }
-
-        // ═══════════════════════════════════════════════════════
-        // Stats & Help
-        // ═══════════════════════════════════════════════════════
-        async function showStats() {
-            try {
-                const resp = await fetch("/api/v1/stats");
-                const stats = await resp.json();
-                const configResp = await fetch("/api/v1/config");
-                const config = await configResp.json();
-
-                const html = `
-                    <div class="stats-grid">
-                        <div class="stat-card"><div class="stat-value">${stats.projects_count}</div><div class="stat-label">Проекты</div></div>
-                        <div class="stat-card"><div class="stat-value">${stats.ideas_count}</div><div class="stat-label">Идеи</div></div>
-                        <div class="stat-card"><div class="stat-value">${stats.messages_count}</div><div class="stat-label">Сообщений</div></div>
-                        <div class="stat-card"><div class="stat-value">${stats.routing_decisions}</div><div class="stat-label">Роутингов</div></div>
-                    </div>
-                    <div class="config-info">
-                        <strong>Модель:</strong> ${config.llm.default_model}<br>
-                        <strong>Роутер:</strong> ${config.llm.router_model}<br>
-                        <strong>API Base:</strong> ${config.llm.api_base}<br>
-                        <strong>API Key:</strong> ${config.llm.api_key}
-                    </div>`;
-                showModal("Статистика системы", html);
-            } catch (e) {
-                showModal("Ошибка", "Не удалось загрузить статистику.");
-            }
-        }
-
-        function showHelp() {
-            showModal("Помощь — Fosved Coder v2.0", `
-                <h3>Команды чата:</h3>
-                <ul>
-                    <li><code>/terminal &lt;cmd&gt;</code> — выполнить shell-команду</li>
-                    <li><code>/git_pull</code> — git pull</li>
-                    <li><code>/git_push</code> — git push</li>
-                    <li><code>/ideas &lt;github_url&gt;</code> — проанализировать репозиторий</li>
-                    <li><code>/clear</code> — очистить историю чата</li>
-                    <li><code>/help</code> — эта справка</li>
-                </ul>
-                <h3>Проекты:</h3>
-                <ul>
-                    <li>Нажмите <strong>+</strong> чтобы создать проект</li>
-                    <li>Клик по проекту — переключение контекста</li>
-                    <li>Каждый проект имеет отдельную историю чата</li>
-                </ul>
-                <h3>Идеи:</h3>
-                <ul>
-                    <li>Вставьте ссылку на GitHub репозиторий</li>
-                    <li>ИИ проанализирует структуру и архитектуру</li>
-                    <li>Результат используется как контекст при генерации кода</li>
-                </ul>
-            `);
-        }
-
-        // ═══════════════════════════════════════════════════════
-        // Modal
-        // ═══════════════════════════════════════════════════════
-        function showModal(title, content) {
-            document.getElementById("modal-title").textContent = title;
-            document.getElementById("modal-body").innerHTML = content;
-            document.getElementById("modal-overlay").classList.add("active");
-        }
-
-        function closeModal() {
-            document.getElementById("modal-overlay").classList.remove("active");
-        }
-
-        // ═══════════════════════════════════════════════════════
-        // Utility
-        // ═══════════════════════════════════════════════════════
-        function escapeHtml(text) {
-            const div = document.createElement("div");
-            div.textContent = text;
-            return div.innerHTML;
-        }
-    </script>
 </body>
 </html>

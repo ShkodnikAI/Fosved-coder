@@ -1,254 +1,194 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
+﻿"""REST API — projects (with ideas, instructions, model select), keys, models."""
+import json, uuid, shutil
+from pathlib import Path
+from datetime import datetime
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from core.keys_manager import keys_manager, PROVIDER_DEFS
+import urllib.request, urllib.error, json as _json
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/api", tags=["api"])
 
-# ═══════════════════════════════════════════════════════════════
-# Pydantic Schemas
-# ═══════════════════════════════════════════════════════════════
+DATA_DIR = Path(__file__).parent.parent / "data"
+UPLOAD_DIR = DATA_DIR / "uploads"
+PROJECTS_FILE = DATA_DIR / "projects.json"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-class TaskInput(BaseModel):
-    prompt: str
-    project_id: Optional[int] = None
-    priority: Optional[int] = 5  # 1=low, 5=medium, 10=high
-
-class TaskResult(BaseModel):
-    status: str
-    output: str = ""
-    files_changed: list[str] = []
-    build_result: str = ""
-    error: str = ""
-
-class ProjectCreate(BaseModel):
-    name: str
-    path: Optional[str] = None
-
-class IdeaInput(BaseModel):
-    repo_url: str
-
-class ApprovalRequest(BaseModel):
-    request_id: str
-    approved: bool
-
-class ProjectResponse(BaseModel):
-    id: int
-    name: str
-    path: str
-    created_at: str
-
-class IdeaResponse(BaseModel):
-    id: int
-    repo_url: str
-    name: str
-    summary: str
-    created_at: str
-
-class StatsResponse(BaseModel):
-    projects_count: int = 0
-    ideas_count: int = 0
-    messages_count: int = 0
-    routing_decisions: int = 0
-
-# ═══════════════════════════════════════════════════════════════
-# Projects Endpoints
-# ═══════════════════════════════════════════════════════════════
-
-@router.get("/projects", response_model=list[ProjectResponse])
-async def list_projects():
-    """Get all projects"""
-    from core.memory import get_all_projects
-    projects = await get_all_projects()
-    return [ProjectResponse(**p) for p in projects]
-
-@router.post("/projects", response_model=ProjectResponse)
-async def create_project(data: ProjectCreate):
-    """Create a new project"""
-    from core.memory import create_project, CONFIG
-    import os
-
-    name = data.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Project name cannot be empty")
-
-    path = data.path or os.path.join(CONFIG["system"]["projects_dir"], name)
-
-    project = await create_project(name, path)
-    if project is None:
-        raise HTTPException(status_code=409, detail="Project with this name or path already exists")
-
-    return ProjectResponse(**project)
-
-@router.delete("/projects/{project_id}")
-async def remove_project(project_id: int):
-    """Delete a project and all its data"""
-    from core.memory import delete_project
-    success = await delete_project(project_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return {"status": "deleted", "project_id": project_id}
-
-# ═══════════════════════════════════════════════════════════════
-# Ideas Endpoints
-# ═══════════════════════════════════════════════════════════════
-
-@router.get("/ideas", response_model=list[IdeaResponse])
-async def list_ideas():
-    """Get all ideas"""
-    from core.memory import get_all_ideas
-    ideas = await get_all_ideas()
-    return [IdeaResponse(**i) for i in ideas]
-
-@router.post("/ideas")
-async def add_idea(data: IdeaInput):
-    """Analyze a GitHub repository and save as idea"""
-    from core.ideas_injector import IdeasInjector
-
-    if not data.repo_url.strip():
-        raise HTTPException(status_code=400, detail="Repository URL cannot be empty")
-
-    injector = IdeasInjector()
-    result = await injector.process_idea(data.repo_url.strip())
-
-    return {"status": "success", "analysis": result, "repo_url": data.repo_url}
-
-@router.delete("/ideas/{idea_id}")
-async def remove_idea(idea_id: int):
-    """Delete an idea"""
-    from core.memory import delete_idea
-    success = await delete_idea(idea_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Idea not found")
-    return {"status": "deleted", "idea_id": idea_id}
-
-# ═══════════════════════════════════════════════════════════════
-# Task Endpoint (for external AI-Office)
-# ═══════════════════════════════════════════════════════════════
-
-@router.post("/task", response_model=TaskResult)
-async def handle_office_task(data: TaskInput):
-    """Accept a coding task from an external AI agent"""
-    from core.router import HybridRouter
-    from core.agent import stream_llm_response
-    from core.memory import get_repo_map, save_message, get_history
-
-    if not data.prompt.strip():
-        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
-
-    router = HybridRouter()
-
-    # Get repo map if project specified
-    repo_map = None
-    if data.project_id:
-        cached = await get_repo_map(data.project_id)
-        if cached:
-            repo_map = cached["content"]
-
-    # Route the task
-    route_result = await router.route_task(data.prompt, repo_map or "")
-
-    # Execute subtasks and collect results
-    full_output = ""
-    files_changed = []
-
-    for subtask in route_result.subtasks:
-        full_output += f"\n[{subtask.reason}] -> {subtask.model}\n"
-
-        # Build context messages
-        history = []
-        if data.project_id:
-            history = await get_history(data.project_id, limit=10)
-
-        # Simple non-streaming call for API mode
-        import litellm
-        from core.memory import CONFIG
-        litellm.suppress_debug_info = True
-
+def _load_projects():
+    if PROJECTS_FILE.exists():
         try:
-            messages = [{"role": "system", "content": f"Ты Fosved Coder AI ассистент. Контекст проекта:\n{repo_map or 'Нет контекста'}"}]
-            messages += history
-            messages += [{"role": "user", "content": subtask.prompt}]
+            with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
 
-            response = await litellm.acompletion(
-                model=subtask.model,
-                messages=messages,
-                api_base=CONFIG["llm"]["api_base"],
-                api_key=CONFIG["llm"]["api_key"],
-                temperature=CONFIG["llm"]["temperature"],
-                max_tokens=CONFIG["llm"].get("max_tokens", 4096)
-            )
-            output = response.choices[0].message.content
-            full_output += output + "\n"
-        except Exception as e:
-            full_output += f"[ERROR with {subtask.model}]: {e}\n"
+def _save_projects(projs):
+    with open(PROJECTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(projs, f, indent=2, ensure_ascii=False)
 
-    return TaskResult(
-        status="success",
-        output=full_output.strip(),
-        files_changed=files_changed,
-        build_result="completed"
-    )
+FREE_MODELS = [
+    {"model_id":"gpt-4o-mini","provider":"OpenAI","type":"free"},
+    {"model_id":"claude-3-haiku-20240307","provider":"Anthropic","type":"free"},
+    {"model_id":"gemini-1.5-flash","provider":"Google","type":"free"},
+    {"model_id":"deepseek-chat","provider":"DeepSeek","type":"free"},
+    {"model_id":"meta-llama/llama-3-8b-instruct:free","provider":"OpenRouter","type":"free"},
+    {"model_id":"mistralai/mistral-7b-instruct:free","provider":"OpenRouter","type":"free"},
+    {"model_id":"google/gemma-2-9b-it:free","provider":"OpenRouter","type":"free"},
+    {"model_id":"qwen/qwen-2-7b-instruct:free","provider":"OpenRouter","type":"free"},
+    {"model_id":"huggingfaceh4/zephyr-7b-beta:free","provider":"OpenRouter","type":"free"},
+    {"model_id":"openchat/openchat-7b:free","provider":"OpenRouter","type":"free"},
+]
 
-# ═══════════════════════════════════════════════════════════════
-# Approval Endpoint (for cyborg mode)
-# ═══════════════════════════════════════════════════════════════
+@router.get("/projects")
+async def list_projects():
+    return _load_projects()
 
-@router.post("/approve/{request_id}")
-async def approve_command(request_id: str, data: ApprovalRequest):
-    """Approve or reject a pending critical command"""
-    from core.executor import CommandExecutor
-
-    executor = CommandExecutor()
-
-    if data.approved:
-        # Execute approved command
-        return {"status": "approved", "request_id": request_id}
-    else:
-        return {"status": "rejected", "request_id": request_id}
-
-# ═══════════════════════════════════════════════════════════════
-# Stats Endpoint
-# ═══════════════════════════════════════════════════════════════
-
-@router.get("/stats", response_model=StatsResponse)
-async def get_system_stats():
-    """Get system statistics"""
-    from core.memory import get_all_projects, get_all_ideas, get_message_count, get_routing_stats
-    from sqlalchemy import func
-    from core.memory import async_session, ChatHistory, RoutingStat
-
-    projects = await get_all_projects()
-    ideas = await get_all_ideas()
-    messages = await get_message_count(None)
-
-    async with async_session() as session:
-        result = await session.execute(select(func.count(RoutingStat.id)))
-        routing_count = result.scalar() or 0
-
-    return StatsResponse(
-        projects_count=len(projects),
-        ideas_count=len(ideas),
-        messages_count=messages,
-        routing_decisions=routing_count
-    )
-
-# ═══════════════════════════════════════════════════════════════
-# Config Endpoint (safe — no API key exposed)
-# ═══════════════════════════════════════════════════════════════
-
-@router.get("/config")
-async def get_config():
-    """Get current configuration (API key hidden)"""
-    from core.memory import CONFIG
-    safe_config = {
-        "llm": {
-            "default_model": CONFIG["llm"]["default_model"],
-            "router_model": CONFIG["llm"]["router_model"],
-            "api_base": CONFIG["llm"]["api_base"],
-            "api_key": "***" if CONFIG["llm"].get("api_key") else "(not set)",
-            "temperature": CONFIG["llm"].get("temperature", 0.2),
-            "max_tokens": CONFIG["llm"].get("max_tokens", 4096),
-        },
-        "system": CONFIG.get("system", {}),
+@router.post("/projects")
+async def create_project(
+    name: str = Form(""),
+    description: str = Form(""),
+    prompt: str = Form(""),
+    instructions: str = Form(""),
+    ideas_json: str = Form("[]"),
+    selected_model: str = Form(""),
+    prompt_file: UploadFile = File(None),
+):
+    proj_id = str(uuid.uuid4())[:8]
+    prompt_text = prompt
+    if prompt_file and prompt_file.filename:
+        fpath = UPLOAD_DIR / prompt_file.filename
+        with open(fpath, "wb") as buf:
+            shutil.copyfileobj(prompt_file.file, buf)
+        try:
+            prompt_text += "\n\n" + fpath.read_text(encoding="utf-8")
+        except Exception:
+            prompt_text += "\n\n[Attached: " + prompt_file.filename + "]"
+    try:
+        ideas = json.loads(ideas_json)
+    except Exception:
+        ideas = []
+    project = {
+        "id": proj_id,
+        "name": name or "Untitled",
+        "description": description,
+        "prompt": prompt_text,
+        "instructions": instructions,
+        "ideas": ideas,
+        "selected_model": selected_model,
+        "status": "idle",
+        "progress": 0,
+        "created_at": datetime.now().isoformat(),
     }
-    return safe_config
+    projs = _load_projects()
+    projs.append(project)
+    _save_projects(projs)
+    return {"status": "ok", "project": project}
+
+@router.put("/projects/{pid}")
+async def update_project(pid: str, request: Request):
+    data = await request.json()
+    projs = _load_projects()
+    updated = False
+    for p in projs:
+        if p["id"] == pid:
+            for k in ["name","description","prompt","instructions","ideas","selected_model","status","progress"]:
+                if k in data:
+                    p[k] = data[k]
+            updated = True
+            break
+    _save_projects(projs)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"status": "ok"}
+
+@router.delete("/projects/{pid}")
+async def delete_project(pid: str):
+    projs = _load_projects()
+    projs = [p for p in projs if p["id"] != pid]
+    _save_projects(projs)
+    return {"status": "ok"}
+
+@router.get("/keys")
+async def list_keys():
+    return keys_manager.list_keys()
+
+@router.post("/keys")
+async def add_key(
+    provider_id: str = Form(""),
+    api_key: str = Form(""),
+    models_json: str = Form("[]"),
+):
+    if not provider_id or not api_key:
+        raise HTTPException(status_code=400, detail="provider_id and api_key required")
+    try:
+        models = json.loads(models_json)
+    except Exception:
+        models = []
+    return keys_manager.add_key(provider_id, api_key, models=models)
+
+@router.delete("/keys/{pid}")
+async def remove_key(pid: str):
+    return keys_manager.remove_key(pid)
+
+@router.get("/models")
+async def list_models():
+    user_models = keys_manager.get_all_models()
+    saved_keys = keys_manager.list_keys()
+    has_openrouter = any(k["provider_id"] == "openrouter" and k.get("is_active", True) for k in saved_keys)
+    result = []
+    existing_ids = set()
+
+    for um in user_models:
+        mid = um["model_name"]
+        result.append({
+            "model_id": mid,
+            "provider": um["provider_name"],
+            "type": "user",
+            "available": um["is_active"],
+            "has_key": True,
+        })
+        existing_ids.add(mid)
+
+    free = list(FREE_MODELS)
+    if has_openrouter:
+        or_free = [m for m in free if m["provider"] == "OpenRouter"]
+        other_free = [m for m in free if m["provider"] != "OpenRouter"][:4]
+        free = or_free + other_free
+    else:
+        free = free[:4]
+
+    for fm in free:
+        if fm["model_id"] not in existing_ids:
+            result.append({
+                "model_id": fm["model_id"],
+                "provider": fm["provider"],
+                "type": "free",
+                "available": True,
+                "has_key": False,
+            })
+    return result
+
+@router.get("/providers")
+async def list_providers():
+    return [{"id": k, "name": v["name"], "base_url": v["base_url"]} for k, v in PROVIDER_DEFS.items()]
+
+@router.get("/github/token")
+async def get_github_token():
+    return {"token": keys_manager.get_github_token()}
+
+@router.post("/github/token")
+async def set_github_token(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    keys_manager.set_github_token(data.get("token", ""))
+    return {"status": "ok"}
+
+@router.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    fpath = UPLOAD_DIR / file.filename
+    with open(fpath, "wb") as buf:
+        shutil.copyfileobj(file.file, buf)
+    return {"status": "ok", "filename": file.filename, "size": fpath.stat().st_size}

@@ -281,3 +281,57 @@ async def get_routing_stats(limit: int = 100) -> list[dict]:
              "reason": s.reason, "success": s.success, "timestamp": str(s.timestamp)}
             for s in result.scalars().all()
         ]
+
+# ── Missing imports stubs (added for endpoints.py) ──────────────────────
+import json as _json
+
+async def update_project_progress(project_id, progress):
+    """Update the progress percentage of a project."""
+    try:
+        db_path = str(CONFIG["system"]["db_path"])
+        import aiosqlite
+        async with aiosqlite.connect(db_path) as db:
+            await db.execute("UPDATE projects SET progress = ? WHERE id = ?", (progress, project_id))
+            await db.commit()
+            return True
+    except Exception:
+        return False
+
+async def update_project_models(project_id, model_ids):
+    """Update the model list associated with a project."""
+    try:
+        db_path = str(CONFIG["system"]["db_path"])
+        import aiosqlite
+        async with aiosqlite.connect(db_path) as db:
+            await db.execute("UPDATE projects SET models = ? WHERE id = ?", (_json.dumps(model_ids), project_id))
+            await db.commit()
+            return True
+    except Exception:
+        return False
+
+async def save_routing_stat(stat_data):
+    """Save a routing decision statistic."""
+    try:
+        db_path = str(CONFIG["system"]["db_path"])
+        import aiosqlite
+        async with aiosqlite.connect(db_path) as db:
+            await db.execute(
+                "INSERT INTO routing_stats (provider, model, timestamp) VALUES (?, ?, ?)",
+                (stat_data.get("provider",""), stat_data.get("model",""), stat_data.get("timestamp",""))
+            )
+            await db.commit()
+    except Exception:
+        pass  # table may not exist yet
+
+async def get_routing_stats():
+    """Retrieve recent routing statistics."""
+    try:
+        db_path = str(CONFIG["system"]["db_path"])
+        import aiosqlite
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute("SELECT * FROM routing_stats ORDER BY id DESC LIMIT 100")
+            rows = await cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            return [dict(zip(columns, row)) for row in rows]
+    except Exception:
+        return []
