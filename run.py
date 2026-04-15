@@ -2,7 +2,7 @@ import json, os, re, subprocess, asyncio, shlex, sys, platform
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
-from api.endpoints import router
+from api.endpoints import router, _collect_project_files
 from core.chat_history import ChatHistory
 from core.chat import stream_chat
 
@@ -261,6 +261,111 @@ async def ws_terminal(websocket: WebSocket, project_id: str):
         _running_processes.pop(project_id, None)
     except Exception as e:
         _running_processes.pop(project_id, None)
+        try:
+            await websocket.send_json({"type": "error", "content": str(e)})
+        except:
+            pass
+
+
+# ===== REFACTOR WEBSOCKET =====
+REFACTOR_SYSTEM = """Ты — Fosved Coder AI, эксперт по рефакторингу кода. Твоя задача — проанализировать предоставленные файлы проекта и предложить конкретные улучшения.
+
+Структура ответа ОБЯЗАТЕЛЬНО:
+
+## 📊 Общая оценка
+Краткое резюме состояния кода.
+
+## 🔴 Критические проблемы
+Перечисли критические проблемы (безопасность, баги, утечки).
+
+## 🟡 Улучшения
+Предложения по улучшению кода. Для каждого:
+- Файл: путь к файлу
+- Проблема: описание
+- Решение: конкретный исправленный код в блоке ```язык
+
+## 🟢 Хорошее
+Что уже сделано хорошо.
+
+## 📋 Чеклист
+- [ ] Пункт 1
+- [ ] Пункт 2
+
+ВАЖНО: Всегда указывай полный путь к файлу в формате [FILE:путь/к/файлу.расширение] перед блоками кода с исправлениями."""
+
+
+@app.websocket("/ws/refactor/{project_id}")
+async def ws_refactor(websocket: WebSocket, project_id: str):
+    await websocket.accept()
+    try:
+        data = await websocket.receive_json()
+        model_id = data.get("model", "")
+        focus = data.get("focus", "full")  # full, security, performance, style
+
+        # Load project
+        projects_file = "data/projects.json"
+        if not os.path.exists(projects_file):
+            await websocket.send_json({"type": "error", "content": "Проект не найден"})
+            return
+        with open(projects_file, "r", encoding="utf-8") as f:
+            projects = json.load(f)
+        project = projects.get(project_id)
+        if not project:
+            await websocket.send_json({"type": "error", "content": "Проект не найден"})
+            return
+
+        folder = project.get("folder", "")
+        if not folder or not os.path.isdir(folder):
+            await websocket.send_json({"type": "error", "content": "Папка проекта не задана"})
+            return
+
+        # Collect files
+        await websocket.send_json({"type": "status", "content": "collecting"})
+        files = _collect_project_files(folder, max_files=30)
+        if not files:
+            await websocket.send_json({"type": "error", "content": "Нет исходных файлов для анализа"})
+            return
+
+        await websocket.send_json({"type": "status", "content": f"Анализирую {len(files)} файлов..."})
+
+        # Build code dump
+        code_dump = f"=== ПРОЕКТ: {project.get('name', '')} ===\n\n"
+        for f in files:
+            code_dump += f"--- {f['path']} ({f['lang']}, {f['size']} байт) ---\n{f['content']}\n\n"
+
+        # Build focus instruction
+        focus_map = {
+            "full": "Полный анализ: безопасность, производительность, читаемость, архитектура",
+            "security": "Фокус на БЕЗОПАСНОСТИ: уязвимости, инъекции, утечки данных",
+            "performance": "Фокус на ПРОИЗВОДИТЕЛЬНОСТИ: оптимизация, алгоритмы, память",
+            "style": "Фокус на СТИЛЕ: читаемость, именование, структура, DRY",
+        }
+        focus_text = focus_map.get(focus, focus_map["full"])
+
+        messages = [
+            {"role": "system", "content": REFACTOR_SYSTEM + "\n\nФокус анализа: " + focus_text},
+            {"role": "user", "content": f"Проанализируй и предложи рефакторинг:\n\n{code_dump}"}
+        ]
+
+        # Use selected model or project default
+        if not model_id:
+            model_id = project.get("selected_model", "")
+
+        # Stream response
+        full_response = ""
+        async for token, is_complete, error in stream_chat(messages, model_id):
+            if error:
+                await websocket.send_json({"type": "error", "content": error})
+                return
+            if token:
+                full_response += token
+                await websocket.send_json({"type": "token", "content": token})
+            if is_complete:
+                await websocket.send_json({"type": "done", "content": full_response})
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
         try:
             await websocket.send_json({"type": "error", "content": str(e)})
         except:

@@ -157,6 +157,35 @@
   </div>
 </div>
 
+<!-- REFACTOR PANEL -->
+<div class="refactor-overlay" id="refactorOverlay" onclick="if(event.target===this)closeRefactor()">
+  <div class="refactor-panel">
+    <div class="refactor-header">
+      <h2>&#129302; Авто-рефакторинг</h2>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-ghost" onclick="closeRefactor()">&times; Закрыть</button>
+      </div>
+    </div>
+    <div class="refactor-controls">
+      <label>Фокус:</label>
+      <div class="focus-group">
+        <button class="focus-btn active" data-focus="full" onclick="setRefactorFocus('full',this)">&#128218; Полный</button>
+        <button class="focus-btn" data-focus="security" onclick="setRefactorFocus('security',this)">&#128274; Безопасность</button>
+        <button class="focus-btn" data-focus="performance" onclick="setRefactorFocus('performance',this)">&#9889; Скорость</button>
+        <button class="focus-btn" data-focus="style" onclick="setRefactorFocus('style',this)">&#9999; Стиль</button>
+      </div>
+      <label style="margin-left:auto">Модель:</label>
+      <select id="refactorModel"></select>
+      <button class="btn btn-accent btn-sm" id="refactorStartBtn" onclick="startRefactor()">&#9654; Анализ</button>
+    </div>
+    <div class="refactor-output" id="refactorOutput">
+      <div class="refactor-status">
+        <div>Нажмите &#9654; Анализ для начала</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== STATE =====
 let projects = {};
@@ -209,6 +238,7 @@ function renderProjects() {
         <div class="project-actions">
           <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();editProject('${p.id}')" title="Редактировать">&#9998;</button>
           <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();generateCode('${p.id}')" title="Генерировать код">&#9889;</button>
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openRefactor('${p.id}')" title="Рефакторинг">&#129302;</button>
           <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openTerminal('${p.id}')" title="Терминал">&#128424;</button>
           <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openFiles('${p.id}')" title="Файлы">&#128193;</button>
           <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteProject('${p.id}')" title="Удалить">&#128465;</button>
@@ -899,6 +929,142 @@ function killTermProcess() {
 
 function clearTerminal() {
   document.getElementById('termOutput').innerHTML = '';
+}
+
+// ===== REFACTOR =====
+let refactorWS = null;
+let refactorFocus = 'full';
+let refactorRunning = false;
+let refactorStreamContent = '';
+
+async function openRefactor(pid) {
+  if (pid) {
+    currentProjectId = pid;
+    selectProject(pid);
+  }
+  if (!currentProjectId) return alert('Сначала выберите проект');
+  document.getElementById('refactorOverlay').classList.add('show');
+  // Populate model select
+  const sel = document.getElementById('refactorModel');
+  sel.innerHTML = '';
+  const userModels = models.filter(m => m.type === 'user');
+  const freeModels = models.filter(m => m.type === 'free');
+  if (userModels.length) {
+    sel.innerHTML += '<optgroup label="Ваши модели">';
+    userModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}">${esc(m.name || m.id)}</option>`; });
+    sel.innerHTML += '</optgroup>';
+  }
+  if (freeModels.length) {
+    sel.innerHTML += '<optgroup label="Бесплатные">';
+    freeModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}">${esc(m.name || m.id)}</option>`; });
+    sel.innerHTML += '</optgroup>';
+  }
+  // Reset output
+  document.getElementById('refactorOutput').innerHTML = '<div class="refactor-status"><div>Нажмите &#9654; Анализ для начала</div></div>';
+}
+
+function closeRefactor() {
+  document.getElementById('refactorOverlay').classList.remove('show');
+  if (refactorWS) { refactorWS.close(); refactorWS = null; }
+  refactorRunning = false;
+}
+
+function setRefactorFocus(focus, btn) {
+  refactorFocus = focus;
+  document.querySelectorAll('.focus-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function startRefactor() {
+  if (!currentProjectId || refactorRunning) return;
+  refactorRunning = true;
+  refactorStreamContent = '';
+  document.getElementById('refactorStartBtn').disabled = true;
+  const out = document.getElementById('refactorOutput');
+  out.innerHTML = '<div class="refactor-status"><div class="spinner"></div><div>Собираю файлы и анализирую...</div></div>';
+
+  // Connect WS
+  if (refactorWS) refactorWS.close();
+  refactorWS = new WebSocket(`ws://${location.host}/ws/refactor/${currentProjectId}`);
+  refactorWS.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'status') {
+      out.innerHTML = `<div class="refactor-status"><div class="spinner"></div><div>${esc(data.content)}</div></div>`;
+    } else if (data.type === 'token') {
+      refactorStreamContent += data.content;
+      // Parse and render content as markdown-like
+      renderRefactorOutput(out, refactorStreamContent);
+    } else if (data.type === 'done') {
+      refactorRunning = false;
+      document.getElementById('refactorStartBtn').disabled = false;
+      renderRefactorOutput(out, refactorStreamContent);
+    } else if (data.type === 'error') {
+      refactorRunning = false;
+      document.getElementById('refactorStartBtn').disabled = false;
+      out.innerHTML += `<div style="color:var(--danger);padding:10px">${esc(data.content)}</div>`;
+    }
+  };
+  refactorWS.onopen = () => {
+    const model = document.getElementById('refactorModel').value;
+    refactorWS.send(JSON.stringify({model: model, focus: refactorFocus}));
+  };
+  refactorWS.onclose = () => {
+    refactorRunning = false;
+    document.getElementById('refactorStartBtn').disabled = false;
+  };
+}
+
+function renderRefactorOutput(el, text) {
+  let html = esc(text);
+  // Parse [FILE:path] tags
+  html = html.replace(/\[FILE:([^\]]+)\]/g, '<div class="refactor-item-title">&#128196; $1</div>');
+  // Headers with emojis
+  html = html.replace(/## (📊[^\n]*)/g, '<h3>$1</h3>');
+  html = html.replace(/## (🔴[^\n]*)/g, '<h3 style="color:var(--danger)">$1</h3>');
+  html = html.replace(/## (🟡[^\n]*)/g, '<h3 style="color:var(--warning)">$1</h3>');
+  html = html.replace(/## (🟢[^\n]*)/g, '<h3 style="color:var(--success)">$1</h3>');
+  html = html.replace(/## (📋[^\n]*)/g, '<h3 style="color:#6bb3f0">$1</h3>');
+  // Other ## headers
+  html = html.replace(/## (.*)/g, '<h3 style="color:var(--accent)">$1</h3>');
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  // Code blocks with language
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => {
+    const ext = langToExt(lang);
+    const applyBtn = `<div class="apply-code-btn"><button class="btn btn-sm btn-accent" onclick="applyRefactorCode(this,'${ext}')">&#128190; Применить к файлу</button> <button class="btn btn-sm btn-ghost" onclick="copyCode(this)">&#128203; Копировать</button></div>`;
+    return `<pre><code>${code}</code></pre>${applyBtn}`;
+  });
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  el.innerHTML = html;
+  el.scrollTop = el.scrollHeight;
+}
+
+async function applyRefactorCode(btn, ext) {
+  if (!currentProjectId) return;
+  // Find the file path from refactor-item-title before this code block
+  const pre = btn.closest('.refactor-output').querySelector('pre code');
+  const container = pre.closest('.refactor-output') || btn.parentElement.parentElement;
+  const allTitles = container.querySelectorAll('.refactor-item-title');
+  let filePath = '';
+  for (const t of allTitles) {
+    if (t.compareDocumentPosition(pre) & Node.DOCUMENT_POSITION_PRECEDING) {
+      filePath = t.textContent.replace(/^[^\w]*/, '').trim();
+    } else break;
+  }
+  if (!filePath) {
+    filePath = prompt('Путь к файлу:', `file.${ext}`);
+  }
+  if (!filePath) return;
+  if (!confirm(`Применить изменения к файлу ${filePath}?`)) return;
+  await api(`/api/projects/${currentProjectId}/refactor/apply`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({path: filePath, content: pre.textContent})
+  });
+  btn.textContent = '✓ Применено!';
+  btn.disabled = true;
 }
 
 // ===== START =====

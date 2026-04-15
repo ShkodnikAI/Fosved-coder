@@ -251,3 +251,77 @@ def terminal_save_history(pid: str, data: dict):
     with open(hist_file, "w", encoding="utf-8") as f:
         json.dump(history[-200:], f)
     return {"status": "ok"}
+
+
+# ===== REFACTOR =====
+# Extensions to analyze as code
+CODE_EXTENSIONS = {
+    '.py', '.js', '.ts', '.jsx', '.tsx', '.vue', '.html', '.css', '.scss', '.less',
+    '.java', '.kt', '.cpp', '.c', '.h', '.hpp', '.cs', '.go', '.rs', '.rb', '.php',
+    '.sql', '.sh', '.bash', '.yaml', '.yml', '.json', '.xml', '.toml', '.ini', '.cfg',
+    '.env', '.md', '.txt', '.dart', '.swift', '.lua', '.r', '.pl', '.ex', '.exs', '.zig'
+}
+
+IGNORE_DIRS = {'.git', '__pycache__', 'node_modules', 'venv', '.venv', '.idea', '.vscode',
+               'dist', 'build', '.next', '.nuxt', 'target', '__pypackages__', '.eggs'}
+
+def _collect_project_files(folder, max_files=30, max_size=8000):
+    """Collect source code files from project folder for refactoring analysis."""
+    files = []
+    total_size = 0
+    for root, dirs, filenames in os.walk(folder):
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith('.')]
+        for fname in sorted(filenames):
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in CODE_EXTENSIONS:
+                continue
+            fpath = os.path.join(root, fname)
+            rel_path = os.path.relpath(fpath, folder)
+            fsize = os.path.getsize(fpath)
+            if fsize > max_size * 3:  # skip huge files
+                continue
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read(max_size)
+                files.append({"path": rel_path, "content": content, "size": fsize, "lang": ext.lstrip('.')})
+                total_size += len(content)
+            except:
+                continue
+            if len(files) >= max_files or total_size > max_files * max_size:
+                break
+        if len(files) >= max_files or total_size > max_files * max_size:
+            break
+    return files
+
+@router.get("/api/projects/{pid}/refactor/files")
+def refactor_collect_files(pid: str, max_files: int = 30):
+    """Collect project files for refactoring analysis."""
+    projects = _load_projects()
+    if pid not in projects:
+        return JSONResponse({"error": "not found"}, 404)
+    folder = projects[pid].get("folder", "")
+    if not folder or not os.path.isdir(folder):
+        return JSONResponse({"error": "no folder set"}, 400)
+    files = _collect_project_files(folder, max_files)
+    return {"files": files, "count": len(files), "project_name": projects[pid].get("name", "")}
+
+@router.post("/api/projects/{pid}/refactor/apply")
+def refactor_apply(pid: str, data: dict):
+    """Apply a refactoring suggestion to a file."""
+    file_path = data.get("path", "")
+    content = data.get("content", "")
+    if not file_path or content is None:
+        return JSONResponse({"error": "path and content required"}, 400)
+    projects = _load_projects()
+    if pid not in projects:
+        return JSONResponse({"error": "not found"}, 404)
+    folder = projects[pid].get("folder", "")
+    if not folder:
+        return JSONResponse({"error": "no folder set"}, 400)
+    full_path = os.path.normpath(os.path.join(folder, file_path))
+    if not full_path.startswith(os.path.normpath(folder)):
+        return JSONResponse({"error": "path traversal blocked"}, 403)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return {"status": "ok", "path": file_path}
