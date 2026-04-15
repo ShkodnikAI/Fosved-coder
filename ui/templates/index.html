@@ -1,426 +1,757 @@
-﻿<!DOCTYPE html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fosved Coder</title>
 <link rel="stylesheet" href="/static/style.css">
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
-
-<header class="header">
-    <div class="logo">⚡</div>
-    <div class="header-title">FOSVED CODER</div>
+<div class="app" id="app">
+  <!-- HEADER -->
+  <div class="header">
+    <h1>&#9889; Fosved Coder</h1>
     <div class="header-actions">
-        <button class="btn-clear-chat" onclick="clearChat()" title="Clear">🗑 Clear</button>
-        <button class="btn-stop" onclick="stopAction()" title="Stop">⏹ Stop</button>
+      <button class="btn btn-ghost" onclick="toggleSidebar()">&#9776;</button>
+      <button class="btn btn-accent" onclick="openSettings()">&#9881; Настройки</button>
     </div>
-</header>
+  </div>
 
-<div class="main-layout">
-    <aside class="sidebar">
-        <div class="sidebar-section">
-            <div class="sidebar-header">
-                <span class="sidebar-title">📁 Projects</span>
-                <button class="btn-add" onclick="openNewProject()">+</button>
-            </div>
-            <div id="projects-list" class="sidebar-list"></div>
-        </div>
-        <div class="sidebar-section">
-            <div class="sidebar-header">
-                <span class="sidebar-title" id="models-title">🤖 AI Models</span>
-                <button class="btn-add" onclick="openManageKeys()">🔑</button>
-            </div>
-            <div id="models-list" class="sidebar-list"></div>
-        </div>
-        <div class="sidebar-section">
-            <div class="sidebar-header">
-                <span class="sidebar-title">🔗 GitHub</span>
-            </div>
-            <div class="github-form">
-                <input type="password" id="github-token" placeholder="Paste token..." class="input-sm">
-                <button class="btn-sm" onclick="saveGithubToken()">Save</button>
-            </div>
-            <div id="github-user-info"></div>
-        </div>
-    </aside>
+  <div class="main">
+    <!-- SIDEBAR -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h2>&#128193; Проекты</h2>
+        <button class="btn btn-accent btn-sm" onclick="openNewProject()">&#43; Новый проект</button>
+      </div>
+      <div class="project-list" id="projectList"></div>
+    </div>
 
-    <main class="content">
-        <div id="chat-messages"></div>
-        <div class="chat-file-preview" id="chat-files"></div>
-        <div class="chat-model-bar">
-            <label>🤖 Model:</label>
-            <select id="chat-model-select" class="chat-model-select" onchange="onChatModelChange()"></select>
-            <span id="chat-model-status" class="chat-model-status"></span>
+    <!-- CHAT AREA -->
+    <div class="chat-area">
+      <div class="chat-header">
+        <h2 id="chatTitle">Выберите проект</h2>
+        <div class="model-bar" id="modelBar" style="display:none">
+          <select id="modelSelect" onchange="currentModel=this.value"></select>
+          <button class="btn btn-sm btn-ghost" onclick="clearChat()" title="Очистить чат">&#128465;</button>
         </div>
-        <div class="input-area">
-            <div class="input-wrapper">
-                <button class="btn-attach" onclick="document.getElementById('chat-file-input').click()" title="Attach">📎</button>
-                <input type="file" id="chat-file-input" style="display:none" multiple onchange="addChatFiles(this)">
-                <textarea id="user-input" placeholder="Ask AI anything...  Type: read filename.py to read project files" rows="6"></textarea>
-                <button class="btn-send" onclick="sendMessage()">➤</button>
-            </div>
+      </div>
+
+      <!-- THREAD TABS -->
+      <div class="threads-bar" id="threadsBar" style="display:none"></div>
+
+      <!-- MESSAGES -->
+      <div class="messages" id="messages"></div>
+
+      <!-- INPUT -->
+      <div class="input-area" id="inputArea" style="display:none">
+        <div class="file-preview" id="filePreview">
+          <span id="fileName"></span>
+          <span class="remove-file" onclick="removeFile()">&times;</span>
         </div>
-        <div class="quick-bar" id="quick-bar"></div>
-    </main>
+        <label class="attach-btn" title="Прикрепить файл">&#128206;<input type="file" id="fileInput" hidden onchange="handleFile(this)"></label>
+        <textarea id="msgInput" rows="3" placeholder="Сообщение... (Shift+Enter — новая строка)" onkeydown="handleKey(event)"></textarea>
+        <button class="btn btn-accent" onclick="sendMessage()">&#9654;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QUICK BAR -->
+  <div class="quick-bar" id="quickBar">
+    <div class="quick-group"><span>Ссылки:</span></div>
+  </div>
 </div>
 
-<div class="modal" id="modal-project" style="display:none">
-    <div class="modal-overlay" onclick="closeModal('modal-project')"></div>
-    <div class="modal-box modal-wide">
-        <h2 id="proj-modal-title">New Project</h2>
-        <input type="hidden" id="proj-edit-id" value="">
-        <label>Project Name</label>
-        <input id="proj-name" placeholder="My project">
-        <label>Description</label>
-        <textarea id="proj-desc" rows="2" placeholder="Short description"></textarea>
-        <label>Project Folder (local path)</label>
-        <input id="proj-folder" placeholder="e.g. D:\AI_projectS\MyApp">
-        <label>GitHub Repository URL</label>
-        <input id="proj-github" placeholder="e.g. https://github.com/user/repo">
-        <label>Prompt</label>
-        <textarea id="proj-prompt" rows="3" placeholder="Describe what you want to build..."></textarea>
-        <label>Instructions</label>
-        <textarea id="proj-instructions" rows="3" placeholder="Coding rules, tech stack, constraints..."></textarea>
-        <label>Attach prompt file (optional)</label>
-        <div class="file-upload-area">
-            <input type="file" id="proj-file" onchange="previewFile(this,'proj-preview')">
-            <div id="proj-preview" class="file-preview"></div>
-        </div>
-        <label>Ideas</label>
-        <div class="idea-input-row">
-            <input type="text" id="proj-idea-input" placeholder="Add an idea...">
-            <button class="btn-sm btn-accent" onclick="addProjIdea()">+ Add</button>
-        </div>
-        <div id="proj-ideas-list" class="idea-tags"></div>
-        <label>AI Model for this project</label>
-        <select id="proj-model-select" class="input-full"><option value="">-- Auto --</option></select>
-        <div class="modal-buttons">
-            <button class="btn-primary" onclick="saveProject()">Save</button>
-            <button class="btn-cancel" onclick="closeModal('modal-project')">Cancel</button>
-        </div>
+<!-- PROJECT MODAL -->
+<div class="modal-overlay" id="projectModal">
+  <div class="modal">
+    <h2 id="projectModalTitle">Новый проект</h2>
+    <label>Название</label>
+    <input id="pName" placeholder="My Project">
+    <label>Папка проекта</label>
+    <input id="pFolder" placeholder="C:/projects/myapp">
+    <label>GitHub репозиторий</label>
+    <input id="pGithub" placeholder="https://github.com/user/repo">
+    <label>Описание / Промпт</label>
+    <textarea id="pPrompt" rows="3" placeholder="Опишите проект для AI..."></textarea>
+    <label>Инструкции</label>
+    <textarea id="pInstructions" rows="3" placeholder="Специфичные инструкции для AI..."></textarea>
+    <label>Идеи и заметки</label>
+    <textarea id="pIdeas" rows="2" placeholder="Идеи, ссылки, заметки..."></textarea>
+    <label>Модель по умолчанию</label>
+    <select id="pModel"></select>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('projectModal')">Отмена</button>
+      <button class="btn btn-accent" id="projectModalSave" onclick="saveProject()">Создать</button>
     </div>
+  </div>
 </div>
 
-<div class="modal" id="modal-keys" style="display:none">
-    <div class="modal-overlay" onclick="closeModal('modal-keys')"></div>
-    <div class="modal-box modal-wide">
-        <h2>Manage API Keys</h2>
-        <label>Provider</label>
-        <select id="key-provider" class="input-full"><option value="">-- Select --</option></select>
-        <label>API Key</label>
-        <input type="password" id="key-api-key" class="input-full" placeholder="sk-...">
-        <label>Models (add one by one)</label>
-        <div class="model-input-row">
-            <input type="text" id="key-model-input" placeholder="e.g. gpt-4o, claude-3-opus">
-            <button class="btn-sm btn-accent" onclick="addTempModel()">+ Add</button>
-        </div>
-        <div id="key-models-list" class="model-tags"></div>
-        <hr>
-        <h3>Saved Keys</h3>
-        <div id="saved-keys-list"></div>
-        <div class="modal-buttons">
-            <button class="btn-primary" onclick="saveKey()">Save Key</button>
-            <button class="btn-cancel" onclick="closeModal('modal-keys')">Cancel</button>
-        </div>
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal" style="width:620px">
+    <h2>&#9881; Настройки</h2>
+    <div class="settings-section">
+      <h3>&#128273; API Ключи</h3>
+      <div id="keysList"></div>
+      <div class="add-key-form">
+        <select id="keyProvider"></select>
+        <input id="keyValue" placeholder="sk-..." type="password">
+        <input id="keyName" placeholder="Имя (необязательно)" style="max-width:150px">
+        <button class="btn btn-accent btn-sm" onclick="addKey()">Добавить</button>
+      </div>
     </div>
+    <div class="settings-section">
+      <h3>&#128187; GitHub</h3>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="ghToken" placeholder="GitHub Token" type="password" style="flex:1">
+        <input id="ghUsername" placeholder="Username" style="max-width:140px">
+        <button class="btn btn-accent btn-sm" onclick="saveGithub()">Сохранить</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Закрыть</button>
+    </div>
+  </div>
 </div>
 
-<div class="modal" id="modal-link" style="display:none">
-    <div class="modal-overlay" onclick="closeModal('modal-link')"></div>
-    <div class="modal-box modal-wide">
-        <h2 id="link-modal-title">Manage Links</h2>
-        <div id="link-list"></div>
-        <hr>
-        <h3>Add Link</h3>
-        <label>Label</label>
-        <input id="link-label" class="input-full" placeholder="e.g. My Server">
-        <label>URL</label>
-        <input id="link-url" class="input-full" placeholder="http://...">
-        <div class="modal-buttons">
-            <button class="btn-primary" onclick="saveLink()">Save</button>
-            <button class="btn-cancel" onclick="closeModal('modal-link')">Cancel</button>
-        </div>
+<!-- FILE TREE MODAL -->
+<div class="modal-overlay" id="filesModal">
+  <div class="modal" style="width:700px">
+    <h2>&#128193; Файлы проекта</h2>
+    <div class="file-tree" id="fileTree"></div>
+    <div class="file-viewer" id="fileViewer" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('filesModal')">Закрыть</button>
     </div>
+  </div>
 </div>
 
-<div class="modal" id="modal-files" style="display:none">
-    <div class="modal-overlay" onclick="closeModal('modal-files')"></div>
-    <div class="modal-box modal-wide" style="height:70vh;display:flex;flex-direction:column">
-        <h2>📁 Project Files</h2>
-        <div id="file-tree" class="file-tree" style="flex:0 0 auto;max-height:40vh"></div>
-        <div id="file-viewer-area" style="flex:1;display:none;flex-direction:column;min-height:0">
-            <div class="file-viewer-header">
-                <span id="fv-path" class="path"></span>
-                <span id="fv-info" class="info"></span>
-            </div>
-            <pre id="fv-code" class="file-viewer-code"></pre>
-        </div>
-        <div class="modal-buttons" style="margin-top:auto">
-            <button class="btn-cancel" onclick="closeModal('modal-files')">Close</button>
-        </div>
-    </div>
+<!-- THREAD CONTEXT MENU -->
+<div id="threadMenu" style="display:none;position:fixed;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;padding:6px 0;z-index:200;min-width:140px;box-shadow:0 4px 12px rgba(0,0,0,.5)">
+  <div style="padding:6px 14px;cursor:pointer;font-size:13px" onclick="renameCurrentThread()">&#9998; Переименовать</div>
+  <div style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--danger)" onclick="deleteCurrentThread()">&#128465; Удалить</div>
 </div>
 
 <script>
-var tempKeyModels=[],tempProjIdeas=[],currentLinkCategory='',chatAttachedFiles=[];
-var allLinks=JSON.parse(localStorage.getItem('fosved_links')||'{}');
-var allProjects=[],allModels=[],selectedProjectId='',selectedModelId='';
-var ws=null,isGenerating=false,currentAiMsg='',codeBlockCounter=0;
+// ===== STATE =====
+let projects = {};
+let currentProjectId = null;
+let currentThreadId = 'main';
+let threads = [];
+let ws = null;
+let isStreaming = false;
+let attachedFile = null;
+let models = [];
+let quickLinks = JSON.parse(localStorage.getItem('quickLinks') || '[]');
 
-function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
-function openModal(id){document.getElementById(id).style.display='flex';}
-function closeModal(id){document.getElementById(id).style.display='none';}
+// ===== INIT =====
+async function init() {
+  await loadProjects();
+  await loadModels();
+  renderQuickBar();
+}
 
-document.addEventListener('DOMContentLoaded',function(){
-    loadProjects();loadModels();loadGithubToken();loadGithubUser();renderQuickBar();updateKeyStatus();connectWS();
+// ===== API HELPERS =====
+async function api(path, opts = {}) {
+  try {
+    const r = await fetch(path, opts);
+    return await r.json();
+  } catch(e) { console.error(e); return null; }
+}
+
+// ===== PROJECTS =====
+async function loadProjects() {
+  projects = (await api('/api/projects')) || {};
+  renderProjects();
+}
+
+function renderProjects() {
+  const el = document.getElementById('projectList');
+  el.innerHTML = '';
+  Object.values(projects).sort((a,b) => (b.created||'').localeCompare(a.created||'')).forEach(p => {
+    const active = p.id === currentProjectId ? 'active' : '';
+    const pct = p.progress || 0;
+    const color = pct < 30 ? 'var(--danger)' : pct < 70 ? 'var(--warning)' : 'var(--success)';
+    const ghLink = p.github_repo ? `<a href="${p.github_repo}" target="_blank" class="github-link" onclick="event.stopPropagation()">&#128279; GitHub</a>` : '';
+    el.innerHTML += `
+      <div class="project-card ${active}" onclick="selectProject('${p.id}')">
+        <h3>${esc(p.name)}</h3>
+        <p>${esc(p.description || p.prompt || '').substring(0, 60)}${ghLink}</p>
+        <div class="progress-bar" onclick="event.stopPropagation();setProgress('${p.id}',event)">
+          <div class="progress-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${pct}%</div>
+        <div class="project-actions">
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();editProject('${p.id}')" title="Редактировать">&#9998;</button>
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();generateCode('${p.id}')" title="Генерировать код">&#9889;</button>
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openFiles('${p.id}')" title="Файлы">&#128193;</button>
+          <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteProject('${p.id}')" title="Удалить">&#128465;</button>
+        </div>
+      </div>`;
+  });
+}
+
+async function selectProject(pid) {
+  currentProjectId = pid;
+  const p = projects[pid];
+  document.getElementById('chatTitle').textContent = p.name;
+  document.getElementById('modelBar').style.display = 'flex';
+  document.getElementById('inputArea').style.display = 'flex';
+  document.getElementById('threadsBar').style.display = 'flex';
+  renderProjects();
+  await loadThreads();
+  await loadChatHistory();
+  populateModelSelect(p.selected_model);
+  connectWS();
+}
+
+function openNewProject() {
+  document.getElementById('projectModalTitle').textContent = 'Новый проект';
+  document.getElementById('projectModalSave').textContent = 'Создать';
+  document.getElementById('projectModalSave').onclick = saveProject;
+  ['pName','pFolder','pGithub','pPrompt','pInstructions','pIdeas'].forEach(id => document.getElementById(id).value = '');
+  populateProjectModelSelect('');
+  openModal('projectModal');
+}
+
+let editingProjectId = null;
+function editProject(pid) {
+  const p = projects[pid];
+  editingProjectId = pid;
+  document.getElementById('projectModalTitle').textContent = 'Редактировать проект';
+  document.getElementById('projectModalSave').textContent = 'Сохранить';
+  document.getElementById('projectModalSave').onclick = updateProject;
+  document.getElementById('pName').value = p.name || '';
+  document.getElementById('pFolder').value = p.folder || '';
+  document.getElementById('pGithub').value = p.github_repo || '';
+  document.getElementById('pPrompt').value = p.prompt || '';
+  document.getElementById('pInstructions').value = p.instructions || '';
+  document.getElementById('pIdeas').value = p.ideas || '';
+  populateProjectModelSelect(p.selected_model);
+  openModal('projectModal');
+}
+
+async function saveProject() {
+  const data = {
+    name: document.getElementById('pName').value.trim(),
+    folder: document.getElementById('pFolder').value.trim(),
+    github_repo: document.getElementById('pGithub').value.trim(),
+    prompt: document.getElementById('pPrompt').value.trim(),
+    instructions: document.getElementById('pInstructions').value.trim(),
+    ideas: document.getElementById('pIdeas').value.trim(),
+    selected_model: document.getElementById('pModel').value,
+    progress: 0
+  };
+  if (!data.name) return alert('Введите название проекта');
+  const p = await api('/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  if (p && p.id) {
+    await loadProjects();
+    selectProject(p.id);
+    closeModal('projectModal');
+  }
+}
+
+async function updateProject() {
+  if (!editingProjectId) return;
+  const data = {
+    name: document.getElementById('pName').value.trim(),
+    folder: document.getElementById('pFolder').value.trim(),
+    github_repo: document.getElementById('pGithub').value.trim(),
+    prompt: document.getElementById('pPrompt').value.trim(),
+    instructions: document.getElementById('pInstructions').value.trim(),
+    ideas: document.getElementById('pIdeas').value.trim(),
+    selected_model: document.getElementById('pModel').value
+  };
+  await api(`/api/projects/${editingProjectId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  await loadProjects();
+  closeModal('projectModal');
+}
+
+async function deleteProject(pid) {
+  if (!confirm('Удалить проект?')) return;
+  await api(`/api/projects/${pid}`, {method:'DELETE'});
+  if (currentProjectId === pid) {
+    currentProjectId = null;
+    document.getElementById('chatTitle').textContent = 'Выберите проект';
+    document.getElementById('modelBar').style.display = 'none';
+    document.getElementById('inputArea').style.display = 'none';
+    document.getElementById('threadsBar').style.display = 'none';
+    document.getElementById('messages').innerHTML = '';
+  }
+  await loadProjects();
+}
+
+function setProgress(pid, e) {
+  const bar = e.currentTarget;
+  const rect = bar.getBoundingClientRect();
+  const pct = Math.round(((e.clientX - rect.left) / rect.width) * 100);
+  fetch(`/api/projects/${pid}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({progress: pct})
+  });
+  projects[pid].progress = pct;
+  renderProjects();
+}
+
+async function generateCode(pid) {
+  const p = projects[pid];
+  if (!p.prompt && !p.instructions) return alert('Добавьте описание/промпт проекта');
+  selectProject(pid);
+  const msg = `Сгенерируй код для проекта "${p.name}". ${p.prompt ? 'Описание: ' + p.prompt : ''} ${p.instructions ? 'Инструкции: ' + p.instructions : ''}`;
+  document.getElementById('msgInput').value = msg;
+  sendMessage();
+}
+
+// ===== THREADS =====
+async function loadThreads() {
+  if (!currentProjectId) return;
+  threads = (await api(`/api/projects/${currentProjectId}/threads`)) || [];
+  if (threads.length > 0 && !threads.find(t => t.id === currentThreadId)) {
+    currentThreadId = threads[0].id;
+  }
+  renderThreads();
+}
+
+function renderThreads() {
+  const bar = document.getElementById('threadsBar');
+  bar.innerHTML = '';
+  threads.forEach(t => {
+    const active = t.id === currentThreadId ? 'active' : '';
+    bar.innerHTML += `
+      <div class="thread-tab ${active}" onclick="switchThread('${t.id}')" oncontextmenu="threadContext(event,'${t.id}')">
+        ${esc(t.name || t.id)}
+        ${threads.length > 1 ? `<span class="thread-close" onclick="event.stopPropagation();deleteThread('${t.id}')">&times;</span>` : ''}
+      </div>`;
+  });
+  bar.innerHTML += `<button class="thread-add" onclick="createThread()" title="Новый поток">+</button>`;
+}
+
+async function createThread() {
+  if (!currentProjectId) return;
+  const name = prompt('Название потока:', `Поток ${threads.length + 1}`);
+  if (!name) return;
+  const res = await api(`/api/projects/${currentProjectId}/threads`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
+  });
+  if (res && res.status === 'ok') {
+    currentThreadId = res.id;
+    await loadThreads();
+    await loadChatHistory();
+  }
+}
+
+async function switchThread(tid) {
+  if (tid === currentThreadId || isStreaming) return;
+  currentThreadId = tid;
+  renderThreads();
+  await loadChatHistory();
+}
+
+async function deleteThread(tid) {
+  if (threads.length <= 1) return;
+  if (!confirm('Удалить этот поток?')) return;
+  await api(`/api/projects/${currentProjectId}/threads/${tid}`, {method:'DELETE'});
+  if (currentThreadId === tid) currentThreadId = 'main';
+  await loadThreads();
+  await loadChatHistory();
+}
+
+let contextThreadId = null;
+function threadContext(e, tid) {
+  e.preventDefault();
+  contextThreadId = tid;
+  const menu = document.getElementById('threadMenu');
+  menu.style.display = 'block';
+  menu.style.left = e.clientX + 'px';
+  menu.style.top = e.clientY + 'px';
+}
+
+async function renameCurrentThread() {
+  document.getElementById('threadMenu').style.display = 'none';
+  if (!contextThreadId) return;
+  const t = threads.find(x => x.id === contextThreadId);
+  const name = prompt('Новое название:', t ? t.name : '');
+  if (!name) return;
+  await api(`/api/projects/${currentProjectId}/threads/${contextThreadId}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
+  });
+  await loadThreads();
+}
+
+async function deleteCurrentThread() {
+  document.getElementById('threadMenu').style.display = 'none';
+  if (contextThreadId) deleteThread(contextThreadId);
+}
+
+// Close thread menu on click outside
+document.addEventListener('click', () => {
+  document.getElementById('threadMenu').style.display = 'none';
 });
 
-/* ======== WEBSOCKET ======== */
-function connectWS(){
-    var proto=location.protocol==='https:'?'wss:':'ws:';
-    ws=new WebSocket(proto+'//'+location.host+'/ws');
-    ws.onopen=function(){loadChatHistory();};
-    ws.onclose=function(){setTimeout(connectWS,3000);};
-    ws.onerror=function(){};
-    ws.onmessage=function(e){
-        var d;try{d=JSON.parse(e.data);}catch(ex){return;}
-        if(d.type==='token'){currentAiMsg+=d.content;updateStreamingMsg(currentAiMsg);}
-        else if(d.type==='done'){isGenerating=false;currentAiMsg='';addCodeActions();}
-        else if(d.type==='error'){isGenerating=false;currentAiMsg='';appendMsg('system','Error: '+d.message);}
+// ===== CHAT =====
+async function loadChatHistory() {
+  if (!currentProjectId) return;
+  const msgs = await api(`/api/chat/${currentProjectId}?thread_id=${currentThreadId}`);
+  const el = document.getElementById('messages');
+  el.innerHTML = '';
+  if (!msgs || msgs.length === 0) return;
+  let lastDate = '';
+  msgs.forEach(m => {
+    const d = (m.timestamp || '').substring(0, 10);
+    if (d && d !== lastDate) {
+      lastDate = d;
+      el.innerHTML += `<div class="date-sep">${d}</div>`;
+    }
+    if (m.role === 'user') {
+      el.innerHTML += `<div class="msg msg-user">${esc(m.content)}</div>`;
+    } else if (m.role === 'assistant') {
+      el.innerHTML += `<div class="msg msg-ai">${renderAI(m.content)}</div>`;
+    }
+  });
+  el.scrollTop = el.scrollHeight;
+}
+
+function connectWS() {
+  if (ws) ws.close();
+  ws = new WebSocket(`ws://${location.host}/ws/chat/${currentProjectId}`);
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'token') {
+      appendToken(data.content);
+    } else if (data.type === 'done') {
+      finishStream();
+    } else if (data.type === 'error') {
+      appendError(data.content);
+      finishStream();
+    }
+  };
+  ws.onclose = () => { isStreaming = false; };
+}
+
+function sendMessage() {
+  if (!currentProjectId || isStreaming) return;
+  const input = document.getElementById('msgInput');
+  let msg = input.value.trim();
+  if (!msg && !attachedFile) return;
+
+  // Append file content if attached
+  if (attachedFile) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      msg += `\n\n--- Файл: ${attachedFile.name} ---\n\`\`\`\n${reader.result.substring(0, 8000)}\n\`\`\``;
+      doSend(msg);
     };
-}
-function updateStreamingMsg(text){
-    var el=document.getElementById('chat-messages'),last=el.querySelector('.msg-streaming');
-    if(!last){last=document.createElement('div');last.className='msg msg-ai msg-streaming';el.appendChild(last);}
-    last.innerHTML=marked.parse(text)+'<span class="cursor-blink">\u258a</span>';
-    el.scrollTop=el.scrollHeight;
-}
-function finishStreaming(){
-    var el=document.getElementById('chat-messages'),last=el.querySelector('.msg-streaming');
-    if(last){last.classList.remove('msg-streaming');last.innerHTML=marked.parse(currentAiMsg);}
-}
-function wsSend(obj){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(obj));else appendMsg('system','Reconnecting...');}
-
-/* ======== CODE ACTIONS ======== */
-function addCodeActions(){
-    setTimeout(function(){
-        var el=document.getElementById('chat-messages');
-        el.querySelectorAll('.msg-ai:not(.msg-streaming)').forEach(function(msg){
-            if(msg.querySelector('.code-actions'))return;
-            msg.querySelectorAll('pre').forEach(function(pre){
-                var code=pre.querySelector('code');if(!code)return;
-                var lang=(code.className.match(/language-(\w+)/)||[])[1]||'text';
-                var extMap={python:'py',javascript:'js',typescript:'ts',html:'html',css:'css',java:'java',cpp:'cpp',c:'c',go:'go',rust:'rs',ruby:'rb',php:'php',sql:'sql',bash:'sh',shell:'sh',json:'json',yaml:'yaml',yml:'yaml',xml:'xml',markdown:'md'};
-                var ext=extMap[lang]||lang;
-                var suggested='generated_'+(++codeBlockCounter)+'.'+ext;
-                var div=document.createElement('div');div.className='code-actions';
-                div.innerHTML='<button class="btn-code-save" onclick="saveCodeFile(this)" data-filename="'+suggested+'">💾 Save as '+suggested+'</button><button class="btn-code-copy" onclick="copyCode(this)">📋 Copy</button>';
-                pre.parentNode.insertBefore(div,pre.nextSibling);
-            });
-        });
-    },200);
-}
-function saveCodeFile(btn){
-    var src=btn.parentElement.previousElementSibling.querySelector('code').textContent;
-    var suggested=btn.getAttribute('data-filename')||'file.txt';
-    var name=prompt('Save file as:',suggested);if(!name)return;
-    if(!selectedProjectId){alert('Select a project.');return;}
-    fetch('/api/projects/'+selectedProjectId+'/save-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:name,content:src})})
-    .then(function(r){if(r.ok){btn.textContent='✅ '+name;alert('Saved: '+name);}else r.text().then(function(t){alert(t);});}).catch(function(e){alert(e.message);});
-}
-function copyCode(btn){
-    var src=btn.parentElement.previousElementSibling.querySelector('code').textContent;
-    navigator.clipboard.writeText(src).then(function(){btn.textContent='✅ Copied!';setTimeout(function(){btn.textContent='📋 Copy';},1500);}).catch(function(){alert('Copy failed');});
+    reader.readAsText(attachedFile);
+    removeFile();
+    return;
+  }
+  doSend(msg);
 }
 
-/* ======== PROJECT FILES ======== */
-function openProjectFiles(){
-    if(!selectedProjectId){alert('Select a project.');return;}
-    fetch('/api/projects/'+selectedProjectId+'/tree').then(function(r){return r.json();}).then(function(d){
-        var el=document.getElementById('file-tree');
-        if(!d.tree||!d.tree.length){el.innerHTML='<div class="empty-hint">'+(d.folder?'Empty: '+esc(d.folder):'Folder not set. Edit project.')+'</div>';document.getElementById('file-viewer-area').style.display='none';openModal('modal-files');return;}
-        el.innerHTML=d.tree.map(function(f){
-            var ico,cls='';if(f.type==='dir'){ico='📁';cls=' file-tree-dir';}
-            else{var ext=f.path.split('.').pop().toLowerCase();var icons={py:'🐍',js:'📜',ts:'📘',html:'🌐',css:'🎨',json:'📋',md:'📝',yaml:'⚙',yml:'⚙',txt:'📄',sh:'🔧',bat:'🔧',sql:'🗄',toml:'⚙',ini:'⚙',env:'🔑'};ico=icons[ext]||'📄';}
-            var sz=f.size?(f.size>1024?(f.size/1024).toFixed(1)+'KB':f.size+'B'):'';
-            return '<div class="file-tree-item'+cls+'" onclick="viewFile(\''+esc(f.path).replace(/'/g,"\\'")+'\','+(f.type==='dir')+')">'+'<span class="file-tree-icon">'+ico+'</span><span class="file-tree-name">'+esc(f.path)+'</span>'+(sz?'<span class="file-tree-size">'+sz+'</span>':'')+'</div>';
-        }).join('');
-        document.getElementById('file-viewer-area').style.display='none';openModal('modal-files');
-    }).catch(function(e){alert(e.message);});
-}
-function viewFile(relPath,isDir){
-    if(isDir||!selectedProjectId)return;
-    document.getElementById('file-viewer-area').style.display='flex';
-    document.getElementById('fv-path').textContent=relPath;
-    document.getElementById('fv-info').textContent='Loading...';
-    document.getElementById('fv-code').textContent='';
-    document.querySelectorAll('.file-tree-item').forEach(function(i){i.classList.remove('active');});
-    if(event&&event.currentTarget)event.currentTarget.classList.add('active');
-    fetch('/api/projects/'+selectedProjectId+'/read-file?path='+encodeURIComponent(relPath))
-    .then(function(r){return r.json();}).then(function(d){
-        document.getElementById('fv-info').textContent=d.lines+' lines, '+(d.size>1024?(d.size/1024).toFixed(1)+'KB':d.size+'B');
-        document.getElementById('fv-code').innerHTML=d.content.split('\n').map(function(line){return '<span class="file-line">'+esc(line)+'</span>';}).join('\n');
-    }).catch(function(){document.getElementById('fv-info').textContent='Error';document.getElementById('fv-code').textContent='Failed to read: '+relPath;});
+function doSend(msg) {
+  // Display user message
+  const el = document.getElementById('messages');
+  el.innerHTML += `<div class="msg msg-user">${esc(msg)}</div>`;
+  document.getElementById('msgInput').value = '';
+
+  // Create AI message container
+  const aiDiv = document.createElement('div');
+  aiDiv.className = 'msg msg-ai';
+  aiDiv.innerHTML = '<span class="cursor-blink"></span>';
+  el.appendChild(aiDiv);
+  el.scrollTop = el.scrollHeight;
+
+  isStreaming = true;
+  const model = document.getElementById('modelSelect').value;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({message: msg, model: model, thread_id: currentThreadId}));
+  } else {
+    connectWS();
+    setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({message: msg, model: model, thread_id: currentThreadId}));
+      }
+    }, 500);
+  }
 }
 
-/* ======== GENERATE ======== */
-function generateCode(){
-    if(!selectedProjectId){alert('Select a project.');return;}
-    var p=allProjects.find(function(x){return x.id===selectedProjectId;});if(!p)return;
-    if(!p.prompt&&!p.instructions){alert('Add prompt/instructions to project first.');return;}
-    var text='Generate complete code based on my project specification.';
-    if(p.ideas&&p.ideas.length)text+='\n\nProject ideas: '+p.ideas.join(', ');
-    text+='\n\nGenerate all necessary files with complete code. Use code blocks with filenames as comments.';
-    if(isGenerating){alert('Wait for current response.');return;}
-    appendMsg('user','⚡ GENERATE: '+text);isGenerating=true;currentAiMsg='';
-    var model=document.getElementById('chat-model-select').value||'';
-    if(!model&&p.selected_model)model=p.selected_model;
-    if(!model&&allModels.length)model=allModels[0].model_id;
-    wsSend({type:'chat',message:text,project_id:selectedProjectId,model:model});
+function appendToken(token) {
+  const el = document.getElementById('messages');
+  const aiDiv = el.querySelector('.msg-ai:last-child');
+  if (!aiDiv) return;
+  const cursor = aiDiv.querySelector('.cursor-blink');
+  const contentDiv = aiDiv.querySelector('.stream-content') || document.createElement('span');
+  if (!contentDiv.classList.contains('stream-content')) {
+    contentDiv.classList.add('stream-content');
+    if (cursor) cursor.before(contentDiv);
+    else aiDiv.appendChild(contentDiv);
+  }
+  contentDiv.textContent += token;
+  el.scrollTop = el.scrollHeight;
 }
 
-/* ======== CHAT ======== */
-function sendMessage(){
-    var input=document.getElementById('user-input'),text=input.value.trim();
-    if(!text&&!chatAttachedFiles.length)return;
-    if(isGenerating){appendMsg('system','Wait for current response.');return;}
-    if(text)appendMsg('user',text);
-    chatAttachedFiles.forEach(function(f){
-        var el=document.getElementById('chat-messages'),div=document.createElement('div');div.className='msg msg-file';
-        var h='<div class="msg-file-card">';if(f.type.indexOf('image')===0)h+='<img src="'+URL.createObjectURL(f)+'">';
-        h+='<div class="msg-file-info"><strong>'+esc(f.name)+'</strong><div class="size">'+(f.size/1024).toFixed(1)+' KB</div></div></div>';
-        div.innerHTML=h;el.appendChild(div);
+function finishStream() {
+  isStreaming = false;
+  const el = document.getElementById('messages');
+  const aiDiv = el.querySelector('.msg-ai:last-child');
+  if (!aiDiv) return;
+  const contentDiv = aiDiv.querySelector('.stream-content');
+  const cursor = aiDiv.querySelector('.cursor-blink');
+  if (cursor) cursor.remove();
+  if (contentDiv) {
+    const raw = contentDiv.textContent;
+    aiDiv.innerHTML = renderAI(raw);
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function appendError(err) {
+  const el = document.getElementById('messages');
+  el.innerHTML += `<div class="msg msg-error">${esc(err)}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+async function clearChat() {
+  if (!currentProjectId) return;
+  if (!confirm('Очистить историю этого потока?')) return;
+  await api(`/api/chat/${currentProjectId}?thread_id=${currentThreadId}`, {method:'DELETE'});
+  document.getElementById('messages').innerHTML = '';
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+// ===== RENDER AI CONTENT =====
+function renderAI(text) {
+  // Process code blocks
+  let html = esc(text);
+  // Code blocks with language
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => {
+    const ext = langToExt(lang);
+    const saveBtn = `<button class="btn btn-sm btn-ghost" onclick="saveCode(this,'${ext}')">&#128190; Сохранить</button>`;
+    const copyBtn = `<button class="btn btn-sm btn-ghost" onclick="copyCode(this)">&#128203; Копировать</button>`;
+    return `<div class="code-lang">${lang || 'code'}</div><pre><code>${code}</code></pre><div class="code-actions">${saveBtn}${copyBtn}</div>`;
+  });
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+function langToExt(lang) {
+  const map = {python:'py',javascript:'js',typescript:'ts',html:'html',css:'css',json:'json',java:'java',cpp:'cpp',c:'c',go:'go',rust:'rs',rb:'rb',php:'php',sql:'sql',sh:'sh',bash:'sh',yaml:'yml',xml:'xml',jsx:'jsx',tsx:'tsx',vue:'vue'};
+  return map[lang.toLowerCase()] || lang || 'txt';
+}
+
+function copyCode(btn) {
+  const pre = btn.closest('.msg-ai').querySelector('pre code');
+  navigator.clipboard.writeText(pre.textContent);
+  btn.textContent = '✓ Скопировано';
+  setTimeout(() => btn.innerHTML = '&#128203; Копировать', 1500);
+}
+
+async function saveCode(btn, ext) {
+  const pre = btn.closest('.msg-ai').querySelector('pre code');
+  const name = prompt('Имя файла:', `file.${ext}`);
+  if (!name || !currentProjectId) return;
+  await api(`/api/projects/${currentProjectId}/save-file`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({path: name, content: pre.textContent})
+  });
+  btn.textContent = '✓ Сохранено';
+  setTimeout(() => btn.innerHTML = '&#128190; Сохранить', 1500);
+}
+
+// ===== FILES =====
+async function openFiles(pid) {
+  const tree = await api(`/api/projects/${pid}/tree`);
+  const el = document.getElementById('fileTree');
+  el.innerHTML = '';
+  if (!tree || tree.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-dim);padding:10px">Папка не задана или пуста</div>';
+    openModal('filesModal');
+    return;
+  }
+  tree.forEach(f => {
+    const icon = f.type === 'dir' ? '&#128193;' : '&#128196;';
+    const style = `padding-left:${f.level * 16 + 8}px`;
+    el.innerHTML += `<div class="file-tree-item" style="${style}" data-path="${esc(f.path)}" onclick="${f.type === 'file' ? `viewFile('${pid}','${esc(f.path)}')` : ''}">
+      <span class="icon">${icon}</span>${esc(f.name)}</div>`;
+  });
+  document.getElementById('fileViewer').style.display = 'none';
+  openModal('filesModal');
+}
+
+async function viewFile(pid, path) {
+  const data = await api(`/api/projects/${pid}/read-file?path=${encodeURIComponent(path)}`);
+  const el = document.getElementById('fileViewer');
+  if (!data || data.error) { el.innerHTML = '<div style="color:var(--danger)">' + (data?.error || 'Ошибка') + '</div>'; el.style.display = 'block'; return; }
+  el.style.display = 'block';
+  const lines = (data.lines || data.content.split('\n'));
+  el.innerHTML = lines.map((line, i) => `<div class="line"><span class="line-no">${i + 1}</span><span class="line-content">${esc(line)}</span></div>`).join('');
+}
+
+// ===== MODELS =====
+async function loadModels() {
+  models = (await api('/api/models')) || [];
+  populateModelSelect('');
+}
+
+function populateModelSelect(selected) {
+  const sel = document.getElementById('modelSelect');
+  sel.innerHTML = '';
+  const userModels = models.filter(m => m.type === 'user');
+  const freeModels = models.filter(m => m.type === 'free');
+  if (userModels.length) {
+    sel.innerHTML += '<optgroup label="Ваши модели">';
+    userModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
+    sel.innerHTML += '</optgroup>';
+  }
+  if (freeModels.length) {
+    sel.innerHTML += '<optgroup label="Бесплатные">';
+    freeModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
+    sel.innerHTML += '</optgroup>';
+  }
+  if (!sel.value && models.length) sel.value = models[0].id;
+}
+
+function populateProjectModelSelect(selected) {
+  const sel = document.getElementById('pModel');
+  sel.innerHTML = '<option value="">— Автовыбор —</option>';
+  models.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
+}
+
+// ===== SETTINGS =====
+async function openSettings() {
+  const providers = (await api('/api/providers')) || [];
+  const provSel = document.getElementById('keyProvider');
+  provSel.innerHTML = providers.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  await refreshKeys();
+  await loadGithub();
+  openModal('settingsModal');
+}
+
+async function refreshKeys() {
+  const keys = (await api('/api/keys')) || [];
+  const el = document.getElementById('keysList');
+  el.innerHTML = '';
+  keys.forEach(k => {
+    el.innerHTML += `<div class="key-row">
+      <span class="key-provider">${esc(k.name || k.provider)}</span>
+      <span class="key-name">${k.models.length ? k.models.join(', ') : '••••••••'}</span>
+      <button class="btn btn-sm btn-danger" onclick="removeKey('${k.provider}')">Удалить</button>
+    </div>`;
+  });
+}
+
+async function addKey() {
+  const provider = document.getElementById('keyProvider').value;
+  const key = document.getElementById('keyValue').value.trim();
+  const name = document.getElementById('keyName').value.trim();
+  if (!key) return;
+  await api('/api/keys', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider, key, name})});
+  document.getElementById('keyValue').value = '';
+  document.getElementById('keyName').value = '';
+  await refreshKeys();
+  await loadModels();
+}
+
+async function removeKey(provider) {
+  await api(`/api/keys/${provider}`, {method:'DELETE'});
+  await refreshKeys();
+  await loadModels();
+}
+
+async function loadGithub() {
+  const data = (await api('/api/github/user')) || {};
+  document.getElementById('ghToken').value = data.token || '';
+  document.getElementById('ghUsername').value = data.username || '';
+}
+
+async function saveGithub() {
+  const token = document.getElementById('ghToken').value.trim();
+  const username = document.getElementById('ghUsername').value.trim();
+  await api('/api/github/token', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token, username})});
+  alert('Сохранено');
+}
+
+// ===== FILE ATTACH =====
+function handleFile(input) {
+  if (input.files[0]) {
+    attachedFile = input.files[0];
+    document.getElementById('fileName').textContent = attachedFile.name;
+    document.getElementById('filePreview').classList.add('show');
+  }
+}
+
+function removeFile() {
+  attachedFile = null;
+  document.getElementById('fileInput').value = '';
+  document.getElementById('filePreview').classList.remove('show');
+}
+
+// ===== QUICK BAR =====
+function renderQuickBar() {
+  const bar = document.getElementById('quickBar');
+  bar.innerHTML = '<div class="quick-group"><span>Ссылки:</span></div>';
+  const categories = {};
+  quickLinks.forEach(l => {
+    if (!categories[l.cat]) categories[l.cat] = [];
+    categories[l.cat].push(l);
+  });
+  Object.entries(categories).forEach(([cat, links]) => {
+    let html = `<div class="quick-group"><span>${esc(cat)}</span>`;
+    links.forEach(l => {
+      html += `<a href="${esc(l.url)}" target="_blank" class="quick-link" onclick="event.preventDefault();window.open('${esc(l.url)}','_blank')">
+        ${esc(l.name)}<span class="remove-link" onclick="event.stopPropagation();event.preventDefault();removeQuickLink(${quickLinks.indexOf(l)})">&times;</span>
+      </a>`;
     });
-    input.value='';chatAttachedFiles=[];renderChatFiles();
-    var model=document.getElementById('chat-model-select').value||'';
-    if(!model&&allModels.length)model=allModels[0].model_id;
-    isGenerating=true;currentAiMsg='';
-    wsSend({type:'chat',message:text,project_id:selectedProjectId,model:model});
+    html += '</div>';
+    bar.innerHTML += html;
+  });
+  bar.innerHTML += `<button class="btn btn-sm btn-ghost" onclick="addQuickLink()">+ Ссылка</button>`;
 }
-function stopAction(){if(isGenerating){wsSend({type:'stop'});isGenerating=false;finishStreaming();appendMsg('system','Stopped.');}}
-function appendMsg(role,text){var el=document.getElementById('chat-messages'),div=document.createElement('div');div.className='msg msg-'+role;div.innerHTML=role==='ai'?marked.parse(text):esc(text);el.appendChild(div);el.scrollTop=el.scrollHeight;if(role==='ai')addCodeActions();}
 
-/* ======== CHAT HISTORY ======== */
-function loadChatHistory(){
-    var pid=selectedProjectId||'';
-    fetch('/api/chat/'+encodeURIComponent(pid)).then(function(r){return r.json();}).then(function(msgs){
-        var el=document.getElementById('chat-messages');el.innerHTML='';
-        if(!msgs||!msgs.length){
-            if(selectedProjectId){var p=allProjects.find(function(x){return x.id===selectedProjectId;});if(p){appendMsg('system','Project: '+p.name);if(p.instructions)appendMsg('ai','<strong>Instructions:</strong><br>'+marked.parse(p.instructions));}}
-            else appendMsg('system','Connected to Fosved Coder');return;
-        }
-        if(selectedProjectId){var p=allProjects.find(function(x){return x.id===selectedProjectId;});if(p)appendMsg('system','Project: '+p.name);}
-        var lastDate='';msgs.forEach(function(m){
-            var ds=(m.timestamp||'').substring(0,10);if(ds&&ds!==lastDate){lastDate=ds;var de=document.createElement('div');de.className='chat-date-sep';de.textContent=ds;el.appendChild(de);}
-            if(m.role==='user')appendMsg('user',m.content);else if(m.role==='ai')appendMsg('ai',m.content||'(empty)');else if(m.role==='system')appendMsg('system',m.content);
-        });el.scrollTop=el.scrollHeight;addCodeActions();
-    }).catch(function(){});
+function addQuickLink() {
+  const name = prompt('Название:');
+  if (!name) return;
+  const url = prompt('URL:');
+  if (!url) return;
+  const cat = prompt('Категория:', 'Разное') || 'Разное';
+  quickLinks.push({name, url, cat});
+  localStorage.setItem('quickLinks', JSON.stringify(quickLinks));
+  renderQuickBar();
 }
-function clearChat(){var pid=selectedProjectId||'';if(!confirm('Clear history?'))return;fetch('/api/chat/'+encodeURIComponent(pid),{method:'DELETE'}).then(function(r){if(r.ok){document.getElementById('chat-messages').innerHTML='';if(selectedProjectId){var p=allProjects.find(function(x){return x.id===selectedProjectId;});if(p)appendMsg('system','Project: '+p.name);}else appendMsg('system','Cleared');}}).catch(function(){});}
 
-/* ======== KEY STATUS ======== */
-function updateKeyStatus(){fetch('/api/keys').then(function(r){return r.json();}).then(function(keys){var el=document.getElementById('models-title');if(keys&&keys.length){var a=keys.filter(function(k){return k.is_active;}).length;el.innerHTML='🤖 AI Models <span class="sidebar-badge">'+a+' key'+(a>1?'s':'')+'</span>';}else el.innerHTML='🤖 AI Models <span class="sidebar-badge warn">no keys</span>';}).catch(function(){});}
-
-/* ======== PROJECTS ======== */
-function loadProjects(){fetch('/api/projects').then(function(r){return r.json();}).then(function(list){allProjects=list||[];renderProjects();}).catch(function(){});}
-function renderProjects(){
-    var el=document.getElementById('projects-list');
-    if(!allProjects.length){el.innerHTML='<div class="empty-hint">No projects yet</div>';return;}
-    el.innerHTML=allProjects.map(function(p){
-        var sel=p.id===selectedProjectId?' selected':'';
-        var ideas=(p.ideas||[]).map(function(i){return '<span class="idea-chip">'+esc(i)+'</span>';}).join('');
-        var model=p.selected_model?'<div class="project-model">Model: '+esc(p.selected_model)+'</div>':'';
-        var folder=p.folder?'<div class="project-folder">📂 '+esc(p.folder)+'</div>':'';
-        var gh=p.github_repo?'<div class="project-github">🐙 <a href="'+esc(p.github_repo)+'" target="_blank">'+esc(p.github_repo.replace('https://github.com/',''))+'</a></div>':'';
-        var prog=p.progress||0,pp=Math.min(100,Math.max(0,prog)),pc=pp>=100?'green':pp>=50?'beige':pp>=25?'yellow':'red';
-        var progressHtml='<div class="project-progress" onclick="event.stopPropagation();promptProgress(\''+p.id+'\')"><div class="progress-bar"><div class="progress-fill '+pc+'" style="width:'+pp+'%"></div></div><span class="progress-pct">'+pp+'%</span></div>';
-        return '<div class="project-item'+sel+'" onclick="selectProject(\''+p.id+'\')"><div class="project-top"><div class="project-name">'+esc(p.name)+'</div><div class="project-btns"><button class="btn-generate" onclick="event.stopPropagation();generateCode()" title="Generate">⚡</button><button class="btn-generate" onclick="event.stopPropagation();openProjectFiles()" title="Files">📁</button><button class="project-btn-edit" onclick="event.stopPropagation();editProject(\''+p.id+'\')" title="Edit">✏</button><button class="project-delete" onclick="event.stopPropagation();deleteProject(\''+p.id+'\')" title="Delete">✕</button></div></div>'+(ideas?'<div class="project-ideas">'+ideas+'</div>':'')+model+folder+gh+'<div class="project-status">'+esc(p.status||'idle')+'</div>'+progressHtml+'</div>';
-    }).join('');
+function removeQuickLink(idx) {
+  quickLinks.splice(idx, 1);
+  localStorage.setItem('quickLinks', JSON.stringify(quickLinks));
+  renderQuickBar();
 }
-function promptProgress(pid){var p=allProjects.find(function(x){return x.id===pid;});if(!p)return;var v=prompt('Progress % (0-100):',p.progress||0);if(v===null)return;var n=parseInt(v,10);if(isNaN(n))return;n=Math.min(100,Math.max(0,n));fetch('/api/projects/'+pid,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({progress:n,status:n>=100?'completed':'in progress'})}).then(function(){loadProjects();}).catch(function(){});}
 
-function openNewProject(){
-    document.getElementById('proj-modal-title').textContent='New Project';document.getElementById('proj-edit-id').value='';
-    ['proj-name','proj-desc','proj-folder','proj-github','proj-prompt','proj-instructions'].forEach(function(id){document.getElementById(id).value='';});
-    document.getElementById('proj-file').value='';document.getElementById('proj-preview').innerHTML='';document.getElementById('proj-preview').style.display='none';
-    tempProjIdeas=[];renderProjIdeas();loadModelSelect('');openModal('modal-project');
+// ===== MODALS =====
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('show');
 }
-function editProject(id){
-    var p=allProjects.find(function(x){return x.id===id;});if(!p)return;
-    document.getElementById('proj-modal-title').textContent='Edit Project';document.getElementById('proj-edit-id').value=p.id;
-    document.getElementById('proj-name').value=p.name||'';document.getElementById('proj-desc').value=p.description||'';
-    document.getElementById('proj-folder').value=p.folder||'';document.getElementById('proj-github').value=p.github_repo||'';
-    document.getElementById('proj-prompt').value=p.prompt||'';document.getElementById('proj-instructions').value=p.instructions||'';
-    document.getElementById('proj-file').value='';document.getElementById('proj-preview').innerHTML='';document.getElementById('proj-preview').style.display='none';
-    tempProjIdeas=p.ideas?p.ideas.slice():[];renderProjIdeas();loadModelSelect(p.selected_model||'');openModal('modal-project');
+
+// ===== UTILS =====
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
 }
-function loadModelSelect(cur){var sel=document.getElementById('proj-model-select');sel.innerHTML='<option value="">-- Auto --</option>';if(allModels)allModels.forEach(function(m){var o=document.createElement('option');o.value=m.model_id;o.textContent=m.model_id+' ('+m.provider+')'+(m.type==='free'?' FREE':'');if(m.model_id===cur)o.selected=true;sel.appendChild(o);});}
-function addProjIdea(){var i=document.getElementById('proj-idea-input'),v=i.value.trim();if(!v)return;tempProjIdeas.push(v);i.value='';renderProjIdeas();}
-function removeProjIdea(i){tempProjIdeas.splice(i,1);renderProjIdeas();}
-function renderProjIdeas(){var el=document.getElementById('proj-ideas-list');if(!tempProjIdeas.length){el.innerHTML='<span style="color:#666;font-size:11px">No ideas</span>';return;}el.innerHTML=tempProjIdeas.map(function(idea,i){return '<span class="idea-tag">'+esc(idea)+' <button onclick="removeProjIdea('+i+')">✕</button></span>';}).join('');}
-function saveProject(){
-    var editId=document.getElementById('proj-edit-id').value,name=document.getElementById('proj-name').value.trim();
-    if(!name){alert('Enter name');return;}
-    var data={name:name,description:document.getElementById('proj-desc').value.trim(),folder:document.getElementById('proj-folder').value.trim(),github_repo:document.getElementById('proj-github').value.trim(),prompt:document.getElementById('proj-prompt').value.trim(),instructions:document.getElementById('proj-instructions').value.trim(),ideas:tempProjIdeas,selected_model:document.getElementById('proj-model-select').value};
-    if(editId){fetch('/api/projects/'+editId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(function(r){if(r.ok){closeModal('modal-project');loadProjects();}else r.text().then(function(t){alert(t);});}).catch(function(e){alert(e.message);});}
-    else{var fd=new FormData();['name','description','prompt','instructions'].forEach(function(k){fd.append(k,data[k]);});fd.append('ideas_json',JSON.stringify(data.ideas));fd.append('selected_model',data.selected_model);var fi=document.getElementById('proj-file');if(fi.files&&fi.files.length>0)fd.append('prompt_file',fi.files[0]);fetch('/api/projects',{method:'POST',body:fd}).then(function(r){if(r.ok){closeModal('modal-project');loadProjects();}else r.text().then(function(t){alert(t);});}).catch(function(e){alert(e.message);});}
-}
-function deleteProject(id){if(!confirm('Delete?'))return;fetch('/api/projects/'+id,{method:'DELETE'}).then(function(){loadProjects();}).catch(function(){});}
-function selectProject(id){selectedProjectId=id;var p=allProjects.find(function(x){return x.id===id;});if(!p)return;selectedModelId=p.selected_model||'';renderProjects();updateChatModelSelect();loadChatHistory();}
 
-/* ======== KEYS ======== */
-function openManageKeys(){tempKeyModels=[];renderModelTags();document.getElementById('key-api-key').value='';loadProviders();loadSavedKeys();openModal('modal-keys');}
-function loadProviders(){fetch('/api/providers').then(function(r){return r.json();}).then(function(list){var s=document.getElementById('key-provider');s.innerHTML='<option value="">-- Select --</option>';list.forEach(function(p){s.innerHTML+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});}).catch(function(){});}
-function loadSavedKeys(){fetch('/api/keys').then(function(r){return r.json();}).then(function(list){var el=document.getElementById('saved-keys-list');if(!list||!list.length){el.innerHTML='<div class="empty-hint">No keys</div>';return;}el.innerHTML=list.map(function(k){return '<div class="key-item"><span class="key-provider">'+esc(k.provider_name)+'</span><span class="key-models">'+esc((k.models||[]).join(', '))+'</span><button class="btn-del" onclick="deleteKey(\''+k.provider_id+'\')">✕</button></div>';}).join();}).catch(function(){});}
-function addTempModel(){var i=document.getElementById('key-model-input'),v=i.value.trim();if(!v)return;tempKeyModels.push(v);i.value='';renderModelTags();}
-function removeTempModel(i){tempKeyModels.splice(i,1);renderModelTags();}
-function renderModelTags(){var el=document.getElementById('key-models-list');if(!tempKeyModels.length){el.innerHTML='<span style="color:#666;font-size:11px">No models</span>';return;}el.innerHTML=tempKeyModels.map(function(m,i){return '<span class="model-tag">'+esc(m)+' <button onclick="removeTempModel('+i+')">✕</button></span>';}).join('');}
-function saveKey(){var p=document.getElementById('key-provider').value,k=document.getElementById('key-api-key').value.trim();if(!p){alert('Select provider');return;}if(!k){alert('Enter key');return;}var fd=new FormData();fd.append('provider_id',p);fd.append('api_key',k);fd.append('models_json',JSON.stringify(tempKeyModels));fetch('/api/keys',{method:'POST',body:fd}).then(function(r){if(r.ok){alert('Saved!');tempKeyModels=[];renderModelTags();document.getElementById('key-api-key').value='';loadSavedKeys();loadModels();updateKeyStatus();}else r.text().then(function(t){alert(t);});}).catch(function(e){alert(e.message);});}
-function deleteKey(pid){if(!confirm('Delete?'))return;fetch('/api/keys/'+pid,{method:'DELETE'}).then(function(){loadSavedKeys();loadModels();updateKeyStatus();}).catch(function(){});}
-
-/* ======== MODELS ======== */
-function loadModels(){fetch('/api/models').then(function(r){return r.json();}).then(function(list){allModels=list||[];updateChatModelSelect();var el=document.getElementById('models-list');if(!allModels.length){el.innerHTML='<div class="empty-hint">No models</div>';return;}el.innerHTML=allModels.map(function(m){var dot,badge,bt;if(m.type==='free'){dot='green';badge='free';bt='FREE';}else if(m.has_key&&m.available){dot='green';badge='user';bt='KEY';}else if(m.has_key&&!m.available){dot='yellow';badge='user';bt='OFF';}else{dot='red';badge='locked';bt='NO KEY';}return '<div class="model-item"><span class="model-dot '+dot+'"></span><span class="model-name">'+esc(m.model_id)+'</span><span class="model-badge '+badge+'">'+bt+'</span><span class="model-provider">'+esc(m.provider)+'</span></div>';}).join();}).catch(function(){});}
-function onChatModelChange(){selectedModelId=document.getElementById('chat-model-select').value;updateModelStatus();}
-function updateChatModelSelect(){
-    var sel=document.getElementById('chat-model-select');sel.innerHTML='';
-    if(!allModels.length){sel.innerHTML='<option value="">No models</option>';document.getElementById('chat-model-status').textContent='';return;}
-    var uM=allModels.filter(function(m){return m.type==='user';}),fM=allModels.filter(function(m){return m.type!=='user';});
-    if(uM.length){var og=document.createElement('optgroup');og.label='Your Models';uM.forEach(function(m){var o=document.createElement('option');o.value=m.model_id;o.textContent=m.model_id+' ('+m.provider+')';if(!m.has_key||!m.available)o.disabled=true;og.appendChild(o);});sel.appendChild(og);}
-    if(fM.length){var og2=document.createElement('optgroup');og2.label='Free Models';fM.forEach(function(m){var o=document.createElement('option');o.value=m.model_id;o.textContent=m.model_id+' ('+m.provider+')';og2.appendChild(o);});sel.appendChild(og2);}
-    var t=selectedModelId||'';if(!t&&selectedProjectId){var p=allProjects.find(function(x){return x.id===selectedProjectId;});if(p&&p.selected_model)t=p.selected_model;}
-    if(!t&&uM.length)t=uM[0].model_id;if(!t&&fM.length)t=fM[0].model_id;
-    sel.value=t;if(!sel.value&&sel.options.length)sel.selectedIndex=0;selectedModelId=sel.value;updateModelStatus();
-}
-function updateModelStatus(){var sel=document.getElementById('chat-model-select'),st=document.getElementById('chat-model-status'),mid=sel.value;if(!mid){st.textContent='';return;}var m=allModels.find(function(x){return x.model_id===mid;});if(!m){st.textContent='';return;}if(m.has_key&&m.available){st.textContent='KEY';st.className='chat-model-status active';}else if(m.type==='free'){st.textContent='FREE';st.className='chat-model-status active';}else{st.textContent='NO KEY';st.className='chat-model-status inactive';}}
-
-/* ======== GITHUB ======== */
-function loadGithubToken(){fetch('/api/github/token').then(function(r){return r.json();}).then(function(d){document.getElementById('github-token').value=d.token||'';}).catch(function(){});}
-function saveGithubToken(){var t=document.getElementById('github-token').value.trim();fetch('/api/github/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(function(r){if(r.ok){alert('Saved!');loadGithubUser();}else r.text().then(function(x){alert(x);});}).catch(function(e){alert(e.message);});}
-function loadGithubUser(){fetch('/api/github/user').then(function(r){return r.json();}).then(function(d){var el=document.getElementById('github-user-info');if(!d.user||d.user==='invalid token'){el.innerHTML='';return;}var repos='';if(d.repos&&d.repos.length)repos='<div class="github-repos">'+d.repos.map(function(r){return '<a class="github-repo" href="'+esc(r.url)+'" target="_blank">'+esc(r.name)+'</a>';}).join('')+'</div>';el.innerHTML='<div class="github-user"><span>👤</span><span class="github-user-name">'+esc(d.user)+'</span></div>'+repos;}).catch(function(){});}
-
-/* ======== FILES ======== */
-function previewFile(input,pid){var el=document.getElementById(pid);el.innerHTML='';if(input.files&&input.files[0]){var f=input.files[0],card=document.createElement('div');card.className='file-card';if(f.type.indexOf('image')===0){var img=document.createElement('img');img.src=URL.createObjectURL(f);card.appendChild(img);}var info=document.createElement('div');info.className='file-info';info.innerHTML='<strong>'+esc(f.name)+'</strong><br>'+(f.size/1024).toFixed(1)+' KB';card.appendChild(info);el.appendChild(card);el.style.display='block';}else el.style.display='none';}
-function addChatFiles(input){if(!input.files)return;for(var i=0;i<input.files.length;i++)chatAttachedFiles.push(input.files[i]);input.value='';renderChatFiles();}
-function removeChatFile(idx){chatAttachedFiles.splice(idx,1);renderChatFiles();}
-function renderChatFiles(){var el=document.getElementById('chat-files');if(!chatAttachedFiles.length){el.className='chat-file-preview';el.innerHTML='';return;}el.className='chat-file-preview has-files';el.innerHTML=chatAttachedFiles.map(function(f,idx){var thumb=f.type.indexOf('image')===0?'<img src="'+URL.createObjectURL(f)+'">':'';return '<div class="chat-file-card">'+thumb+'<span>'+esc(f.name)+' ('+(f.size/1024).toFixed(1)+' KB)</span><button class="chat-file-remove" onclick="removeChatFile('+idx+')">✕</button></div>';}).join('');}
-
-/* ======== QUICK BAR ======== */
-var CATS=[{id:'github',name:'GitHub',ico:'🐙'},{id:'server',name:'Server',ico:'🖥'},{id:'database',name:'Database',ico:'🗄'},{id:'website',name:'Website',ico:'🌐'},{id:'docs',name:'Docs',ico:'📋'},{id:'custom',name:'Custom',ico:'🔗'}];
-function openLinkModal(cat){currentLinkCategory=cat;var c=CATS.find(function(x){return x.id===cat;});document.getElementById('link-modal-title').textContent=c.name+' Links';document.getElementById('link-label').value='';document.getElementById('link-url').value='';renderLinkList(cat);openModal('modal-link');}
-function renderLinkList(cat){var el=document.getElementById('link-list'),links=allLinks[cat]||[];if(!links.length){el.innerHTML='<div class="empty-hint">No links</div>';return;}el.innerHTML=links.map(function(lk,idx){return '<div class="key-item"><span class="key-provider">'+esc(lk.label)+'</span><span class="key-models"><a href="'+esc(lk.url)+'" target="_blank" style="color:#C8A97E;text-decoration:none">'+esc(lk.url)+'</a></span><button class="btn-del" onclick="removeLink(\''+cat+'\','+idx+')">✕</button></div>';}).join('');}
-function saveLink(){var l=document.getElementById('link-label').value.trim(),u=document.getElementById('link-url').value.trim();if(!l||!u){alert('Enter label and URL');return;}if(!allLinks[currentLinkCategory])allLinks[currentLinkCategory]=[];allLinks[currentLinkCategory].push({label:l,url:u});localStorage.setItem('fosved_links',JSON.stringify(allLinks));renderLinkList(currentLinkCategory);renderQuickBar();document.getElementById('link-label').value='';document.getElementById('link-url').value='';}
-function removeLink(cat,idx){allLinks[cat].splice(idx,1);localStorage.setItem('fosved_links',JSON.stringify(allLinks));renderLinkList(cat);renderQuickBar();}
-function renderQuickBar(){document.getElementById('quick-bar').innerHTML=CATS.map(function(c){var links=allLinks[c.id]||[];var h='<div class="qb-group"><button class="qb-cat" onclick="openLinkModal(\''+c.id+'\')"><span class="qb-ico">'+c.ico+'</span> '+esc(c.name)+'</button>';links.forEach(function(lk,idx){h+='<button class="qb-link" onclick="window.open(\''+esc(lk.url).replace(/'/g,"\\'")+'\',\'_blank\')">'+esc(lk.label)+'<span class="qb-link-x" onclick="event.stopPropagation();removeLink(\''+c.id+'\','+idx+')">×</span></button>';});return h+'</div>';}).join('');}
-
-document.addEventListener('keydown',function(e){
-    if(e.target.id==='key-model-input'&&e.key==='Enter'){e.preventDefault();addTempModel();}
-    if(e.target.id==='proj-idea-input'&&e.key==='Enter'){e.preventDefault();addProjIdea();}
-    if(e.target.id==='user-input'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}
-});
+// ===== START =====
+init();
 </script>
 </body>
 </html>

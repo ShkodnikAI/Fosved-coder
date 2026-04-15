@@ -1,144 +1,162 @@
-﻿import os, json, asyncio, re
-from pathlib import Path
+import json, os, re
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-import uvicorn
+from fastapi.responses import FileResponse, HTMLResponse
+from api.endpoints import router
+from core.chat_history import ChatHistory
+from core.chat import stream_chat
 
 app = FastAPI(title="Fosved Coder")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.include_router(router)
 
-BASE = Path(__file__).resolve().parent
-from api.endpoints import router as api_router
-app.include_router(api_router)
-app.mount("/static", StaticFiles(directory=str(BASE / "ui" / "static")), name="static")
+chat_hist = ChatHistory()
 
 @app.get("/")
-async def index():
-    return FileResponse(str(BASE / "ui" / "templates" / "index.html"))
+def index():
+    return FileResponse("ui/templates/index.html")
 
-def _load_projects():
-    pf = BASE / "data" / "projects.json"
-    if pf.exists():
+app.mount("/static", StaticFiles(directory="ui/static"), name="static")
+
+
+def _build_system_prompt(project, messages_count=0):
+    """Build system prompt with project context."""
+    parts = [
+        "Ты — Fosved Coder AI, опытный программист-ассистент. Помогай пользователю с кодом, архитектурой, "
+        "отладкой и разработкой. Отвечай на том языке, на котором задан вопрос.",
+        "Форматируй код в блоках ```язык ... ``` с указанием языка."
+    ]
+    if project:
+        if project.get("instructions"):
+            parts.append(f"\nИНСТРУКЦИИ ПРОЕКТА:\n{project['instructions']}")
+        if project.get("prompt"):
+            parts.append(f"\nОПИСАНИЕ ПРОЕКТА:\n{project['prompt']}")
+        if project.get("ideas"):
+            parts.append(f"\nИДЕИ И ЗАМЕТКИ:\n{project['ideas']}")
+        if project.get("github_repo"):
+            parts.append(f"\nGitHub репозиторий: {project['github_repo']}")
+        if project.get("name"):
+            parts.append(f"\nНазвание проекта: {project['name']}")
+        if project.get("folder"):
+            parts.append(f"\nЛокальная папка: {project['folder']}")
+    return "\n".join(parts)
+
+
+def _replace_read_tags(text, project):
+    """Replace [READ:path] tags with file contents."""
+    folder = project.get("folder", "") if project else ""
+    if not folder:
+        return text
+    def read_file(match):
+        rel_path = match.group(1).strip()
+        full_path = os.path.normpath(os.path.join(folder, rel_path))
+        if not full_path.startswith(os.path.normpath(folder)):
+            return match.group(0)
+        if not os.path.isfile(full_path):
+            return f"[Файл не найден: {rel_path}]"
         try:
-            with open(pf, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read(5000)
+            return f"\n--- Содержимое {rel_path} ---\n{content}\n--- Конец файла ---\n"
+        except:
+            return f"[Ошибка чтения: {rel_path}]"
+    return re.sub(r'\[READ:([^\]]+)\]', read_file, text)
 
-@app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket):
-    await ws.accept()
-    stop_event = asyncio.Event()
+
+def _auto_detect_file_reads(text, project):
+    """Auto-detect patterns like 'read main.py' and append file contents."""
+    folder = project.get("folder", "") if project else ""
+    if not folder or not folder.strip():
+        return text, []
+    files_read = []
+    patterns = [
+        r'(?:прочитай|read|посмотри|покажи|открой)\s+([a-zA-Z0-9_./\-]+\.\w{1,5})',
+        r'(?:файл|file)\s+([a-zA-Z0-9_./\-]+\.\w{1,5})',
+    ]
+    additions = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            fname = match.group(1)
+            if fname in files_read:
+                continue
+            files_read.append(fname)
+            full_path = os.path.normpath(os.path.join(folder, fname))
+            if not full_path.startswith(os.path.normpath(folder)):
+                continue
+            if not os.path.isfile(full_path):
+                additions.append(f"\n[Файл не найден: {fname}]")
+                continue
+            try:
+                with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read(5000)
+                additions.append(f"\n--- Содержимое {fname} ---\n{content}\n--- Конец файла ---\n")
+            except:
+                additions.append(f"\n[Ошибка чтения: {fname}]")
+    if additions:
+        return text + "\n".join(additions), files_read
+    return text, []
+
+
+@app.websocket("/ws/chat/{project_id}")
+async def ws_chat(websocket: WebSocket, project_id: str):
+    await websocket.accept()
     try:
         while True:
-            raw = await ws.receive_text()
-            try:
-                msg = json.loads(raw)
-            except Exception:
-                continue
-            mtype = msg.get("type", "")
-            if mtype == "stop":
-                stop_event.set()
-                continue
-            if mtype != "chat":
-                continue
-            stop_event.clear()
-            message = msg.get("message", "")
-            project_id = msg.get("project_id", "")
-            model_id = msg.get("model", "")
-            messages = []
-            if project_id:
-                projs = _load_projects()
-                proj = next((p for p in projs if p["id"] == project_id), None)
-                if proj:
-                    parts = []
-                    if proj.get("instructions"):
-                        parts.append("INSTRUCTIONS:\n" + proj["instructions"])
-                    if proj.get("prompt"):
-                        parts.append("PROJECT DESCRIPTION:\n" + proj["prompt"])
-                    if proj.get("ideas"):
-                        parts.append("PROJECT IDEAS:\n" + ", ".join(proj["ideas"]))
-                    if proj.get("github_repo"):
-                        parts.append("GITHUB REPO: " + proj["github_repo"])
-                    folder = proj.get("folder", "")
-                    if folder and os.path.isdir(folder):
-                        skip = {".git","__pycache__","node_modules",".venv","venv",".idea",".vscode","dist","build",".next"}
-                        flist = []
-                        def _walk(dp, prefix=""):
-                            try:
-                                items = sorted(os.listdir(dp))
-                                for d in [e for e in items if os.path.isdir(os.path.join(dp,e)) and e not in skip]:
-                                    flist.append(prefix + d + "/")
-                                    _walk(os.path.join(dp,d), prefix + d + "/")
-                                for f in [e for e in items if os.path.isfile(os.path.join(dp,e)) and not e.endswith((".pyc",))]:
-                                    flist.append(prefix + f)
-                            except PermissionError:
-                                pass
-                        _walk(folder)
-                        if flist:
-                            parts.append("PROJECT FILES:\n" + "\n".join(flist[:200]))
-                            parts.append("\nWhen user asks to read a file, use format: [READ:filepath]\nExample: [READ:src/main.py]")
-                    if parts:
-                        messages.append({"role": "system", "content": "\n\n".join(parts)})
-            enriched_message = message
-            folder_path = ""
-            if project_id:
-                projs = _load_projects()
-                proj = next((p for p in projs if p["id"] == project_id), None)
-                if proj:
-                    folder_path = proj.get("folder", "")
-            if folder_path:
-                read_pat = re.compile(r'\[READ:(.+?)\]')
-                def _replace_read(m):
-                    fp = m.group(1).strip()
-                    full = os.path.normpath(os.path.join(folder_path, fp))
-                    if not full.startswith(os.path.normpath(folder_path)):
-                        return "[ACCESS DENIED: " + fp + "]"
-                    try:
-                        with open(full, "r", encoding="utf-8") as f:
-                            return "\n--- FILE: " + fp + " ---\n" + f.read() + "\n--- END FILE ---\n"
-                    except Exception as e:
-                        return "[ERROR reading " + fp + ": " + str(e) + "]"
-                enriched_message = read_pat.sub(_replace_read, message)
-                if "[READ:" not in message:
-                    refs = re.findall(r'(?:read|open|show|view|display|cat)\s+(?:the\s+)?(?:file\s+)?[`\'"]?([\w\./\-]+)[`\'"]?', message, re.IGNORECASE)
-                    extra = ""
-                    for ref in refs[:5]:
-                        full = os.path.normpath(os.path.join(folder_path, ref))
-                        if not full.startswith(os.path.normpath(folder_path)):
-                            continue
-                        try:
-                            with open(full, "r", encoding="utf-8") as f:
-                                extra += "\n--- FILE: " + ref + " ---\n" + f.read() + "\n--- END FILE ---\n"
-                        except Exception:
-                            pass
-                    if extra:
-                        enriched_message = message + "\n\n[Auto-read files:]\n" + extra
-            messages.append({"role": "user", "content": enriched_message})
-            from core.chat import stream_chat
-            from core import chat_history
-            chat_history.save_message(project_id, "user", message)
-            chat_history.save_message(project_id, "ai", "")
-            accumulated = []
-            async def on_token(content):
-                if not stop_event.is_set():
-                    accumulated.append(content)
-                    await ws.send_text(json.dumps({"type": "token", "content": content}))
-            async def on_done():
-                full = "".join(accumulated)
-                chat_history.update_last_ai(project_id, full)
-                await ws.send_text(json.dumps({"type": "done"}))
-            async def on_error(err_msg):
-                chat_history.save_message(project_id, "system", err_msg)
-                await ws.send_text(json.dumps({"type": "error", "message": err_msg}))
-            await stream_chat(model_id, messages, on_token, on_done, on_error, stop_event)
+            data = await websocket.receive_json()
+            message = data.get("message", "")
+            model_id = data.get("model", "")
+            thread_id = data.get("thread_id", "main")
+            project = None
+
+            # Load project context
+            projects_file = "data/projects.json"
+            if os.path.exists(projects_file):
+                with open(projects_file, "r", encoding="utf-8") as f:
+                    projects = json.load(f)
+                    project = projects.get(project_id)
+
+            # Save user message
+            chat_hist.save_message(project_id, "user", message, thread_id)
+
+            # Process file reads
+            message = _replace_read_tags(message, project)
+            message, _ = _auto_detect_file_reads(message, project)
+
+            # Build message history
+            history = chat_hist.load_history(project_id, thread_id)
+            system_prompt = _build_system_prompt(project, len(history))
+            messages = [{"role": "system", "content": system_prompt}]
+
+            # Add history (last 30 messages for context window)
+            for msg in history[-30:]:
+                if msg.get("role") in ("user", "assistant"):
+                    messages.append({"role": msg["role"], "content": msg["content"]})
+
+            # Use selected model or project default
+            if not model_id and project:
+                model_id = project.get("selected_model", "")
+
+            # Stream response
+            full_response = ""
+            async for token, is_complete, error in stream_chat(messages, model_id):
+                if error:
+                    await websocket.send_json({"type": "error", "content": error})
+                    break
+                if token:
+                    full_response += token
+                    await websocket.send_json({"type": "token", "content": token})
+                if is_complete and full_response:
+                    # Save assistant response
+                    chat_hist.save_message(project_id, "assistant", full_response, thread_id)
+                    await websocket.send_json({"type": "done"})
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            await websocket.send_json({"type": "error", "content": str(e)})
+        except:
+            pass
+
 
 if __name__ == "__main__":
-    uvicorn.run("run:app", host="0.0.0.0", port=8000, reload=False)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
