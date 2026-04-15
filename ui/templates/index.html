@@ -50,6 +50,11 @@
     <main class="content">
         <div id="chat-messages"></div>
         <div class="chat-file-preview" id="chat-files"></div>
+        <div class="chat-model-bar">
+            <label>🤖 Model:</label>
+            <select id="chat-model-select" class="chat-model-select" onchange="onChatModelChange()"></select>
+            <span id="chat-model-status" class="chat-model-status"></span>
+        </div>
         <div class="input-area">
             <div class="input-wrapper">
                 <button class="btn-attach" onclick="document.getElementById('chat-file-input').click()" title="Attach">📎</button>
@@ -247,12 +252,8 @@ function sendMessage() {
     chatAttachedFiles = [];
     renderChatFiles();
 
-    /* determine model */
-    var model = selectedModelId || '';
-    if (!model && selectedProjectId) {
-        var proj = allProjects.find(function(p){return p.id === selectedProjectId;});
-        if (proj && proj.selected_model) model = proj.selected_model;
-    }
+    /* determine model from dropdown */
+    var model = document.getElementById('chat-model-select').value || '';
     if (!model && allModels.length > 0) {
         model = allModels[0].model_id;
     }
@@ -521,6 +522,94 @@ function appendMsgHtml(role, html) {
     el.scrollTop = el.scrollHeight;
 }
 
+
+function onChatModelChange() {
+    selectedModelId = document.getElementById('chat-model-select').value;
+    updateModelStatus();
+}
+
+function updateChatModelSelect() {
+    var sel = document.getElementById('chat-model-select');
+    var current = sel.value;
+    sel.innerHTML = '';
+
+    if (!allModels.length) {
+        sel.innerHTML = '<option value="">No models available</option>';
+        document.getElementById('chat-model-status').textContent = '';
+        document.getElementById('chat-model-status').className = 'chat-model-status';
+        return;
+    }
+
+    // Group: user models first, then free
+    var userModels = allModels.filter(function(m){ return m.type === 'user'; });
+    var freeModels = allModels.filter(function(m){ return m.type !== 'user'; });
+
+    if (userModels.length) {
+        var og = document.createElement('optgroup');
+        og.label = 'Your Models (with key)';
+        userModels.forEach(function(m) {
+            var opt = document.createElement('option');
+            opt.value = m.model_id;
+            opt.textContent = m.model_id + ' (' + m.provider + ')';
+            if (!m.has_key || !m.available) opt.disabled = true;
+            og.appendChild(opt);
+        });
+        sel.appendChild(og);
+    }
+
+    if (freeModels.length) {
+        var og2 = document.createElement('optgroup');
+        og2.label = 'Free Models';
+        freeModels.forEach(function(m) {
+            var opt = document.createElement('option');
+            opt.value = m.model_id;
+            opt.textContent = m.model_id + ' (' + m.provider + ')';
+            og2.appendChild(opt);
+        });
+        sel.appendChild(og2);
+    }
+
+    // Set selected: chat override > project model > first available
+    var targetModel = selectedModelId || '';
+    if (!targetModel && selectedProjectId) {
+        var proj = allProjects.find(function(p){return p.id === selectedProjectId;});
+        if (proj && proj.selected_model) targetModel = proj.selected_model;
+    }
+    if (!targetModel && userModels.length) targetModel = userModels[0].model_id;
+    if (!targetModel && freeModels.length) targetModel = freeModels[0].model_id;
+
+    sel.value = targetModel;
+    if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+    selectedModelId = sel.value;
+    updateModelStatus();
+}
+
+function updateModelStatus() {
+    var sel = document.getElementById('chat-model-select');
+    var statusEl = document.getElementById('chat-model-status');
+    var modelId = sel.value;
+    if (!modelId) {
+        statusEl.textContent = '';
+        statusEl.className = 'chat-model-status';
+        return;
+    }
+    var m = allModels.find(function(x){return x.model_id === modelId;});
+    if (!m) {
+        statusEl.textContent = '';
+        statusEl.className = 'chat-model-status';
+        return;
+    }
+    if (m.has_key && m.available) {
+        statusEl.textContent = 'KEY';
+        statusEl.className = 'chat-model-status active';
+    } else if (m.type === 'free') {
+        statusEl.textContent = 'FREE';
+        statusEl.className = 'chat-model-status active';
+    } else {
+        statusEl.textContent = 'NO KEY';
+        statusEl.className = 'chat-model-status inactive';
+    }
+}
 function clearChat() {
     var pid = selectedProjectId || '';
     if (!confirm('Clear chat history?')) return;
