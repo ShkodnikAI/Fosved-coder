@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fosved Coder</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <!-- HEADER -->
+  <div class="header">
+    <h1>&#9889; Fosved Coder</h1>
+    <div class="header-actions">
+      <button class="btn btn-ghost" onclick="toggleSidebar()">&#9776;</button>
+      <button class="btn btn-accent" onclick="openSettings()">&#9881; Настройки</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- SIDEBAR -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h2>&#128193; Проекты</h2>
+        <button class="btn btn-accent btn-sm" onclick="openNewProject()">&#43; Новый проект</button>
+      </div>
+      <div class="project-list" id="projectList"></div>
+    </div>
+
+    <!-- CHAT AREA -->
+    <div class="chat-area">
+      <div class="chat-header">
+        <h2 id="chatTitle">Выберите проект</h2>
+        <div class="model-bar" id="modelBar" style="display:none">
+          <select id="modelSelect" onchange="currentModel=this.value"></select>
+          <button class="btn btn-sm btn-ghost" onclick="clearChat()" title="Очистить чат">&#128465;</button>
+        </div>
+      </div>
+
+      <!-- THREAD TABS -->
+      <div class="threads-bar" id="threadsBar" style="display:none"></div>
+
+      <!-- MESSAGES -->
+      <div class="messages" id="messages"></div>
+
+      <!-- INPUT -->
+      <div class="input-area" id="inputArea" style="display:none">
+        <div class="file-preview" id="filePreview">
+          <span id="fileName"></span>
+          <span class="remove-file" onclick="removeFile()">&times;</span>
+        </div>
+        <label class="attach-btn" title="Прикрепить файл">&#128206;<input type="file" id="fileInput" hidden onchange="handleFile(this)"></label>
+        <textarea id="msgInput" rows="3" placeholder="Сообщение... (Shift+Enter — новая строка)" onkeydown="handleKey(event)"></textarea>
+        <button class="btn btn-accent" onclick="sendMessage()">&#9654;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QUICK BAR -->
+  <div class="quick-bar" id="quickBar">
+    <div class="quick-group"><span>Ссылки:</span></div>
+  </div>
+</div>
+
+<!-- PROJECT MODAL -->
+<div class="modal-overlay" id="projectModal">
+  <div class="modal">
+    <h2 id="projectModalTitle">Новый проект</h2>
+    <label>Название</label>
+    <input id="pName" placeholder="My Project">
+    <label>Папка проекта</label>
+    <input id="pFolder" placeholder="C:/projects/myapp">
+    <label>GitHub репозиторий</label>
+    <input id="pGithub" placeholder="https://github.com/user/repo">
+    <label>Описание / Промпт</label>
+    <textarea id="pPrompt" rows="3" placeholder="Опишите проект для AI..."></textarea>
+    <label>Инструкции</label>
+    <textarea id="pInstructions" rows="3" placeholder="Специфичные инструкции для AI..."></textarea>
+    <label>Идеи и заметки</label>
+    <textarea id="pIdeas" rows="2" placeholder="Идеи, ссылки, заметки..."></textarea>
+    <label>Модель по умолчанию</label>
+    <select id="pModel"></select>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('projectModal')">Отмена</button>
+      <button class="btn btn-accent" id="projectModalSave" onclick="saveProject()">Создать</button>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal" style="width:620px">
+    <h2>&#9881; Настройки</h2>
+    <div class="settings-section">
+      <h3>&#128273; API Ключи</h3>
+      <div id="keysList"></div>
+      <div class="add-key-form">
+        <select id="keyProvider"></select>
+        <input id="keyValue" placeholder="sk-..." type="password">
+        <input id="keyName" placeholder="Имя (необязательно)" style="max-width:150px">
+        <button class="btn btn-accent btn-sm" onclick="addKey()">Добавить</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>&#128187; GitHub</h3>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="ghToken" placeholder="GitHub Token" type="password" style="flex:1">
+        <input id="ghUsername" placeholder="Username" style="max-width:140px">
+        <button class="btn btn-accent btn-sm" onclick="saveGithub()">Сохранить</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- FILE TREE MODAL -->
+<div class="modal-overlay" id="filesModal">
+  <div class="modal" style="width:700px">
+    <h2>&#128193; Файлы проекта</h2>
+    <div class="file-tree" id="fileTree"></div>
+    <div class="file-viewer" id="fileViewer" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('filesModal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- THREAD CONTEXT MENU -->
+<div id="threadMenu" style="display:none;position:fixed;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;padding:6px 0;z-index:200;min-width:140px;box-shadow:0 4px 12px rgba(0,0,0,.5)">
+  <div style="padding:6px 14px;cursor:pointer;font-size:13px" onclick="renameCurrentThread()">&#9998; Переименовать</div>
+  <div style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--danger)" onclick="deleteCurrentThread()">&#128465; Удалить</div>
+</div>
+
+<script>
+// ===== STATE =====
+let projects = {};
+let currentProjectId = null;
+let currentThreadId = 'main';
+let threads = [];
+let ws = null;
+let isStreaming = false;
+let attachedFile = null;
+let models = [];
+let quickLinks = JSON.parse(localStorage.getItem('quickLinks') || '[]');
+
+// ===== INIT =====
+async function init() {
+  await loadProjects();
+  await loadModels();
+  renderQuickBar();
+}
+
+// ===== API HELPERS =====
+async function api(path, opts = {}) {
+  try {
+    const r = await fetch(path, opts);
+    return await r.json();
+  } catch(e) { console.error(e); return null; }
+}
+
+// ===== PROJECTS =====
+async function loadProjects() {
+  projects = (await api('/api/projects')) || {};
+  renderProjects();
+}
+
+function renderProjects() {
+  const el = document.getElementById('projectList');
+  el.innerHTML = '';
+  Object.values(projects).sort((a,b) => (b.created||'').localeCompare(a.created||'')).forEach(p => {
+    const active = p.id === currentProjectId ? 'active' : '';
+    const pct = p.progress || 0;
+    const color = pct < 30 ? 'var(--danger)' : pct < 70 ? 'var(--warning)' : 'var(--success)';
+    const ghLink = p.github_repo ? `<a href="${p.github_repo}" target="_blank" class="github-link" onclick="event.stopPropagation()">&#128279; GitHub</a>` : '';
+    el.innerHTML += `
+      <div class="project-card ${active}" onclick="selectProject('${p.id}')">
+        <h3>${esc(p.name)}</h3>
+        <p>${esc(p.description || p.prompt || '').substring(0, 60)}${ghLink}</p>
+        <div class="progress-bar" onclick="event.stopPropagation();setProgress('${p.id}',event)">
+          <div class="progress-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${pct}%</div>
+        <div class="project-actions">
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();editProject('${p.id}')" title="Редактировать">&#9998;</button>
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();generateCode('${p.id}')" title="Генерировать код">&#9889;</button>
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openFiles('${p.id}')" title="Файлы">&#128193;</button>
+          <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteProject('${p.id}')" title="Удалить">&#128465;</button>
+        </div>
+      </div>`;
+  });
+}
+
+async function selectProject(pid) {
+  currentProjectId = pid;
+  const p = projects[pid];
+  document.getElementById('chatTitle').textContent = p.name;
+  document.getElementById('modelBar').style.display = 'flex';
+  document.getElementById('inputArea').style.display = 'flex';
+  document.getElementById('threadsBar').style.display = 'flex';
+  renderProjects();
+  await loadThreads();
+  await loadChatHistory();
+  populateModelSelect(p.selected_model);
+  connectWS();
+}
+
+function openNewProject() {
+  document.getElementById('projectModalTitle').textContent = 'Новый проект';
+  document.getElementById('projectModalSave').textContent = 'Создать';
+  document.getElementById('projectModalSave').onclick = saveProject;
+  ['pName','pFolder','pGithub','pPrompt','pInstructions','pIdeas'].forEach(id => document.getElementById(id).value = '');
+  populateProjectModelSelect('');
+  openModal('projectModal');
+}
+
+let editingProjectId = null;
+function editProject(pid) {
+  const p = projects[pid];
+  editingProjectId = pid;
+  document.getElementById('projectModalTitle').textContent = 'Редактировать проект';
+  document.getElementById('projectModalSave').textContent = 'Сохранить';
+  document.getElementById('projectModalSave').onclick = updateProject;
+  document.getElementById('pName').value = p.name || '';
+  document.getElementById('pFolder').value = p.folder || '';
+  document.getElementById('pGithub').value = p.github_repo || '';
+  document.getElementById('pPrompt').value = p.prompt || '';
+  document.getElementById('pInstructions').value = p.instructions || '';
+  document.getElementById('pIdeas').value = p.ideas || '';
+  populateProjectModelSelect(p.selected_model);
+  openModal('projectModal');
+}
+
+async function saveProject() {
+  const data = {
+    name: document.getElementById('pName').value.trim(),
+    folder: document.getElementById('pFolder').value.trim(),
+    github_repo: document.getElementById('pGithub').value.trim(),
+    prompt: document.getElementById('pPrompt').value.trim(),
+    instructions: document.getElementById('pInstructions').value.trim(),
+    ideas: document.getElementById('pIdeas').value.trim(),
+    selected_model: document.getElementById('pModel').value,
+    progress: 0
+  };
+  if (!data.name) return alert('Введите название проекта');
+  const p = await api('/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  if (p && p.id) {
+    await loadProjects();
+    selectProject(p.id);
+    closeModal('projectModal');
+  }
+}
+
+async function updateProject() {
+  if (!editingProjectId) return;
+  const data = {
+    name: document.getElementById('pName').value.trim(),
+    folder: document.getElementById('pFolder').value.trim(),
+    github_repo: document.getElementById('pGithub').value.trim(),
+    prompt: document.getElementById('pPrompt').value.trim(),
+    instructions: document.getElementById('pInstructions').value.trim(),
+    ideas: document.getElementById('pIdeas').value.trim(),
+    selected_model: document.getElementById('pModel').value
+  };
+  await api(`/api/projects/${editingProjectId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  await loadProjects();
+  closeModal('projectModal');
+}
+
+async function deleteProject(pid) {
+  if (!confirm('Удалить проект?')) return;
+  await api(`/api/projects/${pid}`, {method:'DELETE'});
+  if (currentProjectId === pid) {
+    currentProjectId = null;
+    document.getElementById('chatTitle').textContent = 'Выберите проект';
+    document.getElementById('modelBar').style.display = 'none';
+    document.getElementById('inputArea').style.display = 'none';
+    document.getElementById('threadsBar').style.display = 'none';
+    document.getElementById('messages').innerHTML = '';
+  }
+  await loadProjects();
+}
+
+function setProgress(pid, e) {
+  const bar = e.currentTarget;
+  const rect = bar.getBoundingClientRect();
+  const pct = Math.round(((e.clientX - rect.left) / rect.width) * 100);
+  fetch(`/api/projects/${pid}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({progress: pct})
+  });
+  projects[pid].progress = pct;
+  renderProjects();
+}
+
+async function generateCode(pid) {
+  const p = projects[pid];
+  if (!p.prompt && !p.instructions) return alert('Добавьте описание/промпт проекта');
+  selectProject(pid);
+  const msg = `Сгенерируй код для проекта "${p.name}". ${p.prompt ? 'Описание: ' + p.prompt : ''} ${p.instructions ? 'Инструкции: ' + p.instructions : ''}`;
+  document.getElementById('msgInput').value = msg;
+  sendMessage();
+}
+
+// ===== THREADS =====
+async function loadThreads() {
+  if (!currentProjectId) return;
+  threads = (await api(`/api/projects/${currentProjectId}/threads`)) || [];
+  if (threads.length > 0 && !threads.find(t => t.id === currentThreadId)) {
+    currentThreadId = threads[0].id;
+  }
+  renderThreads();
+}
+
+function renderThreads() {
+  const bar = document.getElementById('threadsBar');
+  bar.innerHTML = '';
+  threads.forEach(t => {
+    const active = t.id === currentThreadId ? 'active' : '';
+    bar.innerHTML += `
+      <div class="thread-tab ${active}" onclick="switchThread('${t.id}')" oncontextmenu="threadContext(event,'${t.id}')">
+        ${esc(t.name || t.id)}
+        ${threads.length > 1 ? `<span class="thread-close" onclick="event.stopPropagation();deleteThread('${t.id}')">&times;</span>` : ''}
+      </div>`;
+  });
+  bar.innerHTML += `<button class="thread-add" onclick="createThread()" title="Новый поток">+</button>`;
+}
+
+async function createThread() {
+  if (!currentProjectId) return;
+  const name = prompt('Название потока:', `Поток ${threads.length + 1}`);
+  if (!name) return;
+  const res = await api(`/api/projects/${currentProjectId}/threads`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
+  });
+  if (res && res.status === 'ok') {
+    currentThreadId = res.id;
+    await loadThreads();
+    await loadChatHistory();
+  }
+}
+
+async function switchThread(tid) {
+  if (tid === currentThreadId || isStreaming) return;
+  currentThreadId = tid;
+  renderThreads();
+  await loadChatHistory();
+}
+
+async function deleteThread(tid) {
+  if (threads.length <= 1) return;
+  if (!confirm('Удалить этот поток?')) return;
+  await api(`/api/projects/${currentProjectId}/threads/${tid}`, {method:'DELETE'});
+  if (currentThreadId === tid) currentThreadId = 'main';
+  await loadThreads();
+  await loadChatHistory();
+}
+
+let contextThreadId = null;
+function threadContext(e, tid) {
+  e.preventDefault();
+  contextThreadId = tid;
+  const menu = document.getElementById('threadMenu');
+  menu.style.display = 'block';
+  menu.style.left = e.clientX + 'px';
+  menu.style.top = e.clientY + 'px';
+}
+
+async function renameCurrentThread() {
+  document.getElementById('threadMenu').style.display = 'none';
+  if (!contextThreadId) return;
+  const t = threads.find(x => x.id === contextThreadId);
+  const name = prompt('Новое название:', t ? t.name : '');
+  if (!name) return;
+  await api(`/api/projects/${currentProjectId}/threads/${contextThreadId}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
+  });
+  await loadThreads();
+}
+
+async function deleteCurrentThread() {
+  document.getElementById('threadMenu').style.display = 'none';
+  if (contextThreadId) deleteThread(contextThreadId);
+}
+
+// Close thread menu on click outside
+document.addEventListener('click', () => {
+  document.getElementById('threadMenu').style.display = 'none';
+});
+
+// ===== CHAT =====
+async function loadChatHistory() {
+  if (!currentProjectId) return;
+  const msgs = await api(`/api/chat/${currentProjectId}?thread_id=${currentThreadId}`);
+  const el = document.getElementById('messages');
+  el.innerHTML = '';
+  if (!msgs || msgs.length === 0) return;
+  let lastDate = '';
+  msgs.forEach(m => {
+    const d = (m.timestamp || '').substring(0, 10);
+    if (d && d !== lastDate) {
+      lastDate = d;
+      el.innerHTML += `<div class="date-sep">${d}</div>`;
+    }
+    if (m.role === 'user') {
+      el.innerHTML += `<div class="msg msg-user">${esc(m.content)}</div>`;
+    } else if (m.role === 'assistant') {
+      el.innerHTML += `<div class="msg msg-ai">${renderAI(m.content)}</div>`;
+    }
+  });
+  el.scrollTop = el.scrollHeight;
+}
+
+function connectWS() {
+  if (ws) ws.close();
+  ws = new WebSocket(`ws://${location.host}/ws/chat/${currentProjectId}`);
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'token') {
+      appendToken(data.content);
+    } else if (data.type === 'done') {
+      finishStream();
+    } else if (data.type === 'error') {
+      appendError(data.content);
+      finishStream();
+    }
+  };
+  ws.onclose = () => { isStreaming = false; };
+}
+
+function sendMessage() {
+  if (!currentProjectId || isStreaming) return;
+  const input = document.getElementById('msgInput');
+  let msg = input.value.trim();
+  if (!msg && !attachedFile) return;
+
+  // Append file content if attached
+  if (attachedFile) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      msg += `\n\n--- Файл: ${attachedFile.name} ---\n\`\`\`\n${reader.result.substring(0, 8000)}\n\`\`\``;
+      doSend(msg);
+    };
+    reader.readAsText(attachedFile);
+    removeFile();
+    return;
+  }
+  doSend(msg);
+}
+
+function doSend(msg) {
+  // Display user message
+  const el = document.getElementById('messages');
+  el.innerHTML += `<div class="msg msg-user">${esc(msg)}</div>`;
+  document.getElementById('msgInput').value = '';
+
+  // Create AI message container
+  const aiDiv = document.createElement('div');
+  aiDiv.className = 'msg msg-ai';
+  aiDiv.innerHTML = '<span class="cursor-blink"></span>';
+  el.appendChild(aiDiv);
+  el.scrollTop = el.scrollHeight;
+
+  isStreaming = true;
+  const model = document.getElementById('modelSelect').value;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({message: msg, model: model, thread_id: currentThreadId}));
+  } else {
+    connectWS();
+    setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({message: msg, model: model, thread_id: currentThreadId}));
+      }
+    }, 500);
+  }
+}
+
+function appendToken(token) {
+  const el = document.getElementById('messages');
+  const aiDiv = el.querySelector('.msg-ai:last-child');
+  if (!aiDiv) return;
+  const cursor = aiDiv.querySelector('.cursor-blink');
+  const contentDiv = aiDiv.querySelector('.stream-content') || document.createElement('span');
+  if (!contentDiv.classList.contains('stream-content')) {
+    contentDiv.classList.add('stream-content');
+    if (cursor) cursor.before(contentDiv);
+    else aiDiv.appendChild(contentDiv);
+  }
+  contentDiv.textContent += token;
+  el.scrollTop = el.scrollHeight;
+}
+
+function finishStream() {
+  isStreaming = false;
+  const el = document.getElementById('messages');
+  const aiDiv = el.querySelector('.msg-ai:last-child');
+  if (!aiDiv) return;
+  const contentDiv = aiDiv.querySelector('.stream-content');
+  const cursor = aiDiv.querySelector('.cursor-blink');
+  if (cursor) cursor.remove();
+  if (contentDiv) {
+    const raw = contentDiv.textContent;
+    aiDiv.innerHTML = renderAI(raw);
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function appendError(err) {
+  const el = document.getElementById('messages');
+  el.innerHTML += `<div class="msg msg-error">${esc(err)}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+async function clearChat() {
+  if (!currentProjectId) return;
+  if (!confirm('Очистить историю этого потока?')) return;
+  await api(`/api/chat/${currentProjectId}?thread_id=${currentThreadId}`, {method:'DELETE'});
+  document.getElementById('messages').innerHTML = '';
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+// ===== RENDER AI CONTENT =====
+function renderAI(text) {
+  // Process code blocks
+  let html = esc(text);
+  // Code blocks with language
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => {
+    const ext = langToExt(lang);
+    const saveBtn = `<button class="btn btn-sm btn-ghost" onclick="saveCode(this,'${ext}')">&#128190; Сохранить</button>`;
+    const copyBtn = `<button class="btn btn-sm btn-ghost" onclick="copyCode(this)">&#128203; Копировать</button>`;
+    return `<div class="code-lang">${lang || 'code'}</div><pre><code>${code}</code></pre><div class="code-actions">${saveBtn}${copyBtn}</div>`;
+  });
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+function langToExt(lang) {
+  const map = {python:'py',javascript:'js',typescript:'ts',html:'html',css:'css',json:'json',java:'java',cpp:'cpp',c:'c',go:'go',rust:'rs',rb:'rb',php:'php',sql:'sql',sh:'sh',bash:'sh',yaml:'yml',xml:'xml',jsx:'jsx',tsx:'tsx',vue:'vue'};
+  return map[lang.toLowerCase()] || lang || 'txt';
+}
+
+function copyCode(btn) {
+  const pre = btn.closest('.msg-ai').querySelector('pre code');
+  navigator.clipboard.writeText(pre.textContent);
+  btn.textContent = '✓ Скопировано';
+  setTimeout(() => btn.innerHTML = '&#128203; Копировать', 1500);
+}
+
+async function saveCode(btn, ext) {
+  const pre = btn.closest('.msg-ai').querySelector('pre code');
+  const name = prompt('Имя файла:', `file.${ext}`);
+  if (!name || !currentProjectId) return;
+  await api(`/api/projects/${currentProjectId}/save-file`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({path: name, content: pre.textContent})
+  });
+  btn.textContent = '✓ Сохранено';
+  setTimeout(() => btn.innerHTML = '&#128190; Сохранить', 1500);
+}
+
+// ===== FILES =====
+async function openFiles(pid) {
+  const tree = await api(`/api/projects/${pid}/tree`);
+  const el = document.getElementById('fileTree');
+  el.innerHTML = '';
+  if (!tree || tree.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-dim);padding:10px">Папка не задана или пуста</div>';
+    openModal('filesModal');
+    return;
+  }
+  tree.forEach(f => {
+    const icon = f.type === 'dir' ? '&#128193;' : '&#128196;';
+    const style = `padding-left:${f.level * 16 + 8}px`;
+    el.innerHTML += `<div class="file-tree-item" style="${style}" data-path="${esc(f.path)}" onclick="${f.type === 'file' ? `viewFile('${pid}','${esc(f.path)}')` : ''}">
+      <span class="icon">${icon}</span>${esc(f.name)}</div>`;
+  });
+  document.getElementById('fileViewer').style.display = 'none';
+  openModal('filesModal');
+}
+
+async function viewFile(pid, path) {
+  const data = await api(`/api/projects/${pid}/read-file?path=${encodeURIComponent(path)}`);
+  const el = document.getElementById('fileViewer');
+  if (!data || data.error) { el.innerHTML = '<div style="color:var(--danger)">' + (data?.error || 'Ошибка') + '</div>'; el.style.display = 'block'; return; }
+  el.style.display = 'block';
+  const lines = (data.lines || data.content.split('\n'));
+  el.innerHTML = lines.map((line, i) => `<div class="line"><span class="line-no">${i + 1}</span><span class="line-content">${esc(line)}</span></div>`).join('');
+}
+
+// ===== MODELS =====
+async function loadModels() {
+  models = (await api('/api/models')) || [];
+  populateModelSelect('');
+}
+
+function populateModelSelect(selected) {
+  const sel = document.getElementById('modelSelect');
+  sel.innerHTML = '';
+  const userModels = models.filter(m => m.type === 'user');
+  const freeModels = models.filter(m => m.type === 'free');
+  if (userModels.length) {
+    sel.innerHTML += '<optgroup label="Ваши модели">';
+    userModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
+    sel.innerHTML += '</optgroup>';
+  }
+  if (freeModels.length) {
+    sel.innerHTML += '<optgroup label="Бесплатные">';
+    freeModels.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
+    sel.innerHTML += '</optgroup>';
+  }
+  if (!sel.value && models.length) sel.value = models[0].id;
+}
+
+function populateProjectModelSelect(selected) {
+  const sel = document.getElementById('pModel');
+  sel.innerHTML = '<option value="">— Автовыбор —</option>';
+  models.forEach(m => { sel.innerHTML += `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.name || m.id)}</option>`; });
+}
+
+// ===== SETTINGS =====
+async function openSettings() {
+  const providers = (await api('/api/providers')) || [];
+  const provSel = document.getElementById('keyProvider');
+  provSel.innerHTML = providers.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  await refreshKeys();
+  await loadGithub();
+  openModal('settingsModal');
+}
+
+async function refreshKeys() {
+  const keys = (await api('/api/keys')) || [];
+  const el = document.getElementById('keysList');
+  el.innerHTML = '';
+  keys.forEach(k => {
+    el.innerHTML += `<div class="key-row">
+      <span class="key-provider">${esc(k.name || k.provider)}</span>
+      <span class="key-name">${k.models.length ? k.models.join(', ') : '••••••••'}</span>
+      <button class="btn btn-sm btn-danger" onclick="removeKey('${k.provider}')">Удалить</button>
+    </div>`;
+  });
+}
+
+async function addKey() {
+  const provider = document.getElementById('keyProvider').value;
+  const key = document.getElementById('keyValue').value.trim();
+  const name = document.getElementById('keyName').value.trim();
+  if (!key) return;
+  await api('/api/keys', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider, key, name})});
+  document.getElementById('keyValue').value = '';
+  document.getElementById('keyName').value = '';
+  await refreshKeys();
+  await loadModels();
+}
+
+async function removeKey(provider) {
+  await api(`/api/keys/${provider}`, {method:'DELETE'});
+  await refreshKeys();
+  await loadModels();
+}
+
+async function loadGithub() {
+  const data = (await api('/api/github/user')) || {};
+  document.getElementById('ghToken').value = data.token || '';
+  document.getElementById('ghUsername').value = data.username || '';
+}
+
+async function saveGithub() {
+  const token = document.getElementById('ghToken').value.trim();
+  const username = document.getElementById('ghUsername').value.trim();
+  await api('/api/github/token', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token, username})});
+  alert('Сохранено');
+}
+
+// ===== FILE ATTACH =====
+function handleFile(input) {
+  if (input.files[0]) {
+    attachedFile = input.files[0];
+    document.getElementById('fileName').textContent = attachedFile.name;
+    document.getElementById('filePreview').classList.add('show');
+  }
+}
+
+function removeFile() {
+  attachedFile = null;
+  document.getElementById('fileInput').value = '';
+  document.getElementById('filePreview').classList.remove('show');
+}
+
+// ===== QUICK BAR =====
+function renderQuickBar() {
+  const bar = document.getElementById('quickBar');
+  bar.innerHTML = '<div class="quick-group"><span>Ссылки:</span></div>';
+  const categories = {};
+  quickLinks.forEach(l => {
+    if (!categories[l.cat]) categories[l.cat] = [];
+    categories[l.cat].push(l);
+  });
+  Object.entries(categories).forEach(([cat, links]) => {
+    let html = `<div class="quick-group"><span>${esc(cat)}</span>`;
+    links.forEach(l => {
+      html += `<a href="${esc(l.url)}" target="_blank" class="quick-link" onclick="event.preventDefault();window.open('${esc(l.url)}','_blank')">
+        ${esc(l.name)}<span class="remove-link" onclick="event.stopPropagation();event.preventDefault();removeQuickLink(${quickLinks.indexOf(l)})">&times;</span>
+      </a>`;
+    });
+    html += '</div>';
+    bar.innerHTML += html;
+  });
+  bar.innerHTML += `<button class="btn btn-sm btn-ghost" onclick="addQuickLink()">+ Ссылка</button>`;
+}
+
+function addQuickLink() {
+  const name = prompt('Название:');
+  if (!name) return;
+  const url = prompt('URL:');
+  if (!url) return;
+  const cat = prompt('Категория:', 'Разное') || 'Разное';
+  quickLinks.push({name, url, cat});
+  localStorage.setItem('quickLinks', JSON.stringify(quickLinks));
+  renderQuickBar();
+}
+
+function removeQuickLink(idx) {
+  quickLinks.splice(idx, 1);
+  localStorage.setItem('quickLinks', JSON.stringify(quickLinks));
+  renderQuickBar();
+}
+
+// ===== MODALS =====
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('show');
+}
+
+// ===== UTILS =====
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ===== START =====
+init();
+</script>
+</body>
+</html>
