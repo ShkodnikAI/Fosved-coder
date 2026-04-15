@@ -36,7 +36,15 @@
             <div class="sidebar-section">
                 <div class="section-header">
                     <h3>Модели ИИ</h3>
-                    <button class="btn-add" onclick="refreshModels()" title="Обновить" style="font-size:12px">↻</button>
+                    <div style="display:flex; gap:4px;">
+                        <button class="btn-add" onclick="showPriorityModal()" title="Приоритетные модели" style="font-size:11px; background:var(--amber); color:#000;">⚡</button>
+                        <button class="btn-add" onclick="refreshModels()" title="Обновить" style="font-size:12px">↻</button>
+                    </div>
+                </div>
+                <!-- Priority Models Bar -->
+                <div id="priority-bar" style="display:none; margin-bottom:8px;">
+                    <div style="font-size:10px; text-transform:uppercase; color:var(--amber); letter-spacing:0.5px; margin-bottom:4px; font-weight:600;">Приоритетные</div>
+                    <div id="priority-models-bar" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
                 </div>
                 <div id="models-list">
                     <div class="model-item loading">Загрузка...</div>
@@ -230,12 +238,21 @@
         const input = document.getElementById("user-input");
         const text = input.value.trim();
         if (!text && !attachedFile) return;
-        if (!activeModelId) { addMessage("system", "⚠️ Сначала выберите модель ИИ в сайдбаре."); return; }
+
+        // If priority models are set, first one is auto-selected
+        if (!activeModelId && priorityModels.length) {
+            activeModelId = priorityModels[0];
+        }
+        if (!activeModelId) { addMessage("system", "⚠️ Сначала выберите модель ИИ в сайдбаре или настройте приоритетные модели (⚡)."); return; }
 
         let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
         addMessage("user", displayText);
 
+        // If priority models exist, send them all so server knows the fallback chain
         let payload = { type: "chat", prompt: text, model: activeModelId };
+        if (priorityModels.length) {
+            payload.priority_models = priorityModels;
+        }
         if (attachedFile) payload.file_content = attachedFile.content;
         ws.send(JSON.stringify(payload));
 
@@ -264,14 +281,17 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    // MODELS
+    // MODELS & PRIORITY
     // ═══════════════════════════════════════════════════════
+    let priorityModels = []; // up to 3 model IDs in priority order
+
     async function loadModels() {
         try {
             const resp = await fetch("/api/v1/models");
             const data = await resp.json();
             allModels = data.models || [];
             renderModels();
+            renderPriorityBar();
         } catch(e) { console.error("Failed to load models:", e); }
     }
 
@@ -290,7 +310,10 @@
             paid.forEach(m => {
                 const cls = m.status === 'valid' ? 'model-valid' : m.status === 'rate_limited' ? 'model-limited' : '';
                 const sel = m.id === activeModelId ? ' active' : '';
+                const priorityIdx = priorityModels.indexOf(m.id);
+                const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
                 html += `<div class="model-item ${cls}${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
+                    ${priorityBadge}
                     <span class="model-status-dot ${m.status}">●</span>
                     <span class="model-info">
                         <span class="model-name">${escapeHtml(m.name)}</span>
@@ -304,7 +327,10 @@
             html += '<div class="model-section-label">Бесплатные</div>';
             free.forEach(m => {
                 const sel = m.id === activeModelId ? ' active' : '';
+                const priorityIdx = priorityModels.indexOf(m.id);
+                const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
                 html += `<div class="model-item model-free${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
+                    ${priorityBadge}
                     <span class="model-status-dot free">●</span>
                     <span class="model-info">
                         <span class="model-name">${escapeHtml(m.name)}</span>
@@ -330,10 +356,27 @@
         list.innerHTML = html;
     }
 
+    function renderPriorityBar() {
+        const bar = document.getElementById("priority-bar");
+        const container = document.getElementById("priority-models-bar");
+        if (!priorityModels.length) { bar.style.display = "none"; return; }
+        bar.style.display = "block";
+        container.innerHTML = "";
+        priorityModels.forEach((mid, idx) => {
+            const m = allModels.find(x => x.id === mid);
+            if (!m) return;
+            const chip = document.createElement("div");
+            chip.className = "priority-chip";
+            chip.innerHTML = `<span class="priority-chip-num">${idx+1}</span>${escapeHtml(m.name)}`;
+            chip.onclick = () => selectModel(mid);
+            container.appendChild(chip);
+        });
+    }
+
     function selectModel(modelId) {
         activeModelId = modelId;
-        document.querySelectorAll('.model-item').forEach(el => el.classList.remove('active'));
-        const el = document.querySelector(`.model-item[data-id="${modelId}"]`);
+        document.querySelectorAll('#models-list .model-item').forEach(el => el.classList.remove('active'));
+        const el = document.querySelector(`#models-list .model-item[data-id="${modelId}"]`);
         if (el) el.classList.add('active');
     }
 
@@ -341,6 +384,100 @@
         const list = document.getElementById("models-list");
         list.innerHTML = '<div class="model-item loading">Обновление...</div>';
         await loadModels();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // PRIORITY MODELS MODAL
+    // ═══════════════════════════════════════════════════════
+    function showPriorityModal() {
+        const available = allModels.filter(m => m.type === 'paid' || (m.type === 'free' && m.status === 'available'));
+        if (!available.length) { openGenericModal("Приоритетные модели", '<div class="key-error">Нет доступных моделей. Настройте API ключи.</div>'); return; }
+
+        const slotLabels = ['Основная', 'Резервная', 'Фоллбэк'];
+        let html = '<div class="priority-modal-desc">Выберите до 3 приоритетных моделей. Если основная недоступна — автоматически переключится на резервную.</div>';
+
+        for (let i = 0; i < 3; i++) {
+            const selected = priorityModels[i] || '';
+            const m = allModels.find(x => x.id === selected);
+            html += `<div class="priority-slot">
+                <div class="priority-slot-header">
+                    <span class="priority-slot-num">${i+1}</span>
+                    <span class="priority-slot-label">${slotLabels[i]}</span>
+                    ${m ? `<span class="priority-slot-current">${escapeHtml(m.name)}</span>` : '<span class="priority-slot-empty">не выбрана</span>'}
+                </div>
+                <select id="priority-slot-${i}" class="priority-select" onchange="updatePriorityFromSelects()">
+                    <option value="">— не выбрано —</option>`;
+            available.forEach(am => {
+                const isUsed = priorityModels.includes(am.id) && priorityModels.indexOf(am.id) !== i;
+                html += `<option value="${am.id}" ${am.id === selected ? 'selected' : ''} ${isUsed ? 'disabled' : ''}>${escapeHtml(am.name)} (${escapeHtml(am.provider_name)})</option>`;
+            });
+            html += '</select></div>';
+        }
+
+        html += '<div style="display:flex; gap:8px; margin-top:16px;">' +
+            '<button class="btn-small btn-outline" onclick="closeGenericModal()" style="flex:1">Отмена</button>' +
+            '<button class="btn-small" onclick="savePriorityModels()" style="flex:1">Сохранить</button>' +
+            '</div>';
+
+        openGenericModal('⚡ Приоритетные модели', html);
+    }
+
+    function updatePriorityFromSelects() {
+        // Live-update visuals in modal
+        const slotLabels = ['Основная', 'Резервная', 'Фоллбэк'];
+        for (let i = 0; i < 3; i++) {
+            const sel = document.getElementById(`priority-slot-${i}`);
+            if (!sel) continue;
+            // Disable options that are selected in other slots
+            document.querySelectorAll('.priority-select').forEach(s => {
+                Array.from(s.options).forEach(opt => {
+                    opt.disabled = false;
+                });
+            });
+            document.querySelectorAll('.priority-select').forEach(s => {
+                if (s.id !== sel.id && s.value) {
+                    const otherSel = document.getElementById(`priority-slot-${s.id.split('-')[2]}`);
+                    // disable in others
+                    document.querySelectorAll('.priority-select').forEach(s2 => {
+                        if (s2.id !== s.id) {
+                            const opt = s2.querySelector(`option[value="${s.value}"]`);
+                            if (opt) opt.disabled = true;
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    async function savePriorityModels() {
+        const models = [];
+        for (let i = 0; i < 3; i++) {
+            const sel = document.getElementById(`priority-slot-${i}`);
+            if (sel && sel.value) models.push(sel.value);
+        }
+        priorityModels = models;
+        closeGenericModal();
+
+        // Save to project if one is selected
+        if (currentProjectId) {
+            try {
+                await fetch('/api/v1/projects/models', {
+                    method: 'PUT', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ project_id: currentProjectId, model_ids: models })
+                });
+                addMessage('system', `Приоритетные модели сохранены (${models.length}/3).`);
+            } catch(e) { addMessage('error', 'Ошибка сохранения моделей'); }
+        } else {
+            addMessage('system', `Приоритетные модели выбраны (${models.length}/3). При выборе проекта они сохранятся автоматически.`);
+        }
+
+        // Auto-select first priority model
+        if (models.length && !activeModelId) {
+            selectModel(models[0]);
+        }
+
+        renderModels();
+        renderPriorityBar();
     }
 
     // ═══════════════════════════════════════════════════════
@@ -381,8 +518,38 @@
                     document.getElementById("header-progress-fill").style.width = p.progress + "%";
                     document.getElementById("header-progress-text").textContent = p.progress + "%";
                 } else { progressBar.style.display = "none"; }
+
+                // Load priority models for this project
+                if (p && p.selected_models) {
+                    try {
+                        const models = JSON.parse(p.selected_models);
+                        if (Array.isArray(models) && models.length) {
+                            priorityModels = models.slice(0, 3);
+                            activeModelId = priorityModels[0];
+                            renderModels();
+                            renderPriorityBar();
+                        } else {
+                            priorityModels = [];
+                            renderModels();
+                            renderPriorityBar();
+                        }
+                    } catch(e) {
+                        priorityModels = [];
+                        renderModels();
+                        renderPriorityBar();
+                    }
+                } else {
+                    priorityModels = [];
+                    renderModels();
+                    renderPriorityBar();
+                }
             } catch(e) { progressBar.style.display = "none"; }
-        } else { progressBar.style.display = "none"; }
+        } else {
+            progressBar.style.display = "none";
+            priorityModels = [];
+            renderModels();
+            renderPriorityBar();
+        }
 
         addMessage("system", "Контекст: " + name);
     }
@@ -609,9 +776,18 @@
 
     function showHelp() {
         openGenericModal("Помощь — Fosved Coder", `
+            <h3>Приоритетные модели ⚡</h3>
+            <ul>
+                <li>Нажмите <span style="color:var(--amber)">⚡</span> в сайдбаре — настроить до 3 моделей</li>
+                <li><span style="color:var(--amber)">1 — Основная</span> — для сложных задач</li>
+                <li><span style="color:var(--amber)">2 — Резервная</span> — если основная недоступна</li>
+                <li><span style="color:var(--amber)">3 — Фоллбэк</span> — последняя надежда</li>
+                <li>Простые задачи автоматически идут на дешёвую модель</li>
+                <li>Сохраняются отдельно для каждого проекта</li>
+            </ul>
             <h3>Модели ИИ</h3>
             <ul>
-                <li>Клик по модели в сайдбаре — выбрать</li>
+                <li>Клик по модели — выбрать для следующего сообщения</li>
                 <li><span style="color:#4ec9b0">● Зелёная</span> — ключ валиден</li>
                 <li><span style="color:#dcdcaa">● Жёлтая</span> — лимит превышен</li>
                 <li><span style="color:#569cd6">● Синяя</span> — бесплатная модель</li>
@@ -626,7 +802,7 @@
             </ul>
             <h3>Проекты</h3>
             <ul>
-                <li>Каждый проект имеет шкалу прогресса</li>
+                <li>Каждый проект хранит свои приоритетные модели</li>
                 <li>Нажмите "+ Новый" для создания</li>
             </ul>
         `);

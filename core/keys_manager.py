@@ -50,6 +50,12 @@ PROVIDER_DEFS = {
         "api_base": "https://api.minimax.chat/v1",
         "suggested_models": ["minimax-abab6.5s-chat"],
     },
+    "gemini": {
+        "name": "Google AI (Gemini)",
+        "litellm_prefix": "gemini",
+        "api_base": "https://generativelanguage.googleapis.com/v1beta",
+        "suggested_models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
+    },
 }
 
 # Бесплатные модели (через OpenRouter)

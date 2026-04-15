@@ -68,14 +68,31 @@ async def websocket_chat(websocket: WebSocket):
                 await handle_command(data, current_project_id, websocket)
                 continue
 
+            # Parse JSON payload (chat message with model/priority info)
+            import json
+            try:
+                payload = json.loads(data)
+                prompt = payload.get("prompt", data)
+                model_id = payload.get("model")
+                priority = payload.get("priority_models", [])
+            except (json.JSONDecodeError, TypeError):
+                prompt = data
+                model_id = None
+                priority = []
+
             # Save user message
-            await save_message(current_project_id, "user", data)
+            await save_message(current_project_id, "user", prompt)
 
             # Build project context (Repo Map)
             repo_map = None
             if current_project_id:
                 project = await get_project(current_project_id)
                 if project:
+                    # Override priority models from UI if provided
+                    if priority:
+                        from core.memory import update_project_models
+                        await update_project_models(current_project_id, priority)
+
                     cached_map = await get_repo_map(current_project_id)
                     if cached_map:
                         repo_map = cached_map["content"]
@@ -85,7 +102,7 @@ async def websocket_chat(websocket: WebSocket):
                         )
 
             # Route and execute AI response
-            await handle_chat_message(data, current_project_id, repo_map, websocket)
+            await handle_chat_message(prompt, current_project_id, repo_map, websocket)
 
     except WebSocketDisconnect:
         pass

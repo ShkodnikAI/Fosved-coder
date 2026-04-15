@@ -1,5 +1,6 @@
 import litellm
-from core.memory import CONFIG, save_message, get_history
+import json
+from core.memory import CONFIG, save_message, get_history, get_project
 from core.keys_manager import keys_manager
 
 litellm.suppress_debug_info = True
@@ -21,7 +22,6 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 async def stream_llm_response(prompt: str, history: list, websocket, model: str = None, system_prompt: str = None):
     """Stream AI response chunk by chunk to WebSocket. Uses keys_manager for API config."""
     if model is None:
-        # Try first selected model from project or fallback
         model = CONFIG["llm"].get("default_model")
     if system_prompt is None:
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="")
@@ -79,8 +79,66 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
         return None
 
 
+def _get_priority_models(project: dict) -> list[str]:
+    """Extract up to 3 priority model IDs from project's selected_models."""
+    if not project or not project.get("selected_models"):
+        return []
+    try:
+        models = json.loads(project["selected_models"])
+        if isinstance(models, list):
+            return models[:3]  # max 3 priority models
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return []
+
+
+async def _route_with_priority(prompt: str, priority_models: list[str]) -> str | None:
+    """
+    Use HybridRouter to decide: should we route to a cheaper model
+    from the priority list, or use the first (primary) model?
+    Returns the chosen model_id or None.
+    """
+    from core.router import HybridRouter
+    router = HybridRouter()
+
+    prompt_lower = prompt.lower()
+
+    # Simple keywords → use cheapest model from priority list (last one)
+    simple_keywords = [
+        "fix typo", "формат", "xml", "json", "тест", "docstring",
+        "комментарий", "простой", "trivial", "rename", "lint",
+        "semicolon", "indent", "whitespace", "небольшой", "опечатк"
+    ]
+    for kw in simple_keywords:
+        if kw in prompt_lower:
+            if len(priority_models) > 1:
+                # Pick the cheapest — if there's a free model, use it; otherwise use last
+                all_models = keys_manager.get_all_models()
+                free_in_priority = [m for m in priority_models if any(
+                    am["id"] == m and am["type"] == "free" for am in all_models
+                )]
+                if free_in_priority:
+                    return free_in_priority[0]
+                return priority_models[-1]  # last = least expensive
+            return priority_models[0]
+
+    # Complex keywords → always use primary (first) model
+    complex_keywords = [
+        "архитектур", "refactor", "redesign", "систем", "framework",
+        "engine", "парсером", "compiler", "параллельн", "микросервис",
+        "database schema", "модель данных", "api дизайн", "security",
+        "аутентификац", "интеграц", "многопоточ", "async"
+    ]
+    for kw in complex_keywords:
+        if kw in prompt_lower:
+            return priority_models[0]
+
+    # Default: use primary model
+    return priority_models[0]
+
+
 async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket):
-    """Main entry point: get history, add repo_map context, stream response, save to memory."""
+    """Main entry point: get history, add repo_map context, stream response with fallback."""
     history = await get_history(project_id)
 
     repo_map_text = ""
@@ -94,32 +152,77 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     await save_message(project_id, "user", prompt)
 
-    # Determine which model to use
-    model = None
-    if project_id:
-        from core.memory import get_project
-        project = await get_project(project_id)
+    # Get priority models for this project
+    project = await get_project(project_id) if project_id else None
+    priority_models = _get_priority_models(project)
+
+    if priority_models:
+        # Smart routing: pick the best model from priority list
+        chosen_model = await _route_with_priority(prompt, priority_models)
+        if not chosen_model:
+            chosen_model = priority_models[0]
+
+        # Stream with fallback: try each priority model in order
+        max_retries = len(priority_models)  # one attempt per model
+        ai_response = None
+        tried_models = []
+
+        for attempt in range(max_retries):
+            model_to_try = priority_models[attempt]
+            tried_models.append(model_to_try)
+
+            # On first attempt, use the router-chosen model
+            if attempt == 0:
+                model_to_try = chosen_model
+                if model_to_try not in tried_models:
+                    tried_models.insert(0, model_to_try)
+
+            if attempt > 0:
+                model_name = model_to_try
+                all_models = keys_manager.get_all_models()
+                m_info = next((m for m in all_models if m["id"] == model_to_try), None)
+                if m_info:
+                    model_name = m_info["name"]
+                await websocket.send_json({
+                    "type": "info",
+                    "content": f"Переключаюсь на {model_name}..."
+                })
+
+            ai_response = await stream_llm_response(
+                prompt, history, websocket,
+                model=model_to_try, system_prompt=system_prompt
+            )
+            if ai_response is not None:
+                break
+        else:
+            ai_response = None
+
+    else:
+        # No priority models set — use single model from UI or config
+        model = None
         if project and project.get("selected_models"):
-            import json
             try:
                 models = json.loads(project["selected_models"])
                 if models:
-                    model = models[0]  # Use first selected model
+                    model = models[0]
             except (json.JSONDecodeError, TypeError):
                 pass
 
-    # Cyclic agent: up to 3 retries on errors
-    max_retries = CONFIG["system"].get("max_iterations", 3)
-    ai_response = None
-    for attempt in range(max_retries):
-        ai_response = await stream_llm_response(prompt, history, websocket, model=model, system_prompt=system_prompt)
-        if ai_response is not None:
-            break
-        if attempt < max_retries - 1:
-            await websocket.send_json({
-                "type": "info",
-                "content": f"Попытка {attempt + 2}/{max_retries}..."
-            })
+        # Fallback retries
+        max_retries = CONFIG["system"].get("max_iterations", 3)
+        ai_response = None
+        for attempt in range(max_retries):
+            ai_response = await stream_llm_response(
+                prompt, history, websocket,
+                model=model, system_prompt=system_prompt
+            )
+            if ai_response is not None:
+                break
+            if attempt < max_retries - 1:
+                await websocket.send_json({
+                    "type": "info",
+                    "content": f"Попытка {attempt + 2}/{max_retries}..."
+                })
 
     if ai_response:
         await save_message(project_id, "ai", ai_response)
