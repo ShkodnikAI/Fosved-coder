@@ -3,112 +3,473 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fosved Coder</title>
+    <title>Fosved Coder v2.0</title>
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
+    <!-- LEFT SIDEBAR -->
     <div class="sidebar">
-        <h3>Проекты</h3>
-        <div id="projects-list">
-            <div class="project-item active">Общий чат</div>
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <h3>Проекты</h3>
+                <button class="btn-icon" onclick="createProject()" title="Новый проект">+</button>
+            </div>
+            <div id="projects-list">
+                <div class="project-item active" data-id="null" onclick="selectProject(null, this)">
+                    Общий чат
+                </div>
+            </div>
         </div>
-        
-        <h3 style="margin-top: 20px;">Идеи (Репозитории)</h3>
-        <input type="text" id="idea-input" placeholder="Вставить ссылку GitHub...">
-        <div id="ideas-list"></div>
+
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <h3>Идеи (База знаний)</h3>
+            </div>
+            <div class="idea-input-row">
+                <input type="text" id="idea-input" placeholder="GitHub ссылка..." onkeypress="if(event.key==='Enter')analyzeIdea()">
+                <button class="btn-small" onclick="analyzeIdea()">OK</button>
+            </div>
+            <div id="ideas-list"></div>
+        </div>
+
+        <div class="sidebar-section sidebar-footer">
+            <button class="sidebar-btn" onclick="showStats()">📊 Статистика</button>
+            <button class="sidebar-btn" onclick="showHelp()">❓ Помощь</button>
+        </div>
     </div>
 
+    <!-- MAIN AREA -->
     <div class="main">
+        <!-- Header -->
+        <div class="chat-header">
+            <span id="current-project-name">Общий чат</span>
+            <div class="header-actions">
+                <button class="btn-icon" onclick="clearChat()" title="Очистить чат">🗑</button>
+            </div>
+        </div>
+
+        <!-- Chat -->
         <div class="chat-box" id="chat-box">
             <div class="msg system">Подключение к серверу...</div>
         </div>
-        
+
+        <!-- Input -->
         <div class="input-area">
-            <input type="text" id="user-input" placeholder="Введите задачу или промпт..." onkeypress="handleKeyPress(event)">
-            <button class="send-btn" onclick="sendMessage()">Отправить</button>
+            <textarea id="user-input" placeholder="Введите задачу или промпт... (Shift+Enter = новая строка)" rows="1"
+                      onkeydown="handleKeyDown(event)"></textarea>
+            <button class="send-btn" onclick="sendMessage()">➤</button>
         </div>
 
+        <!-- Bottom Bar -->
         <div class="bottom-bar">
-            <button onclick="sendCommand('/terminal ')">🛠 Terminal</button>
-            <button onclick="sendCommand('/db ')">🗄 DB</button>
-            <button onclick="sendCommand('/server ')">🌐 Server</button>
-            <button onclick="sendCommand('/git_pull')">📥 Git Pull</button>
-            <button onclick="sendCommand('/git_push')">📤 Git Push</button>
+            <button onclick="insertCommand('/terminal ')">🛠 Terminal</button>
+            <button onclick="insertCommand('/git_pull')">📥 Pull</button>
+            <button onclick="insertCommand('/git_push')">📤 Push</button>
+            <button onclick="insertCommand('/ideas ')">💡 Ideas</button>
+            <button onclick="insertCommand('/clear')">🧹 Clear</button>
+            <button onclick="insertCommand('/help')">❓ Help</button>
+        </div>
+    </div>
+
+    <!-- MODAL -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span id="modal-title">Модальное окно</span>
+                <button class="btn-icon" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
         </div>
     </div>
 
     <script>
+        // ═══════════════════════════════════════════════════════
+        // WebSocket Connection
+        // ═══════════════════════════════════════════════════════
         const ws = new WebSocket("ws://" + window.location.host + "/ws");
         const chatBox = document.getElementById("chat-box");
-        
         let currentAiDiv = null;
         let currentAiText = "";
+        let currentProjectId = null;
+
+        // Configure marked.js
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: true,
+            gfm: true
+        });
 
         ws.onopen = () => {
-            addMessage("system", "Соединение установлено. Вставьте API ключ в config.yaml и пишите задачи.");
+            clearSystemMessages();
+            addMessage("system", "Fosved Coder v2.0 — подключено. Вставьте API ключ в config.yaml и пишите задачи.");
+            loadProjects();
+            loadIdeas();
         };
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            
+
             if (data.type === "chunk") {
-                // Прилетела часть текста от ИИ
                 if (!currentAiDiv) {
                     currentAiDiv = document.createElement("div");
                     currentAiDiv.className = "msg ai";
                     chatBox.appendChild(currentAiDiv);
                 }
                 currentAiText += data.content;
-                currentAiDiv.innerText = currentAiText; // innerText безопаснее для кода
+                currentAiDiv.innerHTML = renderMarkdown(currentAiText);
+                addCopyButtons(currentAiDiv);
                 chatBox.scrollTop = chatBox.scrollHeight;
-                
+
             } else if (data.type === "done") {
-                // ИИ закончил писать
                 currentAiDiv = null;
                 currentAiText = "";
-                
+
             } else if (data.type === "error") {
-                // Ошибка API ключа или сети
-                addMessage("system", "⚠️ " + data.content);
+                addMessage("error", data.content);
                 currentAiDiv = null;
                 currentAiText = "";
-                
+
+            } else if (data.type === "system") {
+                addMessage("system", data.content);
+
+            } else if (data.type === "command_result") {
+                addMessage("terminal", data.content);
+
+            } else if (data.type === "idea_result") {
+                addMessage("idea", data.content);
+
             } else {
-                // Обычные системные сообщения
-                addMessage(data.type, data.content);
+                addMessage(data.type || "system", data.content || "");
             }
         };
 
         ws.onclose = () => {
-            addMessage("system", "Соединение потеряно. Перезагрузите страницу (F5).");
+            addMessage("error", "Соединение потеряно. Перезагрузите страницу (F5).");
         };
 
+        // ═══════════════════════════════════════════════════════
+        // Message Handling
+        // ═══════════════════════════════════════════════════════
         function addMessage(type, text) {
             const div = document.createElement("div");
             div.className = "msg " + type;
-            div.innerText = text;
+
+            if (type === "ai") {
+                div.innerHTML = renderMarkdown(text);
+                addCopyButtons(div);
+            } else if (type === "terminal") {
+                const pre = document.createElement("pre");
+                const code = document.createElement("code");
+                code.textContent = text;
+                pre.appendChild(code);
+                div.appendChild(pre);
+            } else if (type === "idea") {
+                div.innerHTML = renderMarkdown(text);
+            } else {
+                div.textContent = text;
+            }
+
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
+        function renderMarkdown(text) {
+            try {
+                return marked.parse(text);
+            } catch (e) {
+                return text;
+            }
+        }
+
+        function addCopyButtons(container) {
+            container.querySelectorAll("pre").forEach(pre => {
+                if (pre.querySelector(".copy-btn")) return;
+                const btn = document.createElement("button");
+                btn.className = "copy-btn";
+                btn.textContent = "Копировать";
+                btn.onclick = () => {
+                    const code = pre.querySelector("code");
+                    navigator.clipboard.writeText(code.textContent).then(() => {
+                        btn.textContent = "Скопировано!";
+                        setTimeout(() => btn.textContent = "Копировать", 2000);
+                    });
+                };
+                pre.style.position = "relative";
+                pre.appendChild(btn);
+            });
+        }
+
+        function clearSystemMessages() {
+            chatBox.querySelectorAll(".msg.system, .msg.error").forEach(m => m.remove());
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // User Input
+        // ═══════════════════════════════════════════════════════
         function sendMessage() {
             const input = document.getElementById("user-input");
             const text = input.value.trim();
             if (!text) return;
-            
+
             addMessage("user", text);
             ws.send(text);
             input.value = "";
+            input.style.height = "auto";
         }
 
-        function sendCommand(cmd) {
+        function handleKeyDown(e) {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function insertCommand(cmd) {
             const input = document.getElementById("user-input");
             input.value = cmd;
             input.focus();
         }
 
-        function handleKeyPress(e) {
-            if (e.key === "Enter") sendMessage();
+        // ═══════════════════════════════════════════════════════
+        // Projects
+        // ═══════════════════════════════════════════════════════
+        async function loadProjects() {
+            try {
+                const resp = await fetch("/api/v1/projects");
+                const projects = await resp.json();
+                const list = document.getElementById("projects-list");
+                list.innerHTML = '<div class="project-item active" data-id="null" onclick="selectProject(null, this)">Общий чат</div>';
+                projects.forEach(p => {
+                    const div = document.createElement("div");
+                    div.className = "project-item";
+                    div.dataset.id = p.id;
+                    div.innerHTML = `<span class="project-name">${escapeHtml(p.name)}</span><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">✕</button>`;
+                    div.onclick = () => selectProject(p.id, div);
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error("Failed to load projects:", e);
+            }
+        }
+
+        async function selectProject(projectId, element) {
+            currentProjectId = projectId;
+            document.querySelectorAll(".project-item").forEach(el => el.classList.remove("active"));
+            element.classList.add("active");
+            document.getElementById("current-project-name").textContent =
+                projectId ? element.querySelector(".project-name").textContent : "Общий чат";
+            clearSystemMessages();
+            addMessage("system", "Переключение проекта... Загрузка истории.");
+        }
+
+        async function createProject() {
+            const name = prompt("Имя нового проекта:");
+            if (!name || !name.trim()) return;
+            try {
+                const resp = await fetch("/api/v1/projects", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({name: name.trim()})
+                });
+                if (resp.ok) {
+                    await loadProjects();
+                    addMessage("system", `Проект "${name.trim()}" создан.`);
+                } else {
+                    const err = await resp.json();
+                    addMessage("error", `Ошибка: ${err.detail}`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка создания проекта: ${e}`);
+            }
+        }
+
+        async function deleteProject(id, name) {
+            if (!confirm(`Удалить проект "${name}" и всю историю чата?`)) return;
+            try {
+                const resp = await fetch(`/api/v1/projects/${id}`, {method: "DELETE"});
+                if (resp.ok) {
+                    await loadProjects();
+                    if (currentProjectId === id) selectProject(null, document.querySelector('.project-item'));
+                    addMessage("system", `Проект "${name}" удалён.`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка удаления: ${e}`);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Ideas
+        // ═══════════════════════════════════════════════════════
+        async function loadIdeas() {
+            try {
+                const resp = await fetch("/api/v1/ideas");
+                const ideas = await resp.json();
+                const list = document.getElementById("ideas-list");
+                list.innerHTML = "";
+                if (ideas.length === 0) {
+                    list.innerHTML = '<div class="idea-empty">Нет идей. Вставьте ссылку на GitHub репозиторий.</div>';
+                    return;
+                }
+                ideas.forEach(i => {
+                    const div = document.createElement("div");
+                    div.className = "idea-item";
+                    div.innerHTML = `
+                        <div class="idea-name" onclick="showIdeaDetail(${i.id})">${escapeHtml(i.name)}</div>
+                        <div class="idea-summary">${escapeHtml(i.summary).substring(0, 80)}...</div>
+                        <button class="btn-delete" onclick="deleteIdea(${i.id}, '${escapeHtml(i.name)}')" title="Удалить">✕</button>`;
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error("Failed to load ideas:", e);
+            }
+        }
+
+        async function analyzeIdea() {
+            const input = document.getElementById("idea-input");
+            const url = input.value.trim();
+            if (!url) return;
+            input.value = "";
+            addMessage("system", `Анализирую репозиторий: ${url}...`);
+
+            try {
+                const resp = await fetch("/api/v1/ideas", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({repo_url: url})
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    addMessage("idea", data.analysis);
+                    await loadIdeas();
+                } else {
+                    const err = await resp.json();
+                    addMessage("error", `Ошибка: ${err.detail}`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка анализа: ${e}`);
+            }
+        }
+
+        async function showIdeaDetail(id) {
+            try {
+                const resp = await fetch(`/api/v1/ideas`);
+                const ideas = await resp.json();
+                const idea = ideas.find(i => i.id === id);
+                if (idea) {
+                    showModal("Идея: " + idea.name, renderMarkdown(idea.summary));
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка загрузки идеи: ${e}`);
+            }
+        }
+
+        async function deleteIdea(id, name) {
+            if (!confirm(`Удалить идею "${name}"?`)) return;
+            try {
+                const resp = await fetch(`/api/v1/ideas/${id}`, {method: "DELETE"});
+                if (resp.ok) {
+                    await loadIdeas();
+                    addMessage("system", `Идея "${name}" удалена.`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка удаления: ${e}`);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Chat Actions
+        // ═══════════════════════════════════════════════════════
+        function clearChat() {
+            ws.send("/clear");
+            chatBox.querySelectorAll(".msg").forEach(m => m.remove());
+            addMessage("system", "Чат очищен.");
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Stats & Help
+        // ═══════════════════════════════════════════════════════
+        async function showStats() {
+            try {
+                const resp = await fetch("/api/v1/stats");
+                const stats = await resp.json();
+                const configResp = await fetch("/api/v1/config");
+                const config = await configResp.json();
+
+                const html = `
+                    <div class="stats-grid">
+                        <div class="stat-card"><div class="stat-value">${stats.projects_count}</div><div class="stat-label">Проекты</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.ideas_count}</div><div class="stat-label">Идеи</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.messages_count}</div><div class="stat-label">Сообщений</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.routing_decisions}</div><div class="stat-label">Роутингов</div></div>
+                    </div>
+                    <div class="config-info">
+                        <strong>Модель:</strong> ${config.llm.default_model}<br>
+                        <strong>Роутер:</strong> ${config.llm.router_model}<br>
+                        <strong>API Base:</strong> ${config.llm.api_base}<br>
+                        <strong>API Key:</strong> ${config.llm.api_key}
+                    </div>`;
+                showModal("Статистика системы", html);
+            } catch (e) {
+                showModal("Ошибка", "Не удалось загрузить статистику.");
+            }
+        }
+
+        function showHelp() {
+            showModal("Помощь — Fosved Coder v2.0", `
+                <h3>Команды чата:</h3>
+                <ul>
+                    <li><code>/terminal &lt;cmd&gt;</code> — выполнить shell-команду</li>
+                    <li><code>/git_pull</code> — git pull</li>
+                    <li><code>/git_push</code> — git push</li>
+                    <li><code>/ideas &lt;github_url&gt;</code> — проанализировать репозиторий</li>
+                    <li><code>/clear</code> — очистить историю чата</li>
+                    <li><code>/help</code> — эта справка</li>
+                </ul>
+                <h3>Проекты:</h3>
+                <ul>
+                    <li>Нажмите <strong>+</strong> чтобы создать проект</li>
+                    <li>Клик по проекту — переключение контекста</li>
+                    <li>Каждый проект имеет отдельную историю чата</li>
+                </ul>
+                <h3>Идеи:</h3>
+                <ul>
+                    <li>Вставьте ссылку на GitHub репозиторий</li>
+                    <li>ИИ проанализирует структуру и архитектуру</li>
+                    <li>Результат используется как контекст при генерации кода</li>
+                </ul>
+            `);
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Modal
+        // ═══════════════════════════════════════════════════════
+        function showModal(title, content) {
+            document.getElementById("modal-title").textContent = title;
+            document.getElementById("modal-body").innerHTML = content;
+            document.getElementById("modal-overlay").classList.add("active");
+        }
+
+        function closeModal() {
+            document.getElementById("modal-overlay").classList.remove("active");
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Utility
+        // ═══════════════════════════════════════════════════════
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.textContent = text;
+            return div.innerHTML;
         }
     </script>
 </body>
