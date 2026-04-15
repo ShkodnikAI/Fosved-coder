@@ -21,6 +21,9 @@ class Project(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(unique=True, index=True)
     path: Mapped[str] = mapped_column(unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    base_prompt: Mapped[str] = mapped_column(Text, default="")
+    ideas: Mapped[str] = mapped_column(Text, default="")
     selected_models: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of model IDs
     progress: Mapped[int] = mapped_column(default=0)  # 0-100 percent
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
@@ -99,7 +102,7 @@ async def create_project(name: str, path: str) -> dict:
             session.add(project)
             session.flush()
             os.makedirs(path, exist_ok=True)
-            return {"id": project.id, "name": project.name, "path": project.path, "selected_models": project.selected_models, "progress": project.progress, "created_at": str(project.created_at)}
+            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "progress": project.progress, "created_at": str(project.created_at)}
 
 async def get_all_projects() -> list[dict]:
     """Get all projects as list of dicts."""
@@ -108,7 +111,7 @@ async def get_all_projects() -> list[dict]:
             select(Project).order_by(Project.created_at.desc())
         )
         return [
-            {"id": p.id, "name": p.name, "path": p.path, "selected_models": p.selected_models, "progress": p.progress, "created_at": str(p.created_at)}
+            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "progress": p.progress, "created_at": str(p.created_at)}
             for p in result.scalars().all()
         ]
 
@@ -120,7 +123,7 @@ async def get_project(project_id: int) -> dict | None:
         )
         p = result.scalar_one_or_none()
         if p:
-            return {"id": p.id, "name": p.name, "path": p.path, "selected_models": p.selected_models, "progress": p.progress, "created_at": str(p.created_at)}
+            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "progress": p.progress, "created_at": str(p.created_at)}
         return None
 
 async def update_project_progress(project_id: int, progress: int) -> bool:

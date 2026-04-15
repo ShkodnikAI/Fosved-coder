@@ -774,6 +774,21 @@
                     body: JSON.stringify({ template: template, name: name, description: desc, base_prompt: prompt, ideas: ideas })
                 });
                 if (resp.ok) {
+                    // После создания проекта из шаблона, сохранить настройки
+                    const projectData = await resp.json();
+                    const projectId = projectData.project?.id;
+                    if (projectId && (desc || prompt || ideas)) {
+                        await fetch('/api/v1/projects/settings', {
+                            method: 'PUT',
+                            headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({
+                                project_id: projectId,
+                                description: desc,
+                                base_prompt: prompt,
+                                ideas: ideas
+                            })
+                        });
+                    }
                     await loadProjects();
                     showToast(`Проект "${name}" создан из шаблона "${template}"`, "success");
                     document.getElementById("project-modal").classList.remove("active");
@@ -1125,9 +1140,11 @@
         resultsEl.innerHTML = '<div class="panel-placeholder">Поиск...</div>';
 
         try {
-            const params = new URLSearchParams({ query: query });
-            if (pattern) params.append("pattern", pattern);
-            const resp = await fetch(`/api/v1/projects/${currentProjectId}/search-files?${params}`, { method: "POST" });
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/search-files`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ project_id: currentProjectId, query: query, file_pattern: pattern })
+            });
             if (!resp.ok) {
                 const err = await resp.json();
                 resultsEl.innerHTML = `<div class="panel-placeholder" style="color:var(--red)">Ошибка: ${escapeHtml(err.detail || 'Неизвестная ошибка')}</div>`;
@@ -1141,10 +1158,10 @@
             }
             let html = '';
             results.forEach(r => {
-                const lineText = escapeHtml((r.matching_text || r.line || '').substring(0, 120));
-                html += `<div class="search-result-item" onclick="openFileAtLine('${escapeHtml(r.file_path)}', ${r.line_number || 1})">
-                    <div class="search-result-path">${escapeHtml(r.file_path)}</div>
-                    <div class="search-result-line">строка ${r.line_number || '?'}</div>
+                const lineText = escapeHtml((r.text || '').substring(0, 120));
+                html += `<div class="search-result-item" onclick="openFileAtLine('${escapeHtml(r.file)}', ${r.line || 1})">
+                    <div class="search-result-path">${escapeHtml(r.file)}</div>
+                    <div class="search-result-line">строка ${r.line || '?'}</div>
                     <div class="search-result-text">${lineText}</div>
                 </div>`;
             });
@@ -1203,7 +1220,7 @@
         fetch(`/api/v1/projects/${currentProjectId}/git`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ action: action })
+            body: JSON.stringify({ operation: action, project_id: currentProjectId })
         })
         .then(resp => resp.json())
         .then(data => {
@@ -1249,20 +1266,20 @@
     }
 
     function renderGitStatus(container, data) {
-        const files = data.files || data.modified || [];
-        const branch = data.branch || data.current || "";
+        const lines = data.output || [];
         let html = '';
-        if (branch) html += `<div style="padding:6px 10px;font-size:12px;color:var(--green);font-weight:600;">Branch: ${escapeHtml(branch)}</div>`;
-        if (!files.length) {
-            html += '<div class="panel-placeholder">Нет изменений</div>';
+        if (!lines.length) {
+            html = '<div class="panel-placeholder">Нет изменений</div>';
         } else {
             html += '<div class="git-status-list">';
-            files.forEach(f => {
-                const status = f.status || f.type || '?';
-                const colorMap = { 'M': 'var(--amber)', 'A': 'var(--green)', 'D': 'var(--red)', 'R': 'var(--blue)', '?': 'var(--text-secondary)' };
+            lines.forEach(line => {
+                const status = line.substring(0, 2).trim();
+                const file = line.substring(2).trim();
+                if (!file) return;
+                const colorMap = {'M': 'var(--amber)', 'A': 'var(--green)', 'D': 'var(--red)', 'R': 'var(--blue)', '??': 'var(--text-secondary)'};
                 html += `<div class="git-status-item">
                     <span class="git-status-badge" style="color:${colorMap[status] || 'var(--text-secondary)'}">[${escapeHtml(status)}]</span>
-                    <span class="git-status-file">${escapeHtml(f.path || f.file || f)}</span>
+                    <span class="git-status-file">${escapeHtml(file)}</span>
                 </div>`;
             });
             html += '</div>';
@@ -1282,7 +1299,7 @@
             const resp = await fetch(`/api/v1/projects/${currentProjectId}/git`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ action: "commit", message: msg, auto_add: autoAdd })
+                body: JSON.stringify({ operation: "commit", project_id: currentProjectId, message: msg, auto_add: autoAdd })
             });
             const data = await resp.json();
             const result = data.result || data.output || JSON.stringify(data, null, 2);
@@ -1602,13 +1619,13 @@
         document.getElementById("archive-modal-body").innerHTML = '<div class="panel-placeholder">Загрузка...</div>';
 
         try {
-            const resp = await fetch("/api/v1/projects/archives");
+            const resp = await fetch("/api/v1/archives");
             if (!resp.ok) {
                 document.getElementById("archive-modal-body").innerHTML = '<div class="panel-placeholder" style="color:var(--red)">Ошибка загрузки архивов</div>';
                 return;
             }
             const data = await resp.json();
-            const archives = data.archives || data || [];
+            const archives = Array.isArray(data) ? data : (data.archives || []);
             if (!archives.length) {
                 document.getElementById("archive-modal-body").innerHTML = '<div class="panel-placeholder">Нет архивов</div>';
                 return;
@@ -1635,7 +1652,7 @@
 
     async function showArchiveDetail(archiveId) {
         try {
-            const resp = await fetch(`/api/v1/projects/archives/${archiveId}`);
+            const resp = await fetch(`/api/v1/archives/${archiveId}`);
             if (!resp.ok) { showToast("Ошибка загрузки", "error"); return; }
             const data = await resp.json();
             let html = `<div style="margin-bottom:16px;">
@@ -1661,7 +1678,7 @@
 
     async function downloadArchive(archiveId) {
         try {
-            const resp = await fetch(`/api/v1/projects/archives/${archiveId}/download`);
+            const resp = await fetch(`/api/v1/archives/${archiveId}/download`);
             if (!resp.ok) { showToast("Ошибка скачивания", "error"); return; }
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
@@ -1681,7 +1698,7 @@
     async function deleteArchive(archiveId) {
         if (!confirm("Удалить архив?")) return;
         try {
-            const resp = await fetch(`/api/v1/projects/archives/${archiveId}`, { method: "DELETE" });
+            const resp = await fetch(`/api/v1/archives/${archiveId}`, { method: "DELETE" });
             if (resp.ok) {
                 showToast("Архив удалён", "success");
                 showArchivePanel();

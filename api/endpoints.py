@@ -77,6 +77,15 @@ class CreateFromTemplateRequest(BaseModel):
     name: str
     template: str  # fastapi, react, nextjs, python-cli, flask
     path: str = ""
+    description: str = ""
+    base_prompt: str = ""
+    ideas: str = ""
+
+class UpdateProjectSettingsRequest(BaseModel):
+    project_id: int
+    description: str = ""
+    base_prompt: str = ""
+    ideas: str = ""
 
 class ArchiveProjectRequest(BaseModel):
     project_id: int
@@ -190,6 +199,21 @@ async def update_models(req: UpdateModelsRequest):
         return {"success": True, "model_ids": req.model_ids}
     raise HTTPException(404, "Проект не найден")
 
+@router.put("/projects/settings")
+async def update_project_settings(req: UpdateProjectSettingsRequest):
+    """Update project description, prompt, ideas."""
+    from core.memory import async_session, Project, select
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(select(Project).where(Project.id == req.project_id))
+            project = result.scalar_one_or_none()
+            if not project:
+                raise HTTPException(404, "Проект не найден")
+            project.description = req.description
+            project.base_prompt = req.base_prompt
+            project.ideas = req.ideas
+            return {"success": True}
+
 
 # ═══════════════════════════════════════════════════════════════
 # FILE OPERATIONS
@@ -197,7 +221,7 @@ async def update_models(req: UpdateModelsRequest):
 
 @router.get("/projects/{project_id}/tree")
 async def get_project_tree(project_id: int):
-    """Получить дерево файлов проекта."""
+    """Получить дерево файлов проекта (вложенная структура)."""
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -205,28 +229,28 @@ async def get_project_tree(project_id: int):
     if not os.path.isdir(project_path):
         return {"tree": [], "error": "Папка проекта не найдена"}
 
-    tree = []
-    skip_dirs = {'.git', '__pycache__', 'node_modules', '.next', 'venv', '.venv', '.idea', '.vscode', 'dist', 'build', '.cache'}
-    skip_exts = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin'}
-
-    for root, dirs, files in os.walk(project_path):
-        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
-        rel_root = os.path.relpath(root, project_path)
-        for f in files:
-            if any(f.endswith(ext) for ext in skip_exts):
+    def build_tree(path, rel_path=""):
+        items = []
+        try:
+            entries = sorted(os.listdir(path))
+        except PermissionError:
+            return items
+        skip_dirs = {'.git', '__pycache__', 'node_modules', '.next', 'venv', '.venv', '.idea', '.vscode', 'dist', 'build', '.cache'}
+        skip_exts = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'}
+        for name in entries:
+            if name.startswith('.') and name != '.env':
                 continue
-            rel_path = os.path.join(rel_root, f) if rel_root != '.' else f
-            full_path = os.path.join(root, f)
-            try:
-                size = os.path.getsize(full_path)
-            except OSError:
-                size = 0
-            tree.append({
-                "path": rel_path.replace("\\", "/"),
-                "size": size,
-                "is_dir": False,
-            })
+            full = os.path.join(path, name)
+            rel = os.path.join(rel_path, name) if rel_path else name
+            rel = rel.replace("\\", "/")
+            if os.path.isdir(full) and name not in skip_dirs:
+                children = build_tree(full, rel)
+                items.append({"name": name, "path": rel, "type": "dir", "children": children})
+            elif os.path.isfile(full) and not any(name.endswith(ext) for ext in skip_exts):
+                items.append({"name": name, "path": rel, "type": "file"})
+        return items
 
+    tree = build_tree(project_path)
     return {"tree": tree}
 
 @router.get("/projects/{project_id}/read-file")
@@ -610,6 +634,18 @@ async def create_from_template(req: CreateFromTemplateRequest):
     if not result:
         raise HTTPException(400, "Проект с таким именем уже существует")
 
+    # Save project settings (description, base_prompt, ideas)
+    if req.description or req.base_prompt or req.ideas:
+        from core.memory import async_session, Project, select
+        async with async_session() as session:
+            async with session.begin():
+                db_result = await session.execute(select(Project).where(Project.id == result["id"]))
+                db_project = db_result.scalar_one_or_none()
+                if db_project:
+                    db_project.description = req.description
+                    db_project.base_prompt = req.base_prompt
+                    db_project.ideas = req.ideas
+
     # Write template files
     os.makedirs(project_path, exist_ok=True)
     for file_path, content in template["files"].items():
@@ -764,6 +800,18 @@ def _generate_master_prompt(project_name: str, history: list, file_list: list) -
 @router.get("/ideas")
 async def list_ideas():
     return await get_all_ideas()
+
+@router.post("/ideas")
+async def create_idea(req: AddIdeaRequest):
+    """Анализировать репозиторий и сохранить идею."""
+    from core.ideas_injector import IdeasInjector
+    injector = IdeasInjector()
+    try:
+        result = await injector.process_idea(req.repo_url)
+        name = req.repo_url.split("/")[-1].replace(".git", "")
+        return {"success": True, "analysis": result, "name": name}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 @router.delete("/ideas/{idea_id}")
 async def delete_idea_endpoint(idea_id: int):

@@ -1,5 +1,5 @@
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
@@ -51,6 +51,16 @@ async def get_index():
     return FileResponse("ui/templates/index.html")
 
 app.mount("/static", StaticFiles(directory="ui/static"), name="static")
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Upload a file and return its contents as text."""
+    content_bytes = await file.read()
+    try:
+        text_content = content_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        text_content = f"[Binary file: {file.filename}, {len(content_bytes)} bytes]"
+    return {"filename": file.filename, "content": text_content, "size": len(content_bytes)}
 
 
 @app.websocket("/ws")
