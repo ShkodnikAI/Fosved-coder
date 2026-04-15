@@ -1,4 +1,4 @@
-import json, os, re
+import json, os, re, subprocess, asyncio, shlex, sys, platform
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
@@ -151,6 +151,116 @@ async def ws_chat(websocket: WebSocket, project_id: str):
     except WebSocketDisconnect:
         pass
     except Exception as e:
+        try:
+            await websocket.send_json({"type": "error", "content": str(e)})
+        except:
+            pass
+
+
+# ===== TERMINAL WEBSOCKET =====
+def _get_shell():
+    """Detect appropriate shell for the OS."""
+    if platform.system() == "Windows":
+        return "powershell.exe"
+    return "/bin/bash"
+
+# Track running processes for kill support
+_running_processes = {}
+
+@app.websocket("/ws/terminal/{project_id}")
+async def ws_terminal(websocket: WebSocket, project_id: str):
+    await websocket.accept()
+    try:
+        # Get project folder as working directory
+        projects_file = "data/projects.json"
+        cwd = None
+        if os.path.exists(projects_file):
+            with open(projects_file, "r", encoding="utf-8") as f:
+                projects = json.load(f)
+                project = projects.get(project_id)
+                if project:
+                    cwd = project.get("folder", "")
+        if not cwd or not os.path.isdir(cwd):
+            cwd = None
+
+        while True:
+            data = await websocket.receive_json()
+            action = data.get("action", "run")
+            cmd = data.get("command", "")
+
+            if action == "run":
+                await websocket.send_json({"type": "status", "content": "running"})
+                try:
+                    shell = _get_shell()
+                    is_windows = platform.system() == "Windows"
+
+                    if is_windows:
+                        # PowerShell: combine all args
+                        proc = await asyncio.create_subprocess_shell(
+                            cmd,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=cwd,
+                            shell=True
+                        )
+                    else:
+                        # Bash: use shlex for safety
+                        proc = await asyncio.create_subprocess_shell(
+                            cmd,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=cwd,
+                            shell=True,
+                            executable="/bin/bash"
+                        )
+
+                    _running_processes[project_id] = proc
+
+                    # Stream stdout
+                    while True:
+                        line = await proc.stdout.readline()
+                        if not line:
+                            break
+                        text = line.decode("utf-8", errors="replace")
+                        await websocket.send_json({"type": "output", "content": text})
+
+                    # Stream stderr
+                    while True:
+                        line = await proc.stderr.readline()
+                        if not line:
+                            break
+                        text = line.decode("utf-8", errors="replace")
+                        await websocket.send_json({"type": "error", "content": text})
+
+                    await proc.wait()
+                    exit_code = proc.returncode
+                    _running_processes.pop(project_id, None)
+                    await websocket.send_json({
+                        "type": "done",
+                        "exit_code": exit_code,
+                        "content": f"\n[Процесс завершён с кодом {exit_code}]"
+                    })
+
+                except Exception as e:
+                    _running_processes.pop(project_id, None)
+                    await websocket.send_json({"type": "error", "content": f"Ошибка: {str(e)}"})
+
+            elif action == "kill":
+                proc = _running_processes.get(project_id)
+                if proc:
+                    try:
+                        proc.kill()
+                        _running_processes.pop(project_id, None)
+                        await websocket.send_json({"type": "done", "exit_code": -1, "content": "[Процесс принудительно остановлен]"})
+                    except:
+                        pass
+                else:
+                    await websocket.send_json({"type": "error", "content": "Нет запущенного процесса"})
+
+    except WebSocketDisconnect:
+        _running_processes.pop(project_id, None)
+    except Exception as e:
+        _running_processes.pop(project_id, None)
         try:
             await websocket.send_json({"type": "error", "content": str(e)})
         except:

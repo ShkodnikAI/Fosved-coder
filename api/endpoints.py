@@ -1,4 +1,4 @@
-import json, os, asyncio, re, shutil
+import json, os, asyncio, re, shutil, subprocess, sys, platform
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import JSONResponse
 from core.keys_manager import KeysManager
@@ -223,3 +223,31 @@ def get_chat_history(pid: str, thread_id: str = "main"):
 @router.delete("/api/chat/{pid}")
 def clear_chat_history(pid: str, thread_id: str = "main"):
     return chat_hist.clear_history(pid, thread_id)
+
+
+# ===== TERMINAL =====
+@router.get("/api/projects/{pid}/terminal/cwd")
+def terminal_cwd(pid: str):
+    projects = _load_projects()
+    if pid not in projects:
+        return JSONResponse({"error": "not found"}, 404)
+    folder = projects[pid].get("folder", "")
+    if not folder:
+        return JSONResponse({"error": "no folder set"}, 400)
+    return {"cwd": folder}
+
+@router.get("/api/projects/{pid}/terminal/history")
+def terminal_history(pid: str):
+    hist_file = os.path.join(DATA_DIR, f"term_history_{pid}.json")
+    if os.path.exists(hist_file):
+        with open(hist_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+@router.post("/api/projects/{pid}/terminal/history")
+def terminal_save_history(pid: str, data: dict):
+    hist_file = os.path.join(DATA_DIR, f"term_history_{pid}.json")
+    history = data.get("history", [])
+    with open(hist_file, "w", encoding="utf-8") as f:
+        json.dump(history[-200:], f)
+    return {"status": "ok"}

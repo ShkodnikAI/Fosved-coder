@@ -13,6 +13,7 @@
     <h1>&#9889; Fosved Coder</h1>
     <div class="header-actions">
       <button class="btn btn-ghost" onclick="toggleSidebar()">&#9776;</button>
+      <button class="btn btn-ghost" onclick="openTerminal()" title="Терминал">&#128424;</button>
       <button class="btn btn-accent" onclick="openSettings()">&#9881; Настройки</button>
     </div>
   </div>
@@ -133,6 +134,29 @@
   <div style="padding:6px 14px;cursor:pointer;font-size:13px;color:var(--danger)" onclick="deleteCurrentThread()">&#128465; Удалить</div>
 </div>
 
+<!-- TERMINAL PANEL -->
+<div class="terminal-overlay" id="terminalOverlay" onclick="if(event.target===this)closeTerminal()">
+  <div class="terminal-panel">
+    <div class="terminal-header">
+      <div style="display:flex;align-items:center;gap:10px">
+        <h3>&#128424; Терминал</h3>
+        <span class="terminal-cwd" id="termCwd"></span>
+      </div>
+      <div class="terminal-header-actions">
+        <button class="btn btn-sm btn-ghost" onclick="clearTerminal()" title="Очистить">&#128465;</button>
+        <button class="btn btn-sm btn-ghost" onclick="closeTerminal()" title="Закрыть">&times;</button>
+      </div>
+    </div>
+    <div class="terminal-output" id="termOutput"></div>
+    <div class="terminal-input-bar">
+      <span class="prompt-symbol">$</span>
+      <input id="termInput" placeholder="Введите команду..." onkeydown="handleTermKey(event)" autocomplete="off" spellcheck="false">
+      <button class="run-btn" id="termRunBtn" onclick="runTermCmd()">&#9654; Run</button>
+      <button class="kill-btn" id="termKillBtn" onclick="killTermProcess()" disabled>&#9632; Stop</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== STATE =====
 let projects = {};
@@ -185,6 +209,7 @@ function renderProjects() {
         <div class="project-actions">
           <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();editProject('${p.id}')" title="Редактировать">&#9998;</button>
           <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();generateCode('${p.id}')" title="Генерировать код">&#9889;</button>
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openTerminal('${p.id}')" title="Терминал">&#128424;</button>
           <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openFiles('${p.id}')" title="Файлы">&#128193;</button>
           <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteProject('${p.id}')" title="Удалить">&#128465;</button>
         </div>
@@ -748,6 +773,132 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// ===== TERMINAL =====
+let termWS = null;
+let termRunning = false;
+let termHistoryIdx = -1;
+let termHistory = [];
+
+async function openTerminal(pid) {
+  if (pid) {
+    currentProjectId = pid;
+    selectProject(pid);
+  }
+  if (!currentProjectId) return alert('Сначала выберите проект');
+  document.getElementById('terminalOverlay').classList.add('show');
+  // Show CWD
+  const cwd = await api(`/api/projects/${currentProjectId}/terminal/cwd`);
+  if (cwd && cwd.cwd) {
+    document.getElementById('termCwd').textContent = cwd.cwd;
+  } else {
+    document.getElementById('termCwd').textContent = 'Папка не задана';
+  }
+  // Load history
+  termHistory = (await api(`/api/projects/${currentProjectId}/terminal/history`)) || [];
+  termHistoryIdx = termHistory.length;
+  // Connect terminal WS
+  if (termWS) termWS.close();
+  termWS = new WebSocket(`ws://${location.host}/ws/terminal/${currentProjectId}`);
+  termWS.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    const out = document.getElementById('termOutput');
+    if (data.type === 'output') {
+      out.innerHTML += `<div class="term-line-stdout">${esc(data.content)}</div>`;
+    } else if (data.type === 'error') {
+      out.innerHTML += `<div class="term-line-stderr">${esc(data.content)}</div>`;
+    } else if (data.type === 'status') {
+      out.innerHTML += `<div class="term-line-status">${esc(data.content)}...</div>`;
+    } else if (data.type === 'done') {
+      out.innerHTML += `<div class="term-line-done">${esc(data.content)}</div>`;
+      termRunning = false;
+      document.getElementById('termRunBtn').disabled = false;
+      document.getElementById('termKillBtn').disabled = true;
+      document.getElementById('termInput').focus();
+    }
+    out.scrollTop = out.scrollHeight;
+  };
+  termWS.onclose = () => {
+    termRunning = false;
+    document.getElementById('termRunBtn').disabled = false;
+    document.getElementById('termKillBtn').disabled = true;
+  };
+  document.getElementById('termInput').focus();
+}
+
+function closeTerminal() {
+  document.getElementById('terminalOverlay').classList.remove('show');
+  if (termWS) { termWS.close(); termWS = null; }
+  // Save history
+  if (currentProjectId && termHistory.length) {
+    api(`/api/projects/${currentProjectId}/terminal/history`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({history: termHistory})
+    });
+  }
+}
+
+function handleTermKey(e) {
+  if (e.key === 'Enter') { e.preventDefault(); runTermCmd(); }
+  else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (termHistoryIdx > 0) {
+      termHistoryIdx--;
+      document.getElementById('termInput').value = termHistory[termHistoryIdx] || '';
+    }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (termHistoryIdx < termHistory.length - 1) {
+      termHistoryIdx++;
+      document.getElementById('termInput').value = termHistory[termHistoryIdx] || '';
+    } else {
+      termHistoryIdx = termHistory.length;
+      document.getElementById('termInput').value = '';
+    }
+  }
+}
+
+function runTermCmd() {
+  if (!currentProjectId || termRunning) return;
+  const input = document.getElementById('termInput');
+  const cmd = input.value.trim();
+  if (!cmd) return;
+
+  // Display command
+  const out = document.getElementById('termOutput');
+  out.innerHTML += `<div class="term-line-cmd">$ ${esc(cmd)}</div>`;
+
+  // Add to history
+  termHistory.push(cmd);
+  termHistoryIdx = termHistory.length;
+  input.value = '';
+
+  // Send via WS
+  if (termWS && termWS.readyState === WebSocket.OPEN) {
+    termWS.send(JSON.stringify({action: 'run', command: cmd}));
+  } else {
+    openTerminal(currentProjectId);
+    setTimeout(() => {
+      if (termWS && termWS.readyState === WebSocket.OPEN) {
+        termWS.send(JSON.stringify({action: 'run', command: cmd}));
+      }
+    }, 500);
+  }
+  termRunning = true;
+  document.getElementById('termRunBtn').disabled = true;
+  document.getElementById('termKillBtn').disabled = false;
+  out.scrollTop = out.scrollHeight;
+}
+
+function killTermProcess() {
+  if (termWS && termWS.readyState === WebSocket.OPEN) {
+    termWS.send(JSON.stringify({action: 'kill'}));
+  }
+}
+
+function clearTerminal() {
+  document.getElementById('termOutput').innerHTML = '';
 }
 
 // ===== START =====
