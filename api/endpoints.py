@@ -1,5 +1,5 @@
 ﻿"""REST API — projects (with ideas, instructions, model select), keys, models."""
-import json, uuid, shutil
+import json, uuid, shutil, os
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request

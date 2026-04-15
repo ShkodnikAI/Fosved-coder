@@ -48,6 +48,27 @@ body{font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;background:#1a1a1a;
 .progress-fill.red{background:linear-gradient(90deg,#c0392b,#e74c3c)}
 .progress-fill.beige{background:linear-gradient(90deg,#C8A97E,#d4b88e)}
 .progress-pct{font-size:10px;color:#888;min-width:30px;text-align:right}
+.project-folder{font-size:10px;color:#666;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.btn-generate{background:rgba(200,169,126,0.15);border:1px solid #C8A97E;color:#C8A97E;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;transition:all .2s}
+.btn-generate:hover{background:#C8A97E;color:#1a1a1a}
+
+.code-actions{display:flex;gap:6px;margin-top:6px}
+.btn-code-save{background:#2a2a2a;border:1px solid #555;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:4px;transition:all .2s}
+.btn-code-save:hover{border-color:#C8A97E;color:#C8A97E}
+.btn-code-copy{background:#2a2a2a;border:1px solid #555;color:#ccc;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;transition:all .2s}
+.btn-code-copy:hover{border-color:#27ae60;color:#27ae60}
+
+.file-tree{max-height:250px;overflow-y:auto;padding:4px 0}
+.file-tree-item{display:flex;align-items:center;gap:6px;padding:4px 8px;font-size:11px;color:#999;cursor:pointer;border-radius:4px;transition:background .2s}
+.file-tree-item:hover{background:#333;color:#e0e0e0}
+.file-tree-item.active{background:#2a2a2a;color:#C8A97E}
+.file-tree-icon{font-size:13px}
+.file-tree-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-tree-size{color:#555;font-size:10px}
+
+.folder-input-row{display:flex;gap:6px;margin-top:4px}
+.folder-input-row input{flex:1}
+
 
 
 .model-item{padding:6px 10px;background:#2a2a2a;border-radius:4px;display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:3px}

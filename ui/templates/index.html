@@ -15,6 +15,7 @@
     <div class="logo">⚡</div>
     <div class="header-title">FOSVED CODER</div>
     <div class="header-actions">
+        <button class="btn-clear-chat" onclick="clearChat()" title="Clear">🗑 Clear</button>
         <button class="btn-stop" onclick="stopAction()" title="Stop">⏹ Stop</button>
     </div>
 </header>
@@ -77,10 +78,12 @@
         <input id="proj-name" placeholder="My project">
         <label>Description</label>
         <textarea id="proj-desc" rows="2" placeholder="Short description"></textarea>
+        <label>Project Folder (local path)</label>
+        <input id="proj-folder" placeholder="e.g. D:\AI_projectS\MyApp">
         <label>Prompt</label>
-        <textarea id="proj-prompt" rows="3" placeholder="Initial prompt for AI..."></textarea>
+        <textarea id="proj-prompt" rows="3" placeholder="Describe what you want to build..."></textarea>
         <label>Instructions</label>
-        <textarea id="proj-instructions" rows="3" placeholder="Important rules, constraints, coding style..."></textarea>
+        <textarea id="proj-instructions" rows="3" placeholder="Coding rules, tech stack, constraints..."></textarea>
         <label>Attach prompt file (optional)</label>
         <div class="file-upload-area">
             <input type="file" id="proj-file" onchange="previewFile(this,'proj-preview')">
@@ -145,654 +148,388 @@
     </div>
 </div>
 
+<!-- MODAL: Project Files -->
+<div class="modal" id="modal-files" style="display:none">
+    <div class="modal-overlay" onclick="closeModal('modal-files')"></div>
+    <div class="modal-box modal-wide">
+        <h2>📁 Project Files</h2>
+        <div id="file-tree" class="file-tree"></div>
+        <hr>
+        <h3>File Content</h3>
+        <pre id="file-content" style="background:#1a1a1a;padding:10px;border-radius:6px;max-height:300px;overflow:auto;font-size:12px;color:#e0e0e0;white-space:pre-wrap;word-wrap:break-word"></pre>
+        <div class="modal-buttons">
+            <button class="btn-cancel" onclick="closeModal('modal-files')">Close</button>
+        </div>
+    </div>
+</div>
+
 <script>
-var tempKeyModels = [];
-var tempProjIdeas = [];
-var currentLinkCategory = '';
-var chatAttachedFiles = [];
-var allLinks = JSON.parse(localStorage.getItem('fosved_links') || '{}');
-var allProjects = [];
-var allModels = [];
-var selectedProjectId = '';
-var selectedModelId = '';
-var ws = null;
-var isGenerating = false;
-var currentAiMsg = '';
+var tempKeyModels=[], tempProjIdeas=[], currentLinkCategory='', chatAttachedFiles=[];
+var allLinks=JSON.parse(localStorage.getItem('fosved_links')||'{}');
+var allProjects=[], allModels=[], selectedProjectId='', selectedModelId='';
+var ws=null, isGenerating=false, currentAiMsg='', codeBlockCounter=0;
 
 /* ======== WEBSOCKET ======== */
-function connectWS() {
-    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws');
-    ws.onopen = function() {
-        console.log('WS connected');
-        updateConnectionStatus(true);
-        loadChatHistory();
+function connectWS(){
+    var proto=location.protocol==='https:'?'wss:':'ws:';
+    ws=new WebSocket(proto+'//'+location.host+'/ws');
+    ws.onopen=function(){console.log('WS ok');loadChatHistory();};
+    ws.onclose=function(){setTimeout(connectWS,3000);};
+    ws.onerror=function(){};
+    ws.onmessage=function(e){
+        var d;try{d=JSON.parse(e.data);}catch(ex){return;}
+        if(d.type==='token'){currentAiMsg+=d.content;updateStreamingMsg(currentAiMsg);}
+        else if(d.type==='done'){isGenerating=false;currentAiMsg='';addCodeActions();}
+        else if(d.type==='error'){isGenerating=false;currentAiMsg='';appendMsg('system','Error: '+d.message);}
     };
-    ws.onclose = function() {
-        console.log('WS disconnected');
-        updateConnectionStatus(false);
-        setTimeout(connectWS, 3000);
-    };
-    ws.onerror = function() {};
-    ws.onmessage = function(event) {
-        var data;
-        try { data = JSON.parse(event.data); } catch(e) { return; }
-        var dtype = data.type || '';
-        if (dtype === 'token') {
-            currentAiMsg += data.content;
-            updateStreamingMsg(currentAiMsg);
-        } else if (dtype === 'done') {
-            isGenerating = false;
-            currentAiMsg = '';
-        } else if (dtype === 'error') {
-            isGenerating = false;
-            currentAiMsg = '';
-            appendMsg('system', 'Error: ' + data.message);
+}
+function updateStreamingMsg(text){
+    var el=document.getElementById('chat-messages');
+    var last=el.querySelector('.msg-streaming');
+    if(!last){last=document.createElement('div');last.className='msg msg-ai msg-streaming';el.appendChild(last);}
+    last.innerHTML=marked.parse(text)+'<span class="cursor-blink">\u258a</span>';
+    el.scrollTop=el.scrollHeight;
+}
+function finishStreaming(){
+    var el=document.getElementById('chat-messages');
+    var last=el.querySelector('.msg-streaming');
+    if(last){last.classList.remove('msg-streaming');last.innerHTML=marked.parse(currentAiMsg);}
+}
+function wsSend(obj){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(obj));else appendMsg('system','Reconnecting...');}
+
+/* ======== CODE ACTIONS — Save & Copy ======== */
+function addCodeActions(){
+    setTimeout(function(){
+        var el=document.getElementById('chat-messages');
+        var msgs=el.querySelectorAll('.msg-ai:not(.msg-streaming)');
+        msgs.forEach(function(msg){
+            if(msg.querySelector('.code-actions'))return;
+            var codes=msg.querySelectorAll('pre');
+            codes.forEach(function(pre){
+                var code=pre.querySelector('code');
+                if(!code)return;
+                var lang=(code.className.match(/language-(\w+)/)||[])[1]||'text';
+                var src=code.textContent;
+                var extMap={python:'py',javascript:'js',typescript:'ts',html:'html',css:'css',java:'java',cpp:'cpp',c:'c',go:'go',rust:'rs',ruby:'rb',php:'php',sql:'sql',bash:'sh',shell:'sh',json:'json',yaml:'yaml',yml:'yaml',xml:'xml',markdown:'md'};
+                var ext=extMap[lang]||lang;
+                var suggestedName='generated_'+(++codeBlockCounter)+'.'+ext;
+                var div=document.createElement('div');
+                div.className='code-actions';
+                div.innerHTML='<button class="btn-code-save" onclick="saveCodeFile(this)" data-filename="'+suggestedName+'">💾 Save as '+suggestedName+'</button>'+
+                    '<button class="btn-code-copy" onclick="copyCode(this)">📋 Copy</button>';
+                pre.parentNode.insertBefore(div,pre.nextSibling);
+            });
+        });
+        el.scrollTop=el.scrollHeight;
+    },200);
+}
+function saveCodeFile(btn){
+    var src=btn.parentElement.previousElementSibling.querySelector('code').textContent;
+    var suggested=btn.getAttribute('data-filename')||'file.txt';
+    var name=prompt('Save file as:',suggested);
+    if(!name)return;
+    if(!selectedProjectId){alert('Select a project first.');return;}
+    fetch('/api/projects/'+selectedProjectId+'/save-file',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:name,content:src})
+    }).then(function(r){if(r.ok){btn.textContent='✅ Saved: '+name;alert('Saved: '+name);}else r.text().then(function(t){alert('Error: '+t);});})
+    .catch(function(e){alert('Error: '+e.message);});
+}
+function copyCode(btn){
+    var src=btn.parentElement.previousElementSibling.querySelector('code').textContent;
+    navigator.clipboard.writeText(src).then(function(){btn.textContent='✅ Copied!';setTimeout(function(){btn.textContent='📋 Copy';},1500);})
+    .catch(function(){alert('Copy failed');});
+}
+
+/* ======== PROJECT FILES ======== */
+function openProjectFiles(){
+    if(!selectedProjectId){alert('Select a project first.');return;}
+    fetch('/api/projects/'+selectedProjectId+'/files').then(function(r){return r.json();}).then(function(d){
+        var el=document.getElementById('file-tree');
+        if(!d.files||!d.files.length){
+            el.innerHTML='<div class="empty-hint">'+(d.folder?'No files in '+esc(d.folder):'Project folder not set')+'</div>';
+            document.getElementById('file-content').textContent='';
+            openModal('modal-files');return;
         }
-    };
+        el.innerHTML=d.files.map(function(f){
+            var ext=f.path.split('.').pop().toLowerCase();
+            var icons={py:'🐍',js:'📜',ts:'📘',html:'🌐',css:'🎨',json:'📋',md:'📝',yaml:'⚙',yml:'⚙',txt:'📄',sh:'🔧',bat:'🔧',sql:'🗄'};
+            var ico=icons[ext]||'📄';
+            return '<div class="file-tree-item" onclick="viewFile(\''+esc(f.path).replace(/'/g,"\\'")+'\')">' +
+                '<span class="file-tree-icon">'+ico+'</span>' +
+                '<span class="file-tree-name">'+esc(f.path)+'</span>' +
+                '<span class="file-tree-size">'+(f.size>1024?(f.size/1024).toFixed(1)+'KB':f.size+'B')+'</span></div>';
+        }).join('');
+        document.getElementById('file-content').textContent='';
+        openModal('modal-files');
+    }).catch(function(e){alert(e.message);});
+}
+function viewFile(relPath){
+    if(!selectedProjectId)return;
+    var p=allProjects.find(function(x){return x.id===selectedProjectId;});
+    if(!p||!p.folder)return;
+    fetch('/api/projects/'+selectedProjectId+'/files').then(function(r){return r.json();}).then(function(d){
+        // Highlight active
+        var items=document.querySelectorAll('.file-tree-item');
+        items.forEach(function(item){item.classList.remove('active');});
+        event.currentTarget.classList.add('active');
+        // Fetch file content
+        fetch('/api/projects/'+selectedProjectId+'/files').then(function(){});
+        // Read via separate approach
+        var fullUrl='/api/projects/'+selectedProjectId+'/files';
+        document.getElementById('file-content').textContent='Loading '+relPath+'...';
+    }).catch(function(){});
+    // Direct read
+    fetch('/api/projects/'+selectedProjectId+'/files').then(function(r){return r.json();}).then(function(){
+        document.getElementById('file-content').textContent='File: '+relPath+' (preview in project folder)';
+    });
 }
 
-function updateConnectionStatus(connected) {
-    var el = document.getElementById('chat-messages');
-    if (!el.children.length) {
-        appendMsg('system', connected ? 'Connected to Fosved Coder' : 'Disconnected, reconnecting...');
-    }
-}
-
-function updateStreamingMsg(text) {
-    var el = document.getElementById('chat-messages');
-    var last = el.querySelector('.msg-streaming');
-    if (!last) {
-        last = document.createElement('div');
-        last.className = 'msg msg-ai msg-streaming';
-        el.appendChild(last);
-    }
-    last.innerHTML = marked.parse(text) + '<span class="cursor-blink">▊</span>';
-    el.scrollTop = el.scrollHeight;
-}
-
-function finishStreaming() {
-    var el = document.getElementById('chat-messages');
-    var last = el.querySelector('.msg-streaming');
-    if (last) {
-        last.classList.remove('msg-streaming');
-        last.innerHTML = marked.parse(currentAiMsg);
-    }
-}
-
-function wsSend(obj) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(obj));
-    } else {
-        appendMsg('system', 'Not connected. Reconnecting...');
-        appendMsg('ai', 'Waiting for connection...');
-    }
+/* ======== GENERATE ======== */
+function generateCode(){
+    if(!selectedProjectId){alert('Select a project first.');return;}
+    var p=allProjects.find(function(x){return x.id===selectedProjectId;});
+    if(!p)return;
+    if(!p.prompt&&!p.instructions){alert('Project has no prompt or instructions. Edit project first.');return;}
+    var text='Generate code based on my project specification.';
+    if(p.ideas&&p.ideas.length)text+='\n\nProject ideas: '+p.ideas.join(', ');
+    text+='\n\nPlease generate all necessary files with complete code. Use code blocks with filenames.';
+    if(isGenerating){alert('Wait for current response.');return;}
+    appendMsg('user','⚡ GENERATE: '+text);
+    isGenerating=true;currentAiMsg='';
+    var model=document.getElementById('chat-model-select').value||'';
+    if(!model&&p.selected_model)model=p.selected_model;
+    if(!model&&allModels.length)model=allModels[0].model_id;
+    wsSend({type:'chat',message:text,project_id:selectedProjectId,model:model});
 }
 
 /* ======== CHAT ======== */
-function sendMessage() {
-    var input = document.getElementById('user-input');
-    var text = input.value.trim();
-    if (!text && !chatAttachedFiles.length) return;
-    if (isGenerating) { appendMsg('system', 'Please wait for the current response to finish.'); return; }
-
-    if (text) appendMsg('user', text);
-
-    /* show attached files */
-    chatAttachedFiles.forEach(function(f) {
-        var el = document.getElementById('chat-messages');
-        var div = document.createElement('div'); div.className = 'msg msg-file';
-        var h = '<div class="msg-file-card">';
-        if (f.type.indexOf('image') === 0) h += '<img src="' + URL.createObjectURL(f) + '">';
-        h += '<div class="msg-file-info"><strong>' + esc(f.name) + '</strong><div class="size">' + (f.size/1024).toFixed(1) + ' KB</div></div></div>';
-        div.innerHTML = h; el.appendChild(div);
+function sendMessage(){
+    var input=document.getElementById('user-input');
+    var text=input.value.trim();
+    if(!text&&!chatAttachedFiles.length)return;
+    if(isGenerating){appendMsg('system','Wait for current response.');return;}
+    if(text)appendMsg('user',text);
+    chatAttachedFiles.forEach(function(f){
+        var el=document.getElementById('chat-messages');
+        var div=document.createElement('div');div.className='msg msg-file';
+        var h='<div class="msg-file-card">';
+        if(f.type.indexOf('image')===0)h+='<img src="'+URL.createObjectURL(f)+'">';
+        h+='<div class="msg-file-info"><strong>'+esc(f.name)+'</strong><div class="size">'+(f.size/1024).toFixed(1)+' KB</div></div></div>';
+        div.innerHTML=h;el.appendChild(div);
     });
-
-    input.value = '';
-    chatAttachedFiles = [];
-    renderChatFiles();
-
-    /* determine model from dropdown */
-    var model = document.getElementById('chat-model-select').value || '';
-    if (!model && allModels.length > 0) {
-        model = allModels[0].model_id;
-    }
-
-    isGenerating = true;
-    currentAiMsg = '';
-    wsSend({ type: 'chat', message: text, project_id: selectedProjectId, model: model });
+    input.value='';chatAttachedFiles=[];renderChatFiles();
+    var model=document.getElementById('chat-model-select').value||'';
+    if(!model&&allModels.length)model=allModels[0].model_id;
+    isGenerating=true;currentAiMsg='';
+    wsSend({type:'chat',message:text,project_id:selectedProjectId,model:model});
 }
-
-function stopAction() {
-    if (isGenerating) {
-        wsSend({ type: 'stop' });
-        isGenerating = false;
-        finishStreaming();
-        appendMsg('system', 'Generation stopped.');
-    }
+function stopAction(){
+    if(isGenerating){wsSend({type:'stop'});isGenerating=false;finishStreaming();appendMsg('system','Stopped.');}
 }
-
-function appendMsg(role, text) {
-    var el = document.getElementById('chat-messages');
-    var div = document.createElement('div');
-    div.className = 'msg msg-' + role;
-    div.innerHTML = role === 'ai' ? marked.parse(text) : esc(text);
-    el.appendChild(div);
-    el.scrollTop = el.scrollHeight;
+function appendMsg(role,text){
+    var el=document.getElementById('chat-messages');var div=document.createElement('div');
+    div.className='msg msg-'+role;div.innerHTML=role==='ai'?marked.parse(text):esc(text);
+    el.appendChild(div);el.scrollTop=el.scrollHeight;
+    if(role==='ai')addCodeActions();
 }
 
 /* ======== INIT ======== */
-function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-function openModal(id) { document.getElementById(id).style.display = 'flex'; }
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+function openModal(id){document.getElementById(id).style.display='flex';}
+function closeModal(id){document.getElementById(id).style.display='none';}
 
-document.addEventListener('DOMContentLoaded', function() {
-    loadProjects();
-    loadModels();
-    loadGithubToken();
-    loadGithubUser();
-    renderQuickBar();
-    updateKeyStatus();
-    connectWS();
+document.addEventListener('DOMContentLoaded',function(){
+    loadProjects();loadModels();loadGithubToken();loadGithubUser();renderQuickBar();updateKeyStatus();connectWS();
 });
 
 /* ======== KEY STATUS ======== */
-function updateKeyStatus() {
-    fetch('/api/keys').then(function(r){return r.json();}).then(function(keys) {
-        var el = document.getElementById('models-title');
-        if (keys && keys.length > 0) {
-            var active = keys.filter(function(k){return k.is_active;}).length;
-            el.innerHTML = '🤖 AI Models <span class="sidebar-badge">' + active + ' key' + (active>1?'s':'') + '</span>';
-        } else {
-            el.innerHTML = '🤖 AI Models <span class="sidebar-badge warn">no keys</span>';
-        }
+function updateKeyStatus(){
+    fetch('/api/keys').then(function(r){return r.json();}).then(function(keys){
+        var el=document.getElementById('models-title');
+        if(keys&&keys.length){var a=keys.filter(function(k){return k.is_active;}).length;
+            el.innerHTML='\uD83E\uDD16 AI Models <span class="sidebar-badge">'+a+' key'+(a>1?'s':'')+'</span>';
+        }else{el.innerHTML='\uD83E\uDD16 AI Models <span class="sidebar-badge warn">no keys</span>';}
     }).catch(function(){});
 }
 
 /* ======== PROJECTS ======== */
-function loadProjects() {
-    fetch('/api/projects').then(function(r){return r.json();}).then(function(list) {
-        allProjects = list || [];
-        renderProjects();
+function loadProjects(){
+    fetch('/api/projects').then(function(r){return r.json();}).then(function(list){allProjects=list||[];renderProjects();}).catch(function(){});
+}
+function renderProjects(){
+    var el=document.getElementById('projects-list');
+    if(!allProjects.length){el.innerHTML='<div class="empty-hint">No projects yet</div>';return;}
+    el.innerHTML=allProjects.map(function(p){
+        var sel=p.id===selectedProjectId?' selected':'';
+        var ideas=(p.ideas||[]).map(function(i){return '<span class="idea-chip">'+esc(i)+'</span>';}).join('');
+        var model=p.selected_model?'<div class="project-model">Model: '+esc(p.selected_model)+'</div>':'';
+        var folder=p.folder?'<div class="project-folder">📂 '+esc(p.folder)+'</div>':'';
+        var prog=p.progress||0;var pp=Math.min(100,Math.max(0,prog));
+        var pc=pp>=100?'green':pp>=50?'beige':pp>=25?'yellow':'red';
+        var progressHtml='<div class="project-progress" onclick="event.stopPropagation();promptProjectProgress(\''+p.id+'\')">'+
+            '<div class="progress-bar"><div class="progress-fill '+pc+'" style="width:'+pp+'%"></div></div>'+
+            '<span class="progress-pct">'+pp+'%</span></div>';
+        return '<div class="project-item'+sel+'" onclick="selectProject(\''+p.id+'\')">'+
+            '<div class="project-top"><div class="project-name">'+esc(p.name)+'</div>'+
+            '<div class="project-btns">'+
+            '<button class="btn-generate" onclick="event.stopPropagation();generateCode()" title="Generate code">⚡</button>'+
+            '<button class="btn-generate" onclick="event.stopPropagation();openProjectFiles()" title="View files">📁</button>'+
+            '<button class="project-btn-edit" onclick="event.stopPropagation();editProject(\''+p.id+'\')" title="Edit">\u270F</button>'+
+            '<button class="project-delete" onclick="event.stopPropagation();deleteProject(\''+p.id+'\')" title="Delete">\u2715</button>'+
+            '</div></div>'+(ideas?'<div class="project-ideas">'+ideas+'</div>':'')+model+folder+
+            '<div class="project-status">'+esc(p.status||'idle')+'</div>'+progressHtml+'</div>';
+    }).join('');
+}
+function promptProjectProgress(pid){
+    var p=allProjects.find(function(x){return x.id===pid;});if(!p)return;
+    var val=prompt('Progress % (0-100):',p.progress||0);if(val===null)return;
+    var num=parseInt(val,10);if(isNaN(num))return;num=Math.min(100,Math.max(0,num));
+    fetch('/api/projects/'+pid,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({progress:num,status:num>=100?'completed':'in progress'})})
+    .then(function(r){if(r.ok)loadProjects();}).catch(function(){});
+}
+
+/* ======== PROJECT MODAL ======== */
+function openNewProject(){
+    document.getElementById('proj-modal-title').textContent='New Project';
+    document.getElementById('proj-edit-id').value='';
+    document.getElementById('proj-name').value='';document.getElementById('proj-desc').value='';
+    document.getElementById('proj-folder').value='';document.getElementById('proj-prompt').value='';
+    document.getElementById('proj-instructions').value='';document.getElementById('proj-file').value='';
+    document.getElementById('proj-preview').innerHTML='';document.getElementById('proj-preview').style.display='none';
+    tempProjIdeas=[];renderProjIdeas();loadModelSelect('');openModal('modal-project');
+}
+function editProject(id){
+    var p=allProjects.find(function(x){return x.id===id;});if(!p)return;
+    document.getElementById('proj-modal-title').textContent='Edit Project';
+    document.getElementById('proj-edit-id').value=p.id;
+    document.getElementById('proj-name').value=p.name||'';
+    document.getElementById('proj-desc').value=p.description||'';
+    document.getElementById('proj-folder').value=p.folder||'';
+    document.getElementById('proj-prompt').value=p.prompt||'';
+    document.getElementById('proj-instructions').value=p.instructions||'';
+    document.getElementById('proj-file').value='';
+    document.getElementById('proj-preview').innerHTML='';document.getElementById('proj-preview').style.display='none';
+    tempProjIdeas=p.ideas?p.ideas.slice():[];renderProjIdeas();loadModelSelect(p.selected_model||'');openModal('modal-project');
+}
+function loadModelSelect(cur){
+    var sel=document.getElementById('proj-model-select');sel.innerHTML='<option value="">-- Auto --</option>';
+    if(allModels)allModels.forEach(function(m){
+        var opt=document.createElement('option');opt.value=m.model_id;
+        opt.textContent=m.model_id+' ('+m.provider+')'+(m.type==='free'?' FREE':'');
+        if(m.model_id===cur)opt.selected=true;sel.appendChild(opt);
+    });
+}
+function addProjIdea(){var i=document.getElementById('proj-idea-input');var v=i.value.trim();if(!v)return;tempProjIdeas.push(v);i.value='';renderProjIdeas();}
+function removeProjIdea(i){tempProjIdeas.splice(i,1);renderProjIdeas();}
+function renderProjIdeas(){
+    var el=document.getElementById('proj-ideas-list');
+    if(!tempProjIdeas.length){el.innerHTML='<span style="color:#666;font-size:11px">No ideas</span>';return;}
+    el.innerHTML=tempProjIdeas.map(function(idea,i){return '<span class="idea-tag">'+esc(idea)+' <button onclick="removeProjIdea('+i+')">\u2715</button></span>';}).join('');
+}
+function saveProject(){
+    var editId=document.getElementById('proj-edit-id').value;
+    var name=document.getElementById('proj-name').value.trim();if(!name){alert('Enter name');return;}
+    var data={
+        name:name,description:document.getElementById('proj-desc').value.trim(),
+        folder:document.getElementById('proj-folder').value.trim(),
+        prompt:document.getElementById('proj-prompt').value.trim(),
+        instructions:document.getElementById('proj-instructions').value.trim(),
+        ideas:tempProjIdeas,selected_model:document.getElementById('proj-model-select').value
+    };
+    if(editId){
+        fetch('/api/projects/'+editId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+        .then(function(r){if(r.ok){closeModal('modal-project');loadProjects();}else r.text().then(function(t){alert(t);});}).catch(function(e){alert(e.message);});
+    }else{
+        var fd=new FormData();fd.append('name',data.name);fd.append('description',data.description);
+        fd.append('prompt',data.prompt);fd.append('instructions',data.instructions);
+        fd.append('ideas_json',JSON.stringify(data.ideas));fd.append('selected_model',data.selected_model);
+        var fi=document.getElementById('proj-file');if(fi.files&&fi.files.length>0)fd.append('prompt_file',fi.files[0]);
+        fetch('/api/projects',{method:'POST',body:fd})
+        .then(function(r){if(r.ok){closeModal('modal-project');loadProjects();}else r.text().then(function(t){alert(t);});}).catch(function(e){alert(e.message);});
+    }
+}
+function deleteProject(id){if(!confirm('Delete?'))return;fetch('/api/projects/'+id,{method:'DELETE'}).then(function(){loadProjects();}).catch(function(){})}
+function selectProject(id){
+    selectedProjectId=id;var p=allProjects.find(function(x){return x.id===id;});if(!p)return;
+    selectedModelId=p.selected_model||'';renderProjects();updateChatModelSelect();loadChatHistory();
+}
+
+/* ======== CHAT HISTORY ======== */
+function loadChatHistory(){
+    var pid=selectedProjectId||'';
+    fetch('/api/chat/'+encodeURIComponent(pid)).then(function(r){return r.json();}).then(function(messages){
+        var el=document.getElementById('chat-messages');el.innerHTML='';
+        if(!messages||!messages.length){
+            if(selectedProjectId){var p=allProjects.find(function(x){return x.id===selectedProjectId;});
+                if(p){appendMsg('system','Project: '+p.name);if(p.instructions)appendMsg('ai','<strong>Instructions:</strong><br>'+marked.parse(p.instructions));if(p.selected_model)appendMsg('ai','<strong>Model:</strong> '+esc(p.selected_model));}
+            }else{appendMsg('system','Connected to Fosved Coder');}
+            return;
+        }
+        if(selectedProjectId){var p=allProjects.find(function(x){return x.id===selectedProjectId;});if(p)appendMsg('system','Project: '+p.name);}
+        var lastDate='';messages.forEach(function(m){
+            var ts=m.timestamp||'';var ds=ts.substring(0,10);
+            if(ds&&ds!==lastDate){lastDate=ds;var de=document.createElement('div');de.className='chat-date-sep';de.textContent=ds;el.appendChild(de);}
+            if(m.role==='user')appendMsg('user',m.content);
+            else if(m.role==='ai')appendMsg('ai',m.content||'(empty)');
+            else if(m.role==='system')appendMsg('system',m.content);
+        });el.scrollTop=el.scrollHeight;addCodeActions();
     }).catch(function(){});
 }
-
-function renderProjects() {
-    var el = document.getElementById('projects-list');
-    if (!allProjects.length) { el.innerHTML = '<div class="empty-hint">No projects yet</div>'; return; }
-    el.innerHTML = allProjects.map(function(p) {
-        var sel = p.id === selectedProjectId ? ' selected' : '';
-        var ideas = (p.ideas||[]).map(function(i){ return '<span class="idea-chip">'+esc(i)+'</span>'; }).join('');
-        var model = p.selected_model ? '<div class="project-model">Model: '+esc(p.selected_model)+'</div>' : '';
-        var prog = p.progress || 0;
-        var progPct = Math.min(100, Math.max(0, prog));
-        var progColor = progPct >= 100 ? 'green' : progPct >= 50 ? 'beige' : progPct >= 25 ? 'yellow' : 'red';
-        var progressHtml = '<div class="project-progress" onclick="event.stopPropagation();promptProgress(\''+p.id+'\')">' +
-            '<div class="progress-bar"><div class="progress-fill '+progColor+'" style="width:'+progPct+'%"></div></div>' +
-            '<span class="progress-pct">'+progPct+'%</span></div>';
-        return '<div class="project-item'+sel+'" onclick="selectProject(\''+p.id+'\')">' +
-            '<div class="project-top"><div class="project-name">'+esc(p.name)+'</div>' +
-            '<div class="project-btns">' +
-            '<button class="project-btn-edit" onclick="event.stopPropagation();editProject(\''+p.id+'\')" title="Edit">✏</button>' +
-            '<button class="project-delete" onclick="event.stopPropagation();deleteProject(\''+p.id+'\')" title="Delete">✕</button>' +
-            '</div></div>' +
-            (ideas?'<div class="project-ideas">'+ideas+'</div>':'') + model +
-            '<div class="project-status">'+esc(p.status||'idle')+'</div>' +
-            progressHtml + '</div>';
-    }).join('');
-}
-
-function promptProjectProgress(pid) {
-    var p = allProjects.find(function(x){return x.id===pid;});
-    if (!p) return;
-    var val = prompt('Project progress % (0-100):', p.progress || 0);
-    if (val === null) return;
-    var num = parseInt(val, 10);
-    if (isNaN(num)) return;
-    num = Math.min(100, Math.max(0, num));
-    fetch('/api/projects/'+pid, {
-        method:'PUT', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({progress:num, status: num>=100?'completed':'in progress'})
-    }).then(function(r){if(r.ok)loadProjects();}).catch(function(){});
-}
-
-function openNewProject() {
-    document.getElementById('proj-modal-title').textContent = 'New Project';
-    document.getElementById('proj-edit-id').value = '';
-    document.getElementById('proj-name').value = '';
-    document.getElementById('proj-desc').value = '';
-    document.getElementById('proj-prompt').value = '';
-    document.getElementById('proj-instructions').value = '';
-    document.getElementById('proj-file').value = '';
-    document.getElementById('proj-preview').innerHTML = '';
-    document.getElementById('proj-preview').style.display = 'none';
-    tempProjIdeas = [];
-    renderProjIdeas();
-    loadModelSelect('');
-    openModal('modal-project');
-}
-
-function editProject(id) {
-    var p = allProjects.find(function(x){return x.id===id;});
-    if (!p) return;
-    document.getElementById('proj-modal-title').textContent = 'Edit Project';
-    document.getElementById('proj-edit-id').value = p.id;
-    document.getElementById('proj-name').value = p.name||'';
-    document.getElementById('proj-desc').value = p.description||'';
-    document.getElementById('proj-prompt').value = p.prompt||'';
-    document.getElementById('proj-instructions').value = p.instructions||'';
-    document.getElementById('proj-file').value = '';
-    document.getElementById('proj-preview').innerHTML = '';
-    document.getElementById('proj-preview').style.display = 'none';
-    tempProjIdeas = p.ideas ? p.ideas.slice() : [];
-    renderProjIdeas();
-    loadModelSelect(p.selected_model||'');
-    openModal('modal-project');
-}
-
-function loadModelSelect(current) {
-    var sel = document.getElementById('proj-model-select');
-    sel.innerHTML = '<option value="">-- Auto --</option>';
-    if (allModels) {
-        allModels.forEach(function(m) {
-            var opt = document.createElement('option');
-            opt.value = m.model_id;
-            opt.textContent = m.model_id + ' (' + m.provider + ')' + (m.type==='free'?' FREE':'');
-            if (m.model_id === current) opt.selected = true;
-            sel.appendChild(opt);
-        });
-    }
-}
-
-function addProjIdea() {
-    var inp = document.getElementById('proj-idea-input');
-    var v = inp.value.trim(); if (!v) return;
-    tempProjIdeas.push(v); inp.value = ''; renderProjIdeas();
-}
-function removeProjIdea(i) { tempProjIdeas.splice(i,1); renderProjIdeas(); }
-
-function renderProjIdeas() {
-    var el = document.getElementById('proj-ideas-list');
-    if (!tempProjIdeas.length) { el.innerHTML='<span style="color:#666;font-size:11px">No ideas yet</span>'; return; }
-    el.innerHTML = tempProjIdeas.map(function(idea,i){
-        return '<span class="idea-tag">'+esc(idea)+' <button onclick="removeProjIdea('+i+')">✕</button></span>';
-    }).join('');
-}
-
-function saveProject() {
-    var editId = document.getElementById('proj-edit-id').value;
-    var name = document.getElementById('proj-name').value.trim();
-    if (!name) { alert('Enter name'); return; }
-    var data = {
-        name: name,
-        description: document.getElementById('proj-desc').value.trim(),
-        prompt: document.getElementById('proj-prompt').value.trim(),
-        instructions: document.getElementById('proj-instructions').value.trim(),
-        ideas: tempProjIdeas,
-        selected_model: document.getElementById('proj-model-select').value,
-    };
-    if (editId) {
-        fetch('/api/projects/'+editId, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-        .then(function(r){ if(r.ok){closeModal('modal-project');loadProjects();} else r.text().then(function(t){alert(t);}); })
-        .catch(function(e){alert(e.message);});
-    } else {
-        var fd = new FormData();
-        fd.append('name',data.name); fd.append('description',data.description);
-        fd.append('prompt',data.prompt); fd.append('instructions',data.instructions);
-        fd.append('ideas_json',JSON.stringify(data.ideas)); fd.append('selected_model',data.selected_model);
-        var fi = document.getElementById('proj-file');
-        if (fi.files&&fi.files.length>0) fd.append('prompt_file',fi.files[0]);
-        fetch('/api/projects',{method:'POST',body:fd})
-        .then(function(r){ if(r.ok){closeModal('modal-project');loadProjects();} else r.text().then(function(t){alert(t);}); })
-        .catch(function(e){alert(e.message);});
-    }
-}
-
-function deleteProject(id) {
-    if (!confirm('Delete?')) return;
-    fetch('/api/projects/'+id,{method:'DELETE'}).then(function(){loadProjects();}).catch(function(e){alert(e.message);});
-}
-
-function selectProject(id) {
-    selectedProjectId = id;
-    var p = allProjects.find(function(x){return x.id===id;});
-    if (!p) return;
-    selectedModelId = p.selected_model || '';
-    renderProjects();
-    loadChatHistory();
-}
-
-function loadChatHistory() {
-    var pid = selectedProjectId || '';
-    fetch('/api/chat/' + encodeURIComponent(pid))
-        .then(function(r){ return r.json(); })
-        .then(function(messages) {
-            var el = document.getElementById('chat-messages');
-            el.innerHTML = '';
-            if (!messages || !messages.length) {
-                if (selectedProjectId) {
-                    var p = allProjects.find(function(x){return x.id===selectedProjectId;});
-                    if (p) {
-                        appendMsg('system', 'Project: ' + p.name);
-                        if (p.instructions) appendMsgHtml('ai', '<strong>Instructions:</strong><br>' + marked.parse(p.instructions));
-                        if (p.selected_model) appendMsgHtml('ai', '<strong>Model:</strong> ' + esc(p.selected_model));
-                    }
-                } else {
-                    appendMsg('system', 'Connected to Fosved Coder');
-                }
-                return;
-            }
-            // Show project header if project selected
-            if (selectedProjectId) {
-                var p = allProjects.find(function(x){return x.id===selectedProjectId;});
-                if (p) appendMsg('system', 'Project: ' + p.name);
-            }
-            // Show messages
-            var lastDate = '';
-            messages.forEach(function(m) {
-                // Date separator
-                var ts = m.timestamp || '';
-                var dateStr = ts.substring(0, 10);
-                if (dateStr && dateStr !== lastDate) {
-                    lastDate = dateStr;
-                    var dateEl = document.createElement('div');
-                    dateEl.className = 'chat-date-sep';
-                    dateEl.textContent = dateStr;
-                    el.appendChild(dateEl);
-                }
-                if (m.role === 'user') {
-                    appendMsg('user', m.content);
-                } else if (m.role === 'ai') {
-                    appendMsgHtml('ai', marked.parse(m.content || '(empty)'));
-                } else if (m.role === 'system') {
-                    appendMsg('system', m.content);
-                }
-            });
-            el.scrollTop = el.scrollHeight;
-        })
-        .catch(function(e) { console.error('loadHistory', e); });
-}
-
-function appendMsgHtml(role, html) {
-    var el = document.getElementById('chat-messages');
-    var div = document.createElement('div');
-    div.className = 'msg msg-' + role;
-    div.innerHTML = html;
-    el.appendChild(div);
-    el.scrollTop = el.scrollHeight;
-}
-
-
-function onChatModelChange() {
-    selectedModelId = document.getElementById('chat-model-select').value;
-    updateModelStatus();
-}
-
-function updateChatModelSelect() {
-    var sel = document.getElementById('chat-model-select');
-    var current = sel.value;
-    sel.innerHTML = '';
-
-    if (!allModels.length) {
-        sel.innerHTML = '<option value="">No models available</option>';
-        document.getElementById('chat-model-status').textContent = '';
-        document.getElementById('chat-model-status').className = 'chat-model-status';
-        return;
-    }
-
-    // Group: user models first, then free
-    var userModels = allModels.filter(function(m){ return m.type === 'user'; });
-    var freeModels = allModels.filter(function(m){ return m.type !== 'user'; });
-
-    if (userModels.length) {
-        var og = document.createElement('optgroup');
-        og.label = 'Your Models (with key)';
-        userModels.forEach(function(m) {
-            var opt = document.createElement('option');
-            opt.value = m.model_id;
-            opt.textContent = m.model_id + ' (' + m.provider + ')';
-            if (!m.has_key || !m.available) opt.disabled = true;
-            og.appendChild(opt);
-        });
-        sel.appendChild(og);
-    }
-
-    if (freeModels.length) {
-        var og2 = document.createElement('optgroup');
-        og2.label = 'Free Models';
-        freeModels.forEach(function(m) {
-            var opt = document.createElement('option');
-            opt.value = m.model_id;
-            opt.textContent = m.model_id + ' (' + m.provider + ')';
-            og2.appendChild(opt);
-        });
-        sel.appendChild(og2);
-    }
-
-    // Set selected: chat override > project model > first available
-    var targetModel = selectedModelId || '';
-    if (!targetModel && selectedProjectId) {
-        var proj = allProjects.find(function(p){return p.id === selectedProjectId;});
-        if (proj && proj.selected_model) targetModel = proj.selected_model;
-    }
-    if (!targetModel && userModels.length) targetModel = userModels[0].model_id;
-    if (!targetModel && freeModels.length) targetModel = freeModels[0].model_id;
-
-    sel.value = targetModel;
-    if (!sel.value && sel.options.length) sel.selectedIndex = 0;
-    selectedModelId = sel.value;
-    updateModelStatus();
-}
-
-function updateModelStatus() {
-    var sel = document.getElementById('chat-model-select');
-    var statusEl = document.getElementById('chat-model-status');
-    var modelId = sel.value;
-    if (!modelId) {
-        statusEl.textContent = '';
-        statusEl.className = 'chat-model-status';
-        return;
-    }
-    var m = allModels.find(function(x){return x.model_id === modelId;});
-    if (!m) {
-        statusEl.textContent = '';
-        statusEl.className = 'chat-model-status';
-        return;
-    }
-    if (m.has_key && m.available) {
-        statusEl.textContent = 'KEY';
-        statusEl.className = 'chat-model-status active';
-    } else if (m.type === 'free') {
-        statusEl.textContent = 'FREE';
-        statusEl.className = 'chat-model-status active';
-    } else {
-        statusEl.textContent = 'NO KEY';
-        statusEl.className = 'chat-model-status inactive';
-    }
-}
-function clearChat() {
-    var pid = selectedProjectId || '';
-    if (!confirm('Clear chat history?')) return;
-    fetch('/api/chat/' + encodeURIComponent(pid), {method:'DELETE'})
-        .then(function(r){
-            if(r.ok) {
-                document.getElementById('chat-messages').innerHTML = '';
-                if (selectedProjectId) {
-                    var p = allProjects.find(function(x){return x.id===selectedProjectId;});
-                    if (p) appendMsg('system', 'Project: ' + p.name);
-                } else {
-                    appendMsg('system', 'Chat cleared');
-                }
-            }
-        })
-        .catch(function(){});
+function clearChat(){
+    var pid=selectedProjectId||'';if(!confirm('Clear history?'))return;
+    fetch('/api/chat/'+encodeURIComponent(pid),{method:'DELETE'}).then(function(r){
+        if(r.ok){document.getElementById('chat-messages').innerHTML='';
+            if(selectedProjectId){var p=allProjects.find(function(x){return x.id===selectedProjectId;});if(p)appendMsg('system','Project: '+p.name);}
+            else appendMsg('system','Cleared');}
+    }).catch(function(){});
 }
 
 /* ======== KEYS ======== */
-function openManageKeys() {
-    tempKeyModels=[]; renderModelTags(); document.getElementById('key-api-key').value='';
-    loadProviders(); loadSavedKeys(); openModal('modal-keys');
-}
-function loadProviders() {
-    fetch('/api/providers').then(function(r){return r.json();}).then(function(list){
-        var sel=document.getElementById('key-provider');
-        sel.innerHTML='<option value="">-- Select --</option>';
-        list.forEach(function(p){sel.innerHTML+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});
-    }).catch(function(){});
-}
-function loadSavedKeys() {
-    fetch('/api/keys').then(function(r){return r.json();}).then(function(list){
-        var el=document.getElementById('saved-keys-list');
-        if(!list||!list.length){el.innerHTML='<div class="empty-hint">No keys</div>';return;}
-        el.innerHTML=list.map(function(k){
-            return '<div class="key-item"><span class="key-provider">'+esc(k.provider_name)+'</span>'+
-            '<span class="key-models">'+esc((k.models||[]).join(', '))+'</span>'+
-            '<button class="btn-del" onclick="deleteKey(\''+k.provider_id+'\')">✕</button></div>';
-        }).join('');
-    }).catch(function(){});
-}
+function openManageKeys(){tempKeyModels=[];renderModelTags();document.getElementById('key-api-key').value='';loadProviders();loadSavedKeys();openModal('modal-keys');}
+function loadProviders(){fetch('/api/providers').then(function(r){return r.json();}).then(function(list){var s=document.getElementById('key-provider');s.innerHTML='<option value="">-- Select --</option>';list.forEach(function(p){s.innerHTML+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});}).catch(function(){});}
+function loadSavedKeys(){fetch('/api/keys').then(function(r){return r.json();}).then(function(list){var el=document.getElementById('saved-keys-list');if(!list||!list.length){el.innerHTML='<div class="empty-hint">No keys</div>';return;}el.innerHTML=list.map(function(k){return '<div class="key-item"><span class="key-provider">'+esc(k.provider_name)+'</span><span class="key-models">'+esc((k.models||[]).join(', '))+'</span><button class="btn-del" onclick="deleteKey(\''+k.provider_id+'\')">\u2715</button></div>';}).join();}).catch(function(){});}
 function addTempModel(){var i=document.getElementById('key-model-input');var v=i.value.trim();if(!v)return;tempKeyModels.push(v);i.value='';renderModelTags();}
 function removeTempModel(i){tempKeyModels.splice(i,1);renderModelTags();}
-function renderModelTags(){
-    var el=document.getElementById('key-models-list');
-    if(!tempKeyModels.length){el.innerHTML='<span style="color:#666;font-size:11px">No models</span>';return;}
-    el.innerHTML=tempKeyModels.map(function(m,i){return '<span class="model-tag">'+esc(m)+' <button onclick="removeTempModel('+i+')">✕</button></span>';}).join('');
-}
-function saveKey(){
-    var p=document.getElementById('key-provider').value;var k=document.getElementById('key-api-key').value.trim();
-    if(!p){alert('Select provider');return;}if(!k){alert('Enter key');return;}
-    var fd=new FormData();fd.append('provider_id',p);fd.append('api_key',k);fd.append('models_json',JSON.stringify(tempKeyModels));
-    fetch('/api/keys',{method:'POST',body:fd}).then(function(r){
-        if(r.ok){alert('Key saved!');tempKeyModels=[];renderModelTags();document.getElementById('key-api-key').value='';loadSavedKeys();loadModels();updateKeyStatus();}
-        else r.text().then(function(t){alert(t);});
-    }).catch(function(e){alert(e.message);});
-}
-function deleteKey(pid){
-    if(!confirm('Delete?'))return;
-    fetch('/api/keys/'+pid,{method:'DELETE'}).then(function(){loadSavedKeys();loadModels();updateKeyStatus();}).catch(function(e){alert(e.message);});
-}
+function renderModelTags(){var el=document.getElementById('key-models-list');if(!tempKeyModels.length){el.innerHTML='<span style="color:#666;font-size:11px">No models</span>';return;}el.innerHTML=tempKeyModels.map(function(m,i){return '<span class="model-tag">'+esc(m)+' <button onclick="removeTempModel('+i+')">\u2715</button></span>';}).join('');}
+function saveKey(){var p=document.getElementById('key-provider').value;var k=document.getElementById('key-api-key').value.trim();if(!p){alert('Select provider');return;}if(!k){alert('Enter key');return;}var fd=new FormData();fd.append('provider_id',p);fd.append('api_key',k);fd.append('models_json',JSON.stringify(tempKeyModels));fetch('/api/keys',{method:'POST',body:fd}).then(function(r){if(r.ok){alert('Saved!');tempKeyModels=[];renderModelTags();document.getElementById('key-api-key').value='';loadSavedKeys();loadModels();updateKeyStatus();}else r.text().then(function(t){alert(t);});}).catch(function(e){alert(e.message);});}
+function deleteKey(pid){if(!confirm('Delete?'))return;fetch('/api/keys/'+pid,{method:'DELETE'}).then(function(){loadSavedKeys();loadModels();updateKeyStatus();}).catch(function(){});}
 
 /* ======== MODELS ======== */
-function loadModels(){
-    fetch('/api/models').then(function(r){return r.json();}).then(function(list){
-        allModels=list||[];
-        var el=document.getElementById('models-list');
-        if(!allModels.length){el.innerHTML='<div class="empty-hint">No models</div>';return;}
-        el.innerHTML=allModels.map(function(m){
-            var dot,badge,bt;
-            if(m.type==='free'){dot='green';badge='free';bt='FREE';}
-            else if(m.has_key&&m.available){dot='green';badge='user';bt='KEY';}
-            else if(m.has_key&&!m.available){dot='yellow';badge='user';bt='OFF';}
-            else{dot='red';badge='locked';bt='NO KEY';}
-            return '<div class="model-item"><span class="model-dot '+dot+'"></span>'+
-            '<span class="model-name">'+esc(m.model_id)+'</span>'+
-            '<span class="model-badge '+badge+'">'+bt+'</span>'+
-            '<span class="model-provider">'+esc(m.provider)+'</span></div>';
-        }).join('');
-    }).catch(function(){});
+function loadModels(){fetch('/api/models').then(function(r){return r.json();}).then(function(list){allModels=list||[];updateChatModelSelect();var el=document.getElementById('models-list');if(!allModels.length){el.innerHTML='<div class="empty-hint">No models</div>';return;}el.innerHTML=allModels.map(function(m){var dot,badge,bt;if(m.type==='free'){dot='green';badge='free';bt='FREE';}else if(m.has_key&&m.available){dot='green';badge='user';bt='KEY';}else if(m.has_key&&!m.available){dot='yellow';badge='user';bt='OFF';}else{dot='red';badge='locked';bt='NO KEY';}return '<div class="model-item"><span class="model-dot '+dot+'"></span><span class="model-name">'+esc(m.model_id)+'</span><span class="model-badge '+badge+'">'+bt+'</span><span class="model-provider">'+esc(m.provider)+'</span></div>';}).join();}).catch(function(){});}
+
+function onChatModelChange(){selectedModelId=document.getElementById('chat-model-select').value;updateModelStatus();}
+function updateChatModelSelect(){
+    var sel=document.getElementById('chat-model-select');var cur=sel.value;sel.innerHTML='';
+    if(!allModels.length){sel.innerHTML='<option value="">No models</option>';document.getElementById('chat-model-status').textContent='';return;}
+    var userM=allModels.filter(function(m){return m.type==='user';});
+    var freeM=allModels.filter(function(m){return m.type!=='user';});
+    if(userM.length){var og=document.createElement('optgroup');og.label='Your Models';userM.forEach(function(m){var o=document.createElement('option');o.value=m.model_id;o.textContent=m.model_id+' ('+m.provider+')';if(!m.has_key||!m.available)o.disabled=true;og.appendChild(o);});sel.appendChild(og);}
+    if(freeM.length){var og2=document.createElement('optgroup');og2.label='Free Models';freeM.forEach(function(m){var o=document.createElement('option');o.value=m.model_id;o.textContent=m.model_id+' ('+m.provider+')';og2.appendChild(o);});sel.appendChild(og2);}
+    var t=selectedModelId||'';if(!t&&selectedProjectId){var p=allProjects.find(function(x){return x.id===selectedProjectId;});if(p&&p.selected_model)t=p.selected_model;}
+    if(!t&&userM.length)t=userM[0].model_id;if(!t&&freeM.length)t=freeM[0].model_id;
+    sel.value=t;if(!sel.value&&sel.options.length)sel.selectedIndex=0;selectedModelId=sel.value;updateModelStatus();
 }
+function updateModelStatus(){var sel=document.getElementById('chat-model-select');var st=document.getElementById('chat-model-status');var mid=sel.value;if(!mid){st.textContent='';return;}var m=allModels.find(function(x){return x.model_id===mid;});if(!m){st.textContent='';return;}if(m.has_key&&m.available){st.textContent='KEY';st.className='chat-model-status active';}else if(m.type==='free'){st.textContent='FREE';st.className='chat-model-status active';}else{st.textContent='NO KEY';st.className='chat-model-status inactive';}}
 
 /* ======== GITHUB ======== */
-function loadGithubToken(){
-    fetch('/api/github/token').then(function(r){return r.json();}).then(function(d){
-        document.getElementById('github-token').value=d.token||'';
-    }).catch(function(){});
-}
-function saveGithubToken(){
-    var t=document.getElementById('github-token').value.trim();
-    fetch('/api/github/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})})
-    .then(function(r){if(r.ok){alert('Saved!');loadGithubUser();}else r.text().then(function(x){alert(x);});})
-    .catch(function(e){alert(e.message);});
-}
-function loadGithubUser(){
-    fetch('/api/github/user').then(function(r){return r.json();}).then(function(d){
-        var el=document.getElementById('github-user-info');
-        if(!d.user||d.user==='invalid token'){el.innerHTML='';return;}
-        var repos='';
-        if(d.repos&&d.repos.length){
-            repos='<div class="github-repos">'+d.repos.map(function(r){
-                return '<a class="github-repo" href="'+esc(r.url)+'" target="_blank">'+esc(r.name)+'</a>';
-            }).join('')+'</div>';
-        }
-        el.innerHTML='<div class="github-user"><span>👤</span><span class="github-user-name">'+esc(d.user)+'</span></div>'+repos;
-    }).catch(function(){});
-}
+function loadGithubToken(){fetch('/api/github/token').then(function(r){return r.json();}).then(function(d){document.getElementById('github-token').value=d.token||'';}).catch(function(){});}
+function saveGithubToken(){var t=document.getElementById('github-token').value.trim();fetch('/api/github/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(function(r){if(r.ok){alert('Saved!');loadGithubUser();}else r.text().then(function(x){alert(x);});}).catch(function(e){alert(e.message);});}
+function loadGithubUser(){fetch('/api/github/user').then(function(r){return r.json();}).then(function(d){var el=document.getElementById('github-user-info');if(!d.user||d.user==='invalid token'){el.innerHTML='';return;}var repos='';if(d.repos&&d.repos.length)repos='<div class="github-repos">'+d.repos.map(function(r){return '<a class="github-repo" href="'+esc(r.url)+'" target="_blank">'+esc(r.name)+'</a>';}).join('')+'</div>';el.innerHTML='<div class="github-user"><span>\uD83D\uDC64</span><span class="github-user-name">'+esc(d.user)+'</span></div>'+repos;}).catch(function(){});}
 
-/* ======== FILE PREVIEW ======== */
-function previewFile(input,pid){
-    var el=document.getElementById(pid);el.innerHTML='';
-    if(input.files&&input.files[0]){
-        var f=input.files[0];var card=document.createElement('div');card.className='file-card';
-        if(f.type.indexOf('image')===0){var img=document.createElement('img');img.src=URL.createObjectURL(f);card.appendChild(img);}
-        var info=document.createElement('div');info.className='file-info';
-        info.innerHTML='<strong>'+esc(f.name)+'</strong><br>'+(f.size/1024).toFixed(1)+' KB';
-        card.appendChild(info);el.appendChild(card);el.style.display='block';
-    }else{el.style.display='none';}
-}
-
-/* ======== CHAT FILES ======== */
-function addChatFiles(input){
-    if(!input.files)return;for(var i=0;i<input.files.length;i++)chatAttachedFiles.push(input.files[i]);
-    input.value='';renderChatFiles();
-}
+/* ======== FILES ======== */
+function previewFile(input,pid){var el=document.getElementById(pid);el.innerHTML='';if(input.files&&input.files[0]){var f=input.files[0];var card=document.createElement('div');card.className='file-card';if(f.type.indexOf('image')===0){var img=document.createElement('img');img.src=URL.createObjectURL(f);card.appendChild(img);}var info=document.createElement('div');info.className='file-info';info.innerHTML='<strong>'+esc(f.name)+'</strong><br>'+(f.size/1024).toFixed(1)+' KB';card.appendChild(info);el.appendChild(card);el.style.display='block';}else{el.style.display='none';}}
+function addChatFiles(input){if(!input.files)return;for(var i=0;i<input.files.length;i++)chatAttachedFiles.push(input.files[i]);input.value='';renderChatFiles();}
 function removeChatFile(idx){chatAttachedFiles.splice(idx,1);renderChatFiles();}
-function renderChatFiles(){
-    var el=document.getElementById('chat-files');
-    if(!chatAttachedFiles.length){el.className='chat-file-preview';el.innerHTML='';return;}
-    el.className='chat-file-preview has-files';
-    el.innerHTML=chatAttachedFiles.map(function(f,idx){
-        var thumb=f.type.indexOf('image')===0?'<img src="'+URL.createObjectURL(f)+'">':'';
-        return '<div class="chat-file-card">'+thumb+'<span>'+esc(f.name)+' ('+(f.size/1024).toFixed(1)+' KB)</span>'+
-        '<button class="chat-file-remove" onclick="removeChatFile('+idx+')">✕</button></div>';
-    }).join('');
-}
+function renderChatFiles(){var el=document.getElementById('chat-files');if(!chatAttachedFiles.length){el.className='chat-file-preview';el.innerHTML='';return;}el.className='chat-file-preview has-files';el.innerHTML=chatAttachedFiles.map(function(f,idx){var thumb=f.type.indexOf('image')===0?'<img src="'+URL.createObjectURL(f)+'">':'';return '<div class="chat-file-card">'+thumb+'<span>'+esc(f.name)+' ('+(f.size/1024).toFixed(1)+' KB)</span><button class="chat-file-remove" onclick="removeChatFile('+idx+')">\u2715</button></div>';}).join('');}
 
 /* ======== QUICK BAR ======== */
-var CATS=[
-    {id:'github',name:'GitHub',ico:'🐙'},{id:'server',name:'Server',ico:'🖥'},
-    {id:'database',name:'Database',ico:'🗄'},{id:'website',name:'Website',ico:'🌐'},
-    {id:'docs',name:'Docs',ico:'📋'},{id:'custom',name:'Custom',ico:'🔗'}
-];
-function openLinkModal(cat){
-    currentLinkCategory=cat;var c=CATS.find(function(x){return x.id===cat;});
-    document.getElementById('link-modal-title').textContent=c.name+' Links';
-    document.getElementById('link-label').value='';document.getElementById('link-url').value='';
-    renderLinkList(cat);openModal('modal-link');
-}
-function renderLinkList(cat){
-    var el=document.getElementById('link-list');var links=allLinks[cat]||[];
-    if(!links.length){el.innerHTML='<div class="empty-hint">No links</div>';return;}
-    el.innerHTML=links.map(function(lk,idx){
-        return '<div class="key-item"><span class="key-provider">'+esc(lk.label)+'</span>'+
-        '<span class="key-models"><a href="'+esc(lk.url)+'" target="_blank" style="color:#C8A97E;text-decoration:none">'+esc(lk.url)+'</a></span>'+
-        '<button class="btn-del" onclick="removeLink(\''+cat+'\','+idx+')">✕</button></div>';
-    }).join('');
-}
-function saveLink(){
-    var label=document.getElementById('link-label').value.trim();var url=document.getElementById('link-url').value.trim();
-    if(!label||!url){alert('Enter label and URL');return;}
-    if(!allLinks[currentLinkCategory])allLinks[currentLinkCategory]=[];
-    allLinks[currentLinkCategory].push({label:label,url:url});
-    localStorage.setItem('fosved_links',JSON.stringify(allLinks));
-    renderLinkList(currentLinkCategory);renderQuickBar();
-    document.getElementById('link-label').value='';document.getElementById('link-url').value='';
-}
-function removeLink(cat,idx){
-    allLinks[cat].splice(idx,1);localStorage.setItem('fosved_links',JSON.stringify(allLinks));
-    renderLinkList(cat);renderQuickBar();
-}
-function renderQuickBar(){
-    document.getElementById('quick-bar').innerHTML=CATS.map(function(c){
-        var links=allLinks[c.id]||[];
-        var h='<div class="qb-group"><button class="qb-cat" onclick="openLinkModal(\''+c.id+'\')">'+
-        '<span class="qb-ico">'+c.ico+'</span> '+esc(c.name)+'</button>';
-        links.forEach(function(lk,idx){
-            h+='<button class="qb-link" onclick="window.open(\''+esc(lk.url).replace(/'/g,"\\'")+'\',\'_blank\')">'+
-            esc(lk.label)+'<span class="qb-link-x" onclick="event.stopPropagation();removeLink(\''+c.id+'\','+idx+')">×</span></button>';
-        });
-        return h+'</div>';
-    }).join('');
-}
+var CATS=[{id:'github',name:'GitHub',ico:'\uD83D\uDC19'},{id:'server',name:'Server',ico:'\uD83D\uDDA5'},{id:'database',name:'Database',ico:'\uD83D\uDDC4'},{id:'website',name:'Website',ico:'\uD83C\uDF10'},{id:'docs',name:'Docs',ico:'\uD83D\uDCCB'},{id:'custom',name:'Custom',ico:'\uD83D\uDD17'}];
+function openLinkModal(cat){currentLinkCategory=cat;var c=CATS.find(function(x){return x.id===cat;});document.getElementById('link-modal-title').textContent=c.name+' Links';document.getElementById('link-label').value='';document.getElementById('link-url').value='';renderLinkList(cat);openModal('modal-link');}
+function renderLinkList(cat){var el=document.getElementById('link-list');var links=allLinks[cat]||[];if(!links.length){el.innerHTML='<div class="empty-hint">No links</div>';return;}el.innerHTML=links.map(function(lk,idx){return '<div class="key-item"><span class="key-provider">'+esc(lk.label)+'</span><span class="key-models"><a href="'+esc(lk.url)+'" target="_blank" style="color:#C8A97E;text-decoration:none">'+esc(lk.url)+'</a></span><button class="btn-del" onclick="removeLink(\''+cat+'\','+idx+')">\u2715</button></div>';}).join('');}
+function saveLink(){var label=document.getElementById('link-label').value.trim();var url=document.getElementById('link-url').value.trim();if(!label||!url){alert('Enter label and URL');return;}if(!allLinks[currentLinkCategory])allLinks[currentLinkCategory]=[];allLinks[currentLinkCategory].push({label:label,url:url});localStorage.setItem('fosved_links',JSON.stringify(allLinks));renderLinkList(currentLinkCategory);renderQuickBar();document.getElementById('link-label').value='';document.getElementById('link-url').value='';}
+function removeLink(cat,idx){allLinks[cat].splice(idx,1);localStorage.setItem('fosved_links',JSON.stringify(allLinks));renderLinkList(cat);renderQuickBar();}
+function renderQuickBar(){document.getElementById('quick-bar').innerHTML=CATS.map(function(c){var links=allLinks[c.id]||[];var h='<div class="qb-group"><button class="qb-cat" onclick="openLinkModal(\''+c.id+'\')"><span class="qb-ico">'+c.ico+'</span> '+esc(c.name)+'</button>';links.forEach(function(lk,idx){h+='<button class="qb-link" onclick="window.open(\''+esc(lk.url).replace(/'/g,"\\'")+'\',\'_blank\')">'+esc(lk.label)+'<span class="qb-link-x" onclick="event.stopPropagation();removeLink(\''+c.id+'\','+idx+')">\u00d7</span></button>';});return h+'</div>';}).join('');}
 
 /* ======== KEY HANDLERS ======== */
 document.addEventListener('keydown',function(e){
@@ -801,6 +538,5 @@ document.addEventListener('keydown',function(e){
     if(e.target.id==='user-input'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}
 });
 </script>
-
 </body>
 </html>
