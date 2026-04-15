@@ -1,11 +1,10 @@
-﻿"""REST API — projects (with ideas, instructions, model select), keys, models."""
-import json, uuid, shutil, os
+﻿"""REST API - projects, keys, models, files, history, code generation."""
+import json, uuid, shutil, os, re
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Query
 from core.keys_manager import keys_manager, PROVIDER_DEFS
 from core import chat_history
-import urllib.request, urllib.error, json as _json
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -93,7 +92,7 @@ async def update_project(pid: str, request: Request):
     updated = False
     for p in projs:
         if p["id"] == pid:
-            for k in ["name","description","prompt","instructions","ideas","selected_model","status","progress"]:
+            for k in ["name","description","prompt","instructions","ideas","selected_model","status","progress","folder","github_repo"]:
                 if k in data:
                     p[k] = data[k]
             updated = True
@@ -108,6 +107,114 @@ async def delete_project(pid: str):
     projs = _load_projects()
     projs = [p for p in projs if p["id"] != pid]
     _save_projects(projs)
+    return {"status": "ok"}
+
+@router.get("/projects/{pid}/read-file")
+async def read_project_file(pid: str, path: str = Query("")):
+    projs = _load_projects()
+    proj = next((p for p in projs if p["id"] == pid), None)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    folder = proj.get("folder", "")
+    if not folder or not os.path.isdir(folder):
+        raise HTTPException(status_code=400, detail="Project folder not set")
+    full_path = os.path.normpath(os.path.join(folder, path))
+    if not full_path.startswith(os.path.normpath(folder)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found: " + path)
+    skip_ext = [".pyc",".exe",".dll",".so",".bin",".png",".jpg",".jpeg",".gif",".zip",".tar",".gz"]
+    ext = os.path.splitext(full_path)[1].lower()
+    if ext in skip_ext:
+        raise HTTPException(status_code=400, detail="Binary file, cannot read")
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"path": path, "content": content, "size": len(content), "lines": content.count("\n") + 1}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/projects/{pid}/tree")
+async def project_tree(pid: str):
+    projs = _load_projects()
+    proj = next((p for p in projs if p["id"] == pid), None)
+    folder = proj.get("folder", "") if proj else ""
+    if not folder or not os.path.isdir(folder):
+        return {"tree": [], "folder": folder}
+    skip_dirs = {".git","__pycache__","node_modules",".venv","venv",".idea",".vscode","dist","build",".next"}
+    result = []
+    def walk(dp, prefix=""):
+        try:
+            items = sorted(os.listdir(dp))
+            dirs = [e for e in items if os.path.isdir(os.path.join(dp, e)) and e not in skip_dirs]
+            files = [e for e in items if os.path.isfile(os.path.join(dp, e)) and not e.endswith((".pyc",))]
+            for d in dirs:
+                rel = prefix + d + "/"
+                result.append({"type": "dir", "path": rel})
+                walk(os.path.join(dp, d), rel)
+            for f in files:
+                rel = prefix + f
+                fp = os.path.join(dp, f)
+                result.append({"type": "file", "path": rel, "size": os.path.getsize(fp)})
+        except PermissionError:
+            pass
+    walk(folder)
+    return {"tree": result, "folder": folder}
+
+@router.get("/projects/{pid}/files")
+async def list_project_files(pid: str):
+    projs = _load_projects()
+    proj = next((p for p in projs if p["id"] == pid), None)
+    folder = proj.get("folder", "") if proj else ""
+    if not folder or not os.path.isdir(folder):
+        return {"files": [], "folder": folder}
+    files = []
+    skip = [".git","__pycache__","node_modules",".venv","venv"]
+    for root, dirs, filenames in os.walk(folder):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for fn in filenames:
+            fp = os.path.join(root, fn)
+            rel = os.path.relpath(fp, folder).replace("\\", "/")
+            if fn.endswith(".pyc"):
+                continue
+            files.append({"path": rel, "size": os.path.getsize(fp)})
+    files.sort(key=lambda x: x["path"])
+    return {"files": files, "folder": folder}
+
+@router.post("/projects/{pid}/save-file")
+async def save_project_file(pid: str, request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    filepath = data.get("path", "")
+    content = data.get("content", "")
+    if not filepath:
+        raise HTTPException(status_code=400, detail="path required")
+    projs = _load_projects()
+    proj = next((p for p in projs if p["id"] == pid), None)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    folder = proj.get("folder", "")
+    if not folder:
+        raise HTTPException(status_code=400, detail="Project folder not set")
+    full_path = os.path.join(folder, filepath)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return {"status": "ok", "path": full_path}
+
+@router.post("/projects/{pid}/generate")
+async def trigger_generate(pid: str):
+    return {"status": "ok", "project_id": pid, "action": "generate"}
+
+@router.get("/chat/{project_id}")
+async def get_chat_history(project_id: str):
+    return chat_history.load_history(project_id)
+
+@router.delete("/chat/{project_id}")
+async def clear_chat_history(project_id: str):
+    chat_history.clear_history(project_id)
     return {"status": "ok"}
 
 @router.get("/keys")
@@ -139,18 +246,10 @@ async def list_models():
     has_openrouter = any(k["provider_id"] == "openrouter" and k.get("is_active", True) for k in saved_keys)
     result = []
     existing_ids = set()
-
     for um in user_models:
         mid = um["model_name"]
-        result.append({
-            "model_id": mid,
-            "provider": um["provider_name"],
-            "type": "user",
-            "available": um["is_active"],
-            "has_key": True,
-        })
+        result.append({"model_id": mid, "provider": um["provider_name"], "type": "user", "available": um["is_active"], "has_key": True})
         existing_ids.add(mid)
-
     free = list(FREE_MODELS)
     if has_openrouter:
         or_free = [m for m in free if m["provider"] == "OpenRouter"]
@@ -158,16 +257,9 @@ async def list_models():
         free = or_free + other_free
     else:
         free = free[:4]
-
     for fm in free:
         if fm["model_id"] not in existing_ids:
-            result.append({
-                "model_id": fm["model_id"],
-                "provider": fm["provider"],
-                "type": "free",
-                "available": True,
-                "has_key": False,
-            })
+            result.append({"model_id": fm["model_id"], "provider": fm["provider"], "type": "free", "available": True, "has_key": False})
     return result
 
 @router.get("/providers")
@@ -186,6 +278,25 @@ async def set_github_token(request: Request):
         data = {}
     keys_manager.set_github_token(data.get("token", ""))
     return {"status": "ok"}
+
+@router.get("/github/user")
+async def get_github_user():
+    token = keys_manager.get_github_token()
+    if not token:
+        return {"user": "", "repos": []}
+    try:
+        import urllib.request
+        import json as _json
+        req = urllib.request.Request("https://api.github.com/user", headers={"Authorization": "token " + token, "User-Agent": "FosvedCoder"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = _json.loads(resp.read().decode())
+            username = data.get("login", "")
+        req2 = urllib.request.Request("https://api.github.com/user/repos?sort=updated&per_page=10", headers={"Authorization": "token " + token, "User-Agent": "FosvedCoder"})
+        with urllib.request.urlopen(req2, timeout=5) as resp2:
+            repos = [{"name": r.get("full_name",""), "url": r.get("html_url","")} for r in _json.loads(resp2.read().decode())]
+        return {"user": username, "repos": repos}
+    except Exception as e:
+        return {"user": "invalid token", "repos": [], "error": str(e)}
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
