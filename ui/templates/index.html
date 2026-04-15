@@ -5,649 +5,751 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fosved Coder v2.0</title>
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <!-- Code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════════
-     LEFT SIDEBAR
-     ═══════════════════════════════════════════════════════════ -->
-<div class="sidebar">
+    <!-- LEFT SIDEBAR -->
+    <div class="sidebar">
 
-    <!-- Brand Logo -->
-    <div class="sidebar-logo">
-        <div class="logo-mark">φ</div>
-        <div class="logo-text">
-            <div class="logo-name">Fosved</div>
-            <div class="logo-subtitle">φῶς · веды · coder</div>
-        </div>
-    </div>
-
-    <!-- AI Models -->
-    <div class="sidebar-section">
-        <div class="sidebar-header">
-            <h3>Модели ИИ</h3>
-            <button class="btn-icon btn-tiny" onclick="refreshModels()" title="Обновить">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            </button>
-        </div>
-        <div id="models-list">
-            <div class="model-item loading">Загрузка моделей...</div>
-        </div>
-    </div>
-
-    <!-- Projects -->
-    <div class="sidebar-section">
-        <div class="sidebar-header">
-            <h3>Проекты</h3>
-            <button class="btn-icon btn-tiny" onclick="createProject()" title="Новый проект">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </button>
-        </div>
-        <div id="projects-list">
-            <div class="project-item active" data-id="null" onclick="selectProject(null, this)">Общий чат</div>
-        </div>
-    </div>
-
-    <!-- Ideas -->
-    <div class="sidebar-section">
-        <div class="sidebar-header"><h3>Идеи</h3></div>
-        <div class="idea-input-row">
-            <input type="text" id="idea-input" placeholder="GitHub ссылка..." onkeypress="if(event.key==='Enter')analyzeIdea()">
-            <button class="btn-small" onclick="analyzeIdea()">OK</button>
-        </div>
-        <div id="ideas-list"></div>
-    </div>
-
-    <!-- Footer -->
-    <div class="sidebar-section sidebar-footer">
-        <button class="sidebar-btn" onclick="showKeysModal()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-            Ключи
-        </button>
-        <button class="sidebar-btn" onclick="showStats()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
-            Стат
-        </button>
-    </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════
-     MAIN AREA
-     ═══════════════════════════════════════════════════════════ -->
-<div class="main">
-    <!-- Header -->
-    <div class="chat-header">
-        <div class="header-left">
-            <span id="current-project-name">Общий чат</span>
-            <div class="progress-bar-mini" id="header-progress" style="display:none">
-                <div class="progress-fill" id="header-progress-fill"></div>
-                <span class="progress-text" id="header-progress-text">0%</span>
+        <!-- AI Models -->
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <h3>Модели ИИ</h3>
+                <button class="btn-icon" onclick="refreshModels()" title="Обновить" style="font-size:12px">↻</button>
+            </div>
+            <div id="models-list">
+                <div class="model-item loading">Загрузка...</div>
             </div>
         </div>
-        <div class="header-actions">
-            <button class="btn-icon" onclick="showHelp()" title="Помощь">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            </button>
-            <button class="btn-icon" onclick="clearChat()" title="Очистить чат">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-            </button>
+
+        <!-- Projects -->
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <h3>Проекты</h3>
+                <button class="btn-icon" onclick="createProject()" title="Новый проект">+</button>
+            </div>
+            <div id="projects-list">
+                <div class="project-item active" data-id="null" onclick="selectProject(null, this)">
+                    Общий чат
+                </div>
+            </div>
+        </div>
+
+        <!-- Ideas -->
+        <div class="sidebar-section">
+            <div class="sidebar-header">
+                <h3>Идеи (База знаний)</h3>
+            </div>
+            <div class="idea-input-row">
+                <input type="text" id="idea-input" placeholder="GitHub ссылка..." onkeypress="if(event.key==='Enter')analyzeIdea()">
+                <button class="btn-small" onclick="analyzeIdea()">OK</button>
+            </div>
+            <div id="ideas-list"></div>
+        </div>
+
+        <!-- Footer -->
+        <div class="sidebar-section sidebar-footer">
+            <button class="sidebar-btn" onclick="showKeysModal()">🔑 Ключи</button>
+            <button class="sidebar-btn" onclick="showStats()">📊 Стат</button>
         </div>
     </div>
 
-    <!-- Chat -->
-    <div class="chat-box" id="chat-box">
-        <div class="msg system">Подключение к серверу...</div>
-    </div>
-
-    <!-- Input -->
-    <div class="input-area">
-        <textarea id="user-input" placeholder="Введите задачу или промпт... (Shift+Enter = новая строка)" rows="1"
-                  onkeydown="handleKeyDown(event)"></textarea>
-        <button class="send-btn" onclick="sendMessage()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        </button>
-    </div>
-
-    <!-- Bottom Bar -->
-    <div class="bottom-bar">
-        <button onclick="insertCommand('/terminal ')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-            Terminal
-        </button>
-        <button onclick="insertCommand('/git_pull')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 14 12 9 7 14"/><line x1="12" y1="9" x2="12" y2="21"/></svg>
-            Pull
-        </button>
-        <button onclick="insertCommand('/git_push')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 9v-4a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v4"/><polyline points="17 14 12 9 7 14"/><line x1="12" y1="9" x2="12" y2="21"/></svg>
-            Push
-        </button>
-        <button onclick="insertCommand('/ideas ')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 4 12.9V17H8v-2.1A7 7 0 0 1 12 2z"/></svg>
-            Ideas
-        </button>
-        <button onclick="insertCommand('/clear')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-            Clear
-        </button>
-    </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════
-     MODAL
-     ═══════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
-    <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal-header">
-            <span id="modal-title">Модальное окно</span>
-            <button class="btn-icon" onclick="closeModal()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
+    <!-- MAIN AREA -->
+    <div class="main">
+        <!-- Header -->
+        <div class="chat-header">
+            <div class="header-left">
+                <span id="current-project-name">Общий чат</span>
+                <div class="progress-bar-mini" id="header-progress" style="display:none">
+                    <div class="progress-fill" id="header-progress-fill"></div>
+                    <span class="progress-text" id="header-progress-text">0%</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn-icon" onclick="showHelp()" title="Помощь">❓</button>
+                <button class="btn-icon" onclick="clearChat()" title="Очистить чат">🗑</button>
+            </div>
         </div>
-        <div class="modal-body" id="modal-body"></div>
+
+        <!-- Chat -->
+        <div class="chat-box" id="chat-box">
+            <div class="msg system">Подключение к серверу...</div>
+        </div>
+
+        <!-- Input -->
+        <div class="input-area">
+            <textarea id="user-input" placeholder="Введите задачу или промпт... (Shift+Enter = новая строка)" rows="1"
+                      onkeydown="handleKeyDown(event)"></textarea>
+            <button class="send-btn" onclick="sendMessage()">➤</button>
+        </div>
+
+        <!-- Bottom Bar -->
+        <div class="bottom-bar">
+            <button onclick="insertCommand('/terminal ')">🛠 Terminal</button>
+            <button onclick="insertCommand('/git_pull')">📥 Pull</button>
+            <button onclick="insertCommand('/git_push')">📤 Push</button>
+            <button onclick="insertCommand('/ideas ')">💡 Ideas</button>
+            <button onclick="insertCommand('/clear')">🧹 Clear</button>
+        </div>
     </div>
-</div>
 
-<script>
-// ═══════════════════════════════════════════════════════
-// State
-// ═══════════════════════════════════════════════════════
-const ws = new WebSocket("ws://" + window.location.host + "/ws");
-const chatBox = document.getElementById("chat-box");
-let currentAiDiv = null;
-let currentAiText = "";
-let currentProjectId = null;
-let allModels = [];
-let activeModelId = null;
+    <!-- MODAL -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span id="modal-title">Модальное окно</span>
+                <button class="btn-icon" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
 
-// Configure marked.js
-marked.setOptions({
-    highlight: function(code, lang) {
-        if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
-        return hljs.highlightAuto(code).value;
-    },
-    breaks: true, gfm: true
-});
+    <script>
+        // ═══════════════════════════════════════════════════════
+        // State
+        // ═══════════════════════════════════════════════════════
+        const ws = new WebSocket("ws://" + window.location.host + "/ws");
+        const chatBox = document.getElementById("chat-box");
+        let currentAiDiv = null;
+        let currentAiText = "";
+        let currentProjectId = null;
+        let allModels = [];
+        let activeModelId = null;
 
-// ═══════════════════════════════════════════════════════
-// WebSocket
-// ═══════════════════════════════════════════════════════
-ws.onopen = () => {
-    clearSystemMessages();
-    addMessage("system", "Fosved Coder v2.0 — подключено.");
-    loadModels();
-    loadProjects();
-    loadIdeas();
-};
+        // Configure marked.js
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: true,
+            gfm: true
+        });
 
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (data.type === "chunk") {
-        if (!currentAiDiv) {
-            currentAiDiv = document.createElement("div");
-            currentAiDiv.className = "msg ai";
-            chatBox.appendChild(currentAiDiv);
+        // ═══════════════════════════════════════════════════════
+        // WebSocket Connection
+        // ═══════════════════════════════════════════════════════
+        ws.onopen = () => {
+            clearSystemMessages();
+            addMessage("system", "Fosved Coder v2.0 — подключено.");
+            loadModels();
+            loadProjects();
+            loadIdeas();
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === "chunk") {
+                if (!currentAiDiv) {
+                    currentAiDiv = document.createElement("div");
+                    currentAiDiv.className = "msg ai";
+                    chatBox.appendChild(currentAiDiv);
+                }
+                currentAiText += data.content;
+                currentAiDiv.innerHTML = renderMarkdown(currentAiText);
+                addCopyButtons(currentAiDiv);
+                chatBox.scrollTop = chatBox.scrollHeight;
+
+            } else if (data.type === "done") {
+                currentAiDiv = null;
+                currentAiText = "";
+
+            } else if (data.type === "error") {
+                addMessage("error", data.content);
+                currentAiDiv = null;
+                currentAiText = "";
+
+            } else if (data.type === "system") {
+                addMessage("system", data.content);
+
+            } else if (data.type === "command_result") {
+                addMessage("terminal", data.content);
+
+            } else if (data.type === "idea_result") {
+                addMessage("idea", data.content);
+
+            } else {
+                addMessage(data.type || "system", data.content || "");
+            }
+        };
+
+        ws.onclose = () => {
+            addMessage("error", "Соединение потеряно. Перезагрузите страницу (F5).");
+        };
+
+        // ═══════════════════════════════════════════════════════
+        // Message Handling
+        // ═══════════════════════════════════════════════════════
+        function addMessage(type, text) {
+            const div = document.createElement("div");
+            div.className = "msg " + type;
+
+            if (type === "ai") {
+                div.innerHTML = renderMarkdown(text);
+                addCopyButtons(div);
+            } else if (type === "terminal") {
+                const pre = document.createElement("pre");
+                const code = document.createElement("code");
+                code.textContent = text;
+                pre.appendChild(code);
+                div.appendChild(pre);
+            } else if (type === "idea") {
+                div.innerHTML = renderMarkdown(text);
+            } else {
+                div.textContent = text;
+            }
+
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
-        currentAiText += data.content;
-        currentAiDiv.innerHTML = renderMarkdown(currentAiText);
-        addCopyButtons(currentAiDiv);
-        chatBox.scrollTop = chatBox.scrollHeight;
-    } else if (data.type === "done") {
-        currentAiDiv = null; currentAiText = "";
-    } else if (data.type === "error") {
-        addMessage("error", data.content);
-        currentAiDiv = null; currentAiText = "";
-    } else if (data.type === "system") {
-        addMessage("system", data.content);
-    } else if (data.type === "command_result") {
-        addMessage("terminal", data.content);
-    } else if (data.type === "idea_result") {
-        addMessage("idea", data.content);
-    } else {
-        addMessage(data.type || "system", data.content || "");
-    }
-};
 
-ws.onclose = () => { addMessage("error", "Соединение потеряно. Перезагрузите (F5)."); };
+        function renderMarkdown(text) {
+            try {
+                return marked.parse(text);
+            } catch (e) {
+                return text;
+            }
+        }
 
-// ═══════════════════════════════════════════════════════
-// Messages
-// ═══════════════════════════════════════════════════════
-function addMessage(type, text) {
-    const div = document.createElement("div");
-    div.className = "msg " + type;
-    if (type === "ai") { div.innerHTML = renderMarkdown(text); addCopyButtons(div); }
-    else if (type === "terminal") { const pre = document.createElement("pre"); const code = document.createElement("code"); code.textContent = text; pre.appendChild(code); div.appendChild(pre); }
-    else if (type === "idea") { div.innerHTML = renderMarkdown(text); }
-    else { div.textContent = text; }
-    chatBox.appendChild(div);
-    chatBox.scrollTop = chatBox.scrollHeight;
-}
-function renderMarkdown(text) { try { return marked.parse(text); } catch(e) { return text; } }
-function addCopyButtons(container) {
-    container.querySelectorAll("pre").forEach(pre => {
-        if (pre.querySelector(".copy-btn")) return;
-        const btn = document.createElement("button"); btn.className = "copy-btn"; btn.textContent = "Копировать";
-        btn.onclick = () => { navigator.clipboard.writeText(pre.querySelector("code").textContent).then(() => { btn.textContent = "Скопировано!"; setTimeout(() => btn.textContent = "Копировать", 2000); }); };
-        pre.style.position = "relative"; pre.appendChild(btn);
-    });
-}
-function clearSystemMessages() { chatBox.querySelectorAll(".msg.system, .msg.error").forEach(m => m.remove()); }
+        function addCopyButtons(container) {
+            container.querySelectorAll("pre").forEach(pre => {
+                if (pre.querySelector(".copy-btn")) return;
+                const btn = document.createElement("button");
+                btn.className = "copy-btn";
+                btn.textContent = "Копировать";
+                btn.onclick = () => {
+                    const code = pre.querySelector("code");
+                    navigator.clipboard.writeText(code.textContent).then(() => {
+                        btn.textContent = "Скопировано!";
+                        setTimeout(() => btn.textContent = "Копировать", 2000);
+                    });
+                };
+                pre.style.position = "relative";
+                pre.appendChild(btn);
+            });
+        }
 
-// ═══════════════════════════════════════════════════════
-// Input
-// ═══════════════════════════════════════════════════════
-function sendMessage() {
-    const input = document.getElementById("user-input"); const text = input.value.trim();
-    if (!text) return;
-    addMessage("user", text); ws.send(text); input.value = ""; input.style.height = "auto";
-}
-function handleKeyDown(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
-function insertCommand(cmd) { const input = document.getElementById("user-input"); input.value = cmd; input.focus(); }
+        function clearSystemMessages() {
+            chatBox.querySelectorAll(".msg.system, .msg.error").forEach(m => m.remove());
+        }
 
-// ═══════════════════════════════════════════════════════
-// MODELS
-// ═══════════════════════════════════════════════════════
-async function loadModels() {
-    try {
-        const resp = await fetch("/api/v1/models");
-        const data = await resp.json();
-        allModels = data.models || [];
-        renderModels();
-    } catch(e) { console.error("Failed to load models:", e); }
-}
+        // ═══════════════════════════════════════════════════════
+        // User Input
+        // ═══════════════════════════════════════════════════════
+        function sendMessage() {
+            const input = document.getElementById("user-input");
+            const text = input.value.trim();
+            if (!text) return;
 
-function renderModels() {
-    const list = document.getElementById("models-list");
-    if (!allModels.length) { list.innerHTML = '<div class="model-empty">Нет доступных моделей. Настройте ключи.</div>'; return; }
+            addMessage("user", text);
+            ws.send(text);
+            input.value = "";
+            input.style.height = "auto";
+        }
 
-    // Separate paid and free
-    const paid = allModels.filter(m => m.type === "paid");
-    const free = allModels.filter(m => m.type === "free" && m.status === "available");
-    const freeDisabled = allModels.filter(m => m.type === "free" && m.status !== "available");
+        function handleKeyDown(e) {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
 
-    let html = "";
+        function insertCommand(cmd) {
+            const input = document.getElementById("user-input");
+            input.value = cmd;
+            input.focus();
+        }
 
-    if (paid.length) {
-        html += '<div class="model-section-label">Платные</div>';
-        paid.forEach(m => {
-            const cls = m.status === 'valid' ? 'model-valid' : m.status === 'rate_limited' ? 'model-limited' : 'model-item';
-            const sel = m.id === activeModelId ? ' active' : '';
-            const icon = m.status === 'valid' ? '●' : '●';
-            html += `<div class="model-item ${cls}${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
-                <span class="model-status-dot ${m.status}">${icon}</span>
-                <span class="model-info">
-                    <span class="model-name">${escapeHtml(m.name)}</span>
-                    <span class="model-provider">${escapeHtml(m.provider_name)}</span>
-                </span>
-            </div>`;
-        });
-    }
+        // ═══════════════════════════════════════════════════════
+        // MODELS
+        // ═══════════════════════════════════════════════════════
+        async function loadModels() {
+            try {
+                const resp = await fetch("/api/v1/models");
+                const data = await resp.json();
+                allModels = data.models || [];
+                renderModels();
+            } catch(e) { console.error("Failed to load models:", e); }
+        }
 
-    if (free.length) {
-        html += '<div class="model-section-label">Бесплатные</div>';
-        free.forEach(m => {
-            const sel = m.id === activeModelId ? ' active' : '';
-            html += `<div class="model-item model-free${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
-                <span class="model-status-dot free">●</span>
-                <span class="model-info">
-                    <span class="model-name">${escapeHtml(m.name)}</span>
-                    <span class="model-provider">${escapeHtml(m.provider_name)}</span>
-                </span>
-            </div>`;
-        });
-    }
+        function renderModels() {
+            const list = document.getElementById("models-list");
+            if (!allModels.length) { list.innerHTML = '<div class="model-empty">Нет моделей. Настройте ключи.</div>'; return; }
 
-    if (freeDisabled.length) {
-        html += '<div class="model-section-label">Бесплатные (нужен OpenRouter)</div>';
-        freeDisabled.forEach(m => {
-            html += `<div class="model-item model-disabled" title="Нужен API ключ OpenRouter">
-                <span class="model-status-dot disabled">●</span>
-                <span class="model-info">
-                    <span class="model-name">${escapeHtml(m.name)}</span>
-                    <span class="model-provider">${escapeHtml(m.provider_name)}</span>
-                </span>
-            </div>`;
-        });
-    }
+            const paid = allModels.filter(m => m.type === "paid");
+            const free = allModels.filter(m => m.type === "free" && m.status === "available");
+            const freeDisabled = allModels.filter(m => m.type === "free" && m.status !== "available");
 
-    list.innerHTML = html;
-}
+            let html = "";
 
-function selectModel(modelId) {
-    activeModelId = modelId;
-    document.querySelectorAll('.model-item').forEach(el => el.classList.remove('active'));
-    const el = document.querySelector(`.model-item[data-id="${modelId}"]`);
-    if (el) el.classList.add('active');
-}
+            if (paid.length) {
+                html += '<div class="model-section-label">Платные</div>';
+                paid.forEach(m => {
+                    const cls = m.status === 'valid' ? 'model-valid' : m.status === 'rate_limited' ? 'model-limited' : 'model-item';
+                    const sel = m.id === activeModelId ? ' active' : '';
+                    const icon = m.status === 'valid' ? '●' : '●';
+                    html += `<div class="model-item ${cls}${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
+                        <span class="model-status-dot ${m.status}">${icon}</span>
+                        <span class="model-info">
+                            <span class="model-name">${escapeHtml(m.name)}</span>
+                            <span class="model-provider">${escapeHtml(m.provider_name)}</span>
+                        </span>
+                    </div>`;
+                });
+            }
 
-async function refreshModels() {
-    const list = document.getElementById("models-list");
-    list.innerHTML = '<div class="model-item loading">Обновление...</div>';
-    await loadModels();
-}
+            if (free.length) {
+                html += '<div class="model-section-label">Бесплатные</div>';
+                free.forEach(m => {
+                    const sel = m.id === activeModelId ? ' active' : '';
+                    html += `<div class="model-item model-free${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
+                        <span class="model-status-dot free">●</span>
+                        <span class="model-info">
+                            <span class="model-name">${escapeHtml(m.name)}</span>
+                            <span class="model-provider">${escapeHtml(m.provider_name)}</span>
+                        </span>
+                    </div>`;
+                });
+            }
 
-// ═══════════════════════════════════════════════════════
-// PROJECTS
-// ═══════════════════════════════════════════════════════
-async function loadProjects() {
-    try {
-        const resp = await fetch("/api/v1/projects"); const projects = await resp.json();
-        const list = document.getElementById("projects-list");
-        list.innerHTML = '<div class="project-item active" data-id="null" onclick="selectProject(null, this)">Общий чат</div>';
-        projects.forEach(p => {
-            const div = document.createElement("div"); div.className = "project-item"; div.dataset.id = p.id;
-            const progressHtml = p.progress > 0 ? `<div class="project-progress"><div class="project-progress-fill" style="width:${p.progress}%"></div><span class="project-progress-text">${p.progress}%</span></div>` : '';
-            div.innerHTML = `<div class="project-info"><span class="project-name">${escapeHtml(p.name)}</span>${progressHtml}</div>
-                <button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="10" height="10"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>`;
-            div.onclick = () => selectProject(p.id, div);
-            list.appendChild(div);
-        });
-    } catch(e) { console.error("Failed to load projects:", e); }
-}
+            if (freeDisabled.length) {
+                html += '<div class="model-section-label">Нужен OpenRouter</div>';
+                freeDisabled.forEach(m => {
+                    html += `<div class="model-item model-disabled" title="Нужен API ключ OpenRouter">
+                        <span class="model-status-dot disabled">●</span>
+                        <span class="model-info">
+                            <span class="model-name">${escapeHtml(m.name)}</span>
+                            <span class="model-provider">${escapeHtml(m.provider_name)}</span>
+                        </span>
+                    </div>`;
+                });
+            }
 
-async function selectProject(projectId, element) {
-    currentProjectId = projectId;
-    document.querySelectorAll(".project-item").forEach(el => el.classList.remove("active"));
-    element.classList.add("active");
-    const name = projectId ? element.querySelector(".project-name").textContent : "Общий чат";
-    document.getElementById("current-project-name").textContent = name;
+            list.innerHTML = html;
+        }
 
-    // Show/hide progress bar in header
-    const progressBar = document.getElementById("header-progress");
-    if (projectId) {
-        const project = element.dataset;
-        // Try to get project data for progress
-        try {
-            const resp = await fetch("/api/v1/projects");
-            const projects = await resp.json();
-            const p = projects.find(pr => pr.id === projectId);
-            if (p && p.progress > 0) {
-                progressBar.style.display = "flex";
-                document.getElementById("header-progress-fill").style.width = p.progress + "%";
-                document.getElementById("header-progress-text").textContent = p.progress + "%";
+        function selectModel(modelId) {
+            activeModelId = modelId;
+            document.querySelectorAll('.model-item').forEach(el => el.classList.remove('active'));
+            const el = document.querySelector(`.model-item[data-id="${modelId}"]`);
+            if (el) el.classList.add('active');
+        }
+
+        async function refreshModels() {
+            const list = document.getElementById("models-list");
+            list.innerHTML = '<div class="model-item loading">Обновление...</div>';
+            await loadModels();
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Projects
+        // ═══════════════════════════════════════════════════════
+        async function loadProjects() {
+            try {
+                const resp = await fetch("/api/v1/projects");
+                const projects = await resp.json();
+                const list = document.getElementById("projects-list");
+                list.innerHTML = '<div class="project-item active" data-id="null" onclick="selectProject(null, this)">Общий чат</div>';
+                projects.forEach(p => {
+                    const div = document.createElement("div");
+                    div.className = "project-item";
+                    div.dataset.id = p.id;
+                    const progressHtml = p.progress > 0 ? `<div class="project-progress"><div class="project-progress-fill" style="width:${p.progress}%"></div><span class="project-progress-text">${p.progress}%</span></div>` : '';
+                    div.innerHTML = `<div class="project-info"><span class="project-name">${escapeHtml(p.name)}</span>${progressHtml}</div><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">✕</button>`;
+                    div.onclick = () => selectProject(p.id, div);
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error("Failed to load projects:", e);
+            }
+        }
+
+        async function selectProject(projectId, element) {
+            currentProjectId = projectId;
+            document.querySelectorAll(".project-item").forEach(el => el.classList.remove("active"));
+            element.classList.add("active");
+            const name = projectId ? element.querySelector(".project-name").textContent : "Общий чат";
+            document.getElementById("current-project-name").textContent = name;
+
+            // Show/hide progress bar in header
+            const progressBar = document.getElementById("header-progress");
+            if (projectId) {
+                try {
+                    const resp = await fetch("/api/v1/projects");
+                    const projects = await resp.json();
+                    const p = projects.find(pr => pr.id === projectId);
+                    if (p && p.progress > 0) {
+                        progressBar.style.display = "flex";
+                        document.getElementById("header-progress-fill").style.width = p.progress + "%";
+                        document.getElementById("header-progress-text").textContent = p.progress + "%";
+                    } else {
+                        progressBar.style.display = "none";
+                    }
+                } catch(e) { progressBar.style.display = "none"; }
             } else {
                 progressBar.style.display = "none";
             }
-        } catch(e) { progressBar.style.display = "none"; }
-    } else {
-        progressBar.style.display = "none";
-    }
 
-    clearSystemMessages();
-    addMessage("system", `Переключение: ${name}`);
-}
+            clearSystemMessages();
+            addMessage("system", `Переключение: ${name}`);
+        }
 
-async function createProject() {
-    const name = prompt("Имя нового проекта:"); if (!name || !name.trim()) return;
-    try {
-        const resp = await fetch("/api/v1/projects", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name: name.trim()}) });
-        if (resp.ok) { await loadProjects(); addMessage("system", `Проект "${name.trim()}" создан.`); }
-        else { const err = await resp.json(); addMessage("error", `Ошибка: ${err.detail}`); }
-    } catch(e) { addMessage("error", `Ошибка: ${e}`); }
-}
+        async function createProject() {
+            const name = prompt("Имя нового проекта:");
+            if (!name || !name.trim()) return;
+            try {
+                const resp = await fetch("/api/v1/projects", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({name: name.trim()})
+                });
+                if (resp.ok) {
+                    await loadProjects();
+                    addMessage("system", `Проект "${name.trim()}" создан.`);
+                } else {
+                    const err = await resp.json();
+                    addMessage("error", `Ошибка: ${err.detail}`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка создания проекта: ${e}`);
+            }
+        }
 
-async function deleteProject(id, name) {
-    if (!confirm(`Удалить "${name}"?`)) return;
-    try {
-        const resp = await fetch(`/api/v1/projects/${id}`, {method: "DELETE"});
-        if (resp.ok) { await loadProjects(); if (currentProjectId === id) selectProject(null, document.querySelector('.project-item')); addMessage("system", `"${name}" удалён.`); }
-    } catch(e) { addMessage("error", `Ошибка: ${e}`); }
-}
+        async function deleteProject(id, name) {
+            if (!confirm(`Удалить проект "${name}" и всю историю чата?`)) return;
+            try {
+                const resp = await fetch(`/api/v1/projects/${id}`, {method: "DELETE"});
+                if (resp.ok) {
+                    await loadProjects();
+                    if (currentProjectId === id) selectProject(null, document.querySelector('.project-item'));
+                    addMessage("system", `Проект "${name}" удалён.`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка удаления: ${e}`);
+            }
+        }
 
-// ═══════════════════════════════════════════════════════
-// IDEAS
-// ═══════════════════════════════════════════════════════
-async function loadIdeas() {
-    try {
-        const resp = await fetch("/api/v1/ideas"); const ideas = await resp.json();
-        const list = document.getElementById("ideas-list"); list.innerHTML = "";
-        if (!ideas.length) { list.innerHTML = '<div class="idea-empty">Нет идей. Вставьте GitHub ссылку.</div>'; return; }
-        ideas.forEach(i => {
-            const div = document.createElement("div"); div.className = "idea-item";
-            div.innerHTML = `<div class="idea-name" onclick="showIdeaDetail(${i.id})">${escapeHtml(i.name)}</div>
-                <div class="idea-summary">${escapeHtml(i.summary).substring(0, 80)}...</div>
-                <button class="btn-delete" onclick="deleteIdea(${i.id},'${escapeHtml(i.name)}')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="10" height="10"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>`;
-            list.appendChild(div);
-        });
-    } catch(e) { console.error("Failed to load ideas:", e); }
-}
+        // ═══════════════════════════════════════════════════════
+        // Ideas
+        // ═══════════════════════════════════════════════════════
+        async function loadIdeas() {
+            try {
+                const resp = await fetch("/api/v1/ideas");
+                const ideas = await resp.json();
+                const list = document.getElementById("ideas-list");
+                list.innerHTML = "";
+                if (ideas.length === 0) {
+                    list.innerHTML = '<div class="idea-empty">Нет идей. Вставьте ссылку на GitHub репозиторий.</div>';
+                    return;
+                }
+                ideas.forEach(i => {
+                    const div = document.createElement("div");
+                    div.className = "idea-item";
+                    div.innerHTML = `
+                        <div class="idea-name" onclick="showIdeaDetail(${i.id})">${escapeHtml(i.name)}</div>
+                        <div class="idea-summary">${escapeHtml(i.summary).substring(0, 80)}...</div>
+                        <button class="btn-delete" onclick="deleteIdea(${i.id}, '${escapeHtml(i.name)}')" title="Удалить">✕</button>`;
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error("Failed to load ideas:", e);
+            }
+        }
 
-async function analyzeIdea() {
-    const input = document.getElementById("idea-input"); const url = input.value.trim(); if (!url) return;
-    input.value = ""; addMessage("system", `Анализирую: ${url}...`);
-    try {
-        const resp = await fetch("/api/v1/ideas", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({repo_url: url}) });
-        if (resp.ok) { const data = await resp.json(); addMessage("idea", data.analysis); await loadIdeas(); }
-        else { const err = await resp.json(); addMessage("error", `Ошибка: ${err.detail}`); }
-    } catch(e) { addMessage("error", `Ошибка: ${e}`); }
-}
+        async function analyzeIdea() {
+            const input = document.getElementById("idea-input");
+            const url = input.value.trim();
+            if (!url) return;
+            input.value = "";
+            addMessage("system", `Анализирую репозиторий: ${url}...`);
 
-async function showIdeaDetail(id) {
-    try {
-        const resp = await fetch("/api/v1/ideas"); const ideas = await resp.json();
-        const idea = ideas.find(i => i.id === id);
-        if (idea) showModal("Идея: " + idea.name, renderMarkdown(idea.summary));
-    } catch(e) { addMessage("error", `Ошибка: ${e}`); }
-}
+            try {
+                const resp = await fetch("/api/v1/ideas", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({repo_url: url})
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    addMessage("idea", data.analysis);
+                    await loadIdeas();
+                } else {
+                    const err = await resp.json();
+                    addMessage("error", `Ошибка: ${err.detail}`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка анализа: ${e}`);
+            }
+        }
 
-async function deleteIdea(id, name) {
-    if (!confirm(`Удалить "${name}"?`)) return;
-    try { const resp = await fetch(`/api/v1/ideas/${id}`, {method: "DELETE"}); if (resp.ok) { await loadIdeas(); addMessage("system", `"${name}" удалена.`); } }
-    catch(e) { addMessage("error", `Ошибка: ${e}`); }
-}
+        async function showIdeaDetail(id) {
+            try {
+                const resp = await fetch(`/api/v1/ideas`);
+                const ideas = await resp.json();
+                const idea = ideas.find(i => i.id === id);
+                if (idea) {
+                    showModal("Идея: " + idea.name, renderMarkdown(idea.summary));
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка загрузки идеи: ${e}`);
+            }
+        }
 
-// ═══════════════════════════════════════════════════════
-// CHAT ACTIONS
-// ═══════════════════════════════════════════════════════
-function clearChat() { ws.send("/clear"); chatBox.querySelectorAll(".msg").forEach(m => m.remove()); addMessage("system", "Чат очищен."); }
+        async function deleteIdea(id, name) {
+            if (!confirm(`Удалить идею "${name}"?`)) return;
+            try {
+                const resp = await fetch(`/api/v1/ideas/${id}`, {method: "DELETE"});
+                if (resp.ok) {
+                    await loadIdeas();
+                    addMessage("system", `Идея "${name}" удалена.`);
+                }
+            } catch (e) {
+                addMessage("error", `Ошибка удаления: ${e}`);
+            }
+        }
 
-// ═══════════════════════════════════════════════════════
-// KEYS MODAL
-// ═══════════════════════════════════════════════════════
-async function showKeysModal() {
-    try {
-        const [provResp, ghResp] = await Promise.all([fetch("/api/v1/keys/providers"), fetch("/api/v1/keys/github")]);
-        const provData = await provResp.json();
-        const ghData = await ghResp.json();
+        // ═══════════════════════════════════════════════════════
+        // Chat Actions
+        // ═══════════════════════════════════════════════════════
+        function clearChat() {
+            ws.send("/clear");
+            chatBox.querySelectorAll(".msg").forEach(m => m.remove());
+            addMessage("system", "Чат очищен.");
+        }
 
-        const providers = provData.providers || {};
-        const configured = provData.configured || {};
+        // ═══════════════════════════════════════════════════════
+        // KEYS MODAL
+        // ═══════════════════════════════════════════════════════
+        async function showKeysModal() {
+            try {
+                const [provResp, ghResp] = await Promise.all([fetch("/api/v1/keys/providers"), fetch("/api/v1/keys/github")]);
+                const provData = await provResp.json();
+                const ghData = await ghResp.json();
 
-        let html = '<div class="keys-section"><h3>API Ключи</h3>';
+                const providers = provData.providers || {};
+                const configured = provData.configured || {};
 
-        for (const [pid, pdef] of Object.entries(providers)) {
-            const cfg = configured[pid] || {};
-            const status = cfg.status || "not_configured";
-            const statusLabel = {valid: "Активен", rate_limited: "Лимит", invalid: "Ошибка", not_configured: "Не настроен"}[status] || status;
-            const statusCls = {valid: "st-valid", rate_limited: "st-limited", invalid: "st-invalid", not_configured: "st-none"}[status] || "";
-            const keyMasked = cfg.has_key ? "●●●●●●●●" : "";
+                let html = '<div class="keys-section"><h3>API Ключи</h3>';
 
-            html += `<div class="key-card">
-                <div class="key-card-header">
-                    <span class="key-provider-name">${pdef.name}</span>
-                    <span class="key-status ${statusCls}">${statusLabel}</span>
-                </div>
-                ${cfg.has_key ? `<div class="key-value">Ключ: ${keyMasked} (${cfg.models_count || 0} моделей)</div>` : ''}
-                <div class="key-actions">
-                    ${cfg.has_key ? `<button class="btn-small btn-danger" onclick="removeKey('${pid}')">Удалить</button>` : `<button class="btn-small" onclick="showAddKeyForm('${pid}', '${pdef.name}')">Добавить ключ</button>`}
-                    ${cfg.has_key ? `<button class="btn-small btn-outline" onclick="revalidateKey('${pid}')">Проверить</button>` : ''}
+                for (const [pid, pdef] of Object.entries(providers)) {
+                    const cfg = configured[pid] || {};
+                    const status = cfg.status || "not_configured";
+                    const statusLabel = {valid: "Активен", rate_limited: "Лимит", invalid: "Ошибка", not_configured: "Не настроен"}[status] || status;
+                    const statusCls = {valid: "st-valid", rate_limited: "st-limited", invalid: "st-invalid", not_configured: "st-none"}[status] || "";
+                    const keyMasked = cfg.has_key ? "●●●●●●●●" : "";
+
+                    html += `<div class="key-card">
+                        <div class="key-card-header">
+                            <span class="key-provider-name">${pdef.name}</span>
+                            <span class="key-status ${statusCls}">${statusLabel}</span>
+                        </div>
+                        ${cfg.has_key ? `<div class="key-value">Ключ: ${keyMasked} (${cfg.models_count || 0} моделей)</div>` : ''}
+                        <div class="key-actions">
+                            ${cfg.has_key ? `<button class="btn-small btn-danger" onclick="removeKey('${pid}')">Удалить</button>` : `<button class="btn-small" onclick="showAddKeyForm('${pid}', '${pdef.name}')">Добавить ключ</button>`}
+                            ${cfg.has_key ? `<button class="btn-small btn-outline" onclick="revalidateKey('${pid}')">Проверить</button>` : ''}
+                        </div>
+                    </div>`;
+                }
+                html += '</div>';
+
+                // GitHub section
+                html += `<div class="keys-section">
+                    <h3>GitHub</h3>
+                    <div class="key-card">
+                        <div class="key-card-header">
+                            <span class="key-provider-name">GitHub Token</span>
+                            <span class="key-status ${ghData.has_token ? (ghData.enabled ? 'st-valid' : 'st-none') : 'st-none'}">
+                                ${ghData.has_token ? (ghData.enabled ? 'Активен (' + ghData.user + ')' : 'Отключён') : 'Не настроен'}
+                            </span>
+                        </div>
+                        ${ghData.has_token ? `<div class="key-value">Токен: ●●●●●●●●</div>` : ''}
+                        <div class="key-actions">
+                            ${ghData.has_token ?
+                                `<button class="btn-small btn-outline" onclick="toggleGitHub(${!ghData.enabled})">${ghData.enabled ? 'Отключить' : 'Включить'}</button>
+                                 <button class="btn-small btn-danger" onclick="showAddGithubToken()">Заменить</button>` :
+                                `<button class="btn-small" onclick="showAddGithubToken()">Добавить токен</button>`
+                            }
+                        </div>
+                    </div>
+                </div>`;
+
+                showModal("Управление ключами", html);
+            } catch(e) { showModal("Ошибка", "Не удалось загрузить данные ключей."); }
+        }
+
+        function showAddKeyForm(providerId, providerName) {
+            const body = document.getElementById("modal-body");
+            body.innerHTML = `<div class="keys-section">
+                <h3>Добавить ключ: ${escapeHtml(providerName)}</h3>
+                <div class="key-form">
+                    <label class="key-label">API ключ</label>
+                    <input type="password" id="new-api-key" class="key-input" placeholder="sk-..." autofocus>
+                    <label class="key-label">Модели (через запятую, оставьте пустым для стандартных)</label>
+                    <input type="text" id="new-models" class="key-input" placeholder="model-1, model-2">
+                    <div class="key-form-actions">
+                        <button class="btn-small btn-outline" onclick="showKeysModal()">Отмена</button>
+                        <button class="btn-small" onclick="addKey('${providerId}')">Сохранить и проверить</button>
+                    </div>
                 </div>
             </div>`;
+            document.getElementById("modal-title").textContent = "Ключ: " + providerName;
         }
-        html += '</div>';
 
-        // GitHub section
-        html += `<div class="keys-section">
-            <h3>GitHub</h3>
-            <div class="key-card">
-                <div class="key-card-header">
-                    <span class="key-provider-name">GitHub Token</span>
-                    <span class="key-status ${ghData.has_token ? (ghData.enabled ? 'st-valid' : 'st-none') : 'st-none'}">
-                        ${ghData.has_token ? (ghData.enabled ? 'Активен (' + ghData.user + ')' : 'Отключён') : 'Не настроен'}
-                    </span>
-                </div>
-                ${ghData.has_token ? `<div class="key-value">Токен: ●●●●●●●●</div>` : ''}
-                <div class="key-actions">
-                    ${ghData.has_token ?
-                        `<button class="btn-small btn-outline" onclick="toggleGitHub(${!ghData.enabled})">${ghData.enabled ? 'Отключить' : 'Включить'}</button>
-                         <button class="btn-small btn-danger" onclick="showAddGithubToken()">Заменить</button>` :
-                        `<button class="btn-small" onclick="showAddGithubToken()">Добавить токен</button>`
-                    }
-                </div>
-            </div>
-        </div>`;
+        async function addKey(providerId) {
+            const apiKey = document.getElementById("new-api-key").value.trim();
+            const modelsStr = document.getElementById("new-models").value.trim();
+            if (!apiKey) { alert("Введите API ключ"); return; }
+            const models = modelsStr ? modelsStr.split(",").map(m => m.trim()).filter(Boolean) : [];
 
-        showModal("Управление ключами", html);
-    } catch(e) { showModal("Ошибка", "Не удалось загрузить данные ключей."); }
-}
+            const body = document.getElementById("modal-body");
+            body.innerHTML += '<div class="key-validating">Проверяем ключ...</div>';
 
-function showAddKeyForm(providerId, providerName) {
-    const body = document.getElementById("modal-body");
-    body.innerHTML = `<div class="keys-section">
-        <h3>Добавить ключ: ${escapeHtml(providerName)}</h3>
-        <div class="key-form">
-            <label class="key-label">API ключ</label>
-            <input type="password" id="new-api-key" class="key-input" placeholder="sk-..." autofocus>
-            <label class="key-label">Модели (через запятую, оставьте пустым для стандартных)</label>
-            <input type="text" id="new-models" class="key-input" placeholder="model-1, model-2">
-            <div class="key-form-actions">
-                <button class="btn-small btn-outline" onclick="showKeysModal()">Отмена</button>
-                <button class="btn-small" onclick="addKey('${providerId}')">Сохранить и проверить</button>
-            </div>
-        </div>
-    </div>`;
-    document.getElementById("modal-title").textContent = "Ключ: " + providerName;
-}
-
-async function addKey(providerId) {
-    const apiKey = document.getElementById("new-api-key").value.trim();
-    const modelsStr = document.getElementById("new-models").value.trim();
-    if (!apiKey) { alert("Введите API ключ"); return; }
-    const models = modelsStr ? modelsStr.split(",").map(m => m.trim()).filter(Boolean) : [];
-
-    const body = document.getElementById("modal-body");
-    body.innerHTML += '<div class="key-validating">Проверяем ключ...</div>';
-
-    try {
-        const resp = await fetch("/api/v1/keys/add", {
-            method: "POST", headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({provider: providerId, api_key: apiKey, models: models})
-        });
-        const data = await resp.json();
-        if (resp.ok) {
-            await loadModels();
-            showKeysModal();
-        } else {
-            body.querySelector(".key-validating").className = "key-error";
-            body.querySelector(".key-error").textContent = "Ошибка: " + (data.detail || data.error);
+            try {
+                const resp = await fetch("/api/v1/keys/add", {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({provider: providerId, api_key: apiKey, models: models})
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    await loadModels();
+                    showKeysModal();
+                } else {
+                    body.querySelector(".key-validating").className = "key-error";
+                    body.querySelector(".key-error").textContent = "Ошибка: " + (data.detail || data.error);
+                }
+            } catch(e) { body.querySelector(".key-validating").className = "key-error"; body.querySelector(".key-error").textContent = "Ошибка сети: " + e; }
         }
-    } catch(e) { body.querySelector(".key-validating").className = "key-error"; body.querySelector(".key-error").textContent = "Ошибка сети: " + e; }
-}
 
-async function removeKey(providerId) {
-    if (!confirm("Удалить ключ?")) return;
-    try {
-        await fetch(`/api/v1/keys/${providerId}`, {method: "DELETE"});
-        await loadModels(); showKeysModal();
-    } catch(e) { alert("Ошибка: " + e); }
-}
+        async function removeKey(providerId) {
+            if (!confirm("Удалить ключ?")) return;
+            try {
+                await fetch(`/api/v1/keys/${providerId}`, {method: "DELETE"});
+                await loadModels(); showKeysModal();
+            } catch(e) { alert("Ошибка: " + e); }
+        }
 
-async function revalidateKey(providerId) {
-    try {
-        const resp = await fetch(`/api/v1/models/validate/${providerId}`, {method: "POST"});
-        const data = await resp.json();
-        await loadModels(); showKeysModal();
-    } catch(e) { alert("Ошибка: " + e); }
-}
+        async function revalidateKey(providerId) {
+            try {
+                const resp = await fetch(`/api/v1/models/validate/${providerId}`, {method: "POST"});
+                const data = await resp.json();
+                await loadModels(); showKeysModal();
+            } catch(e) { alert("Ошибка: " + e); }
+        }
 
-function showAddGithubToken() {
-    const body = document.getElementById("modal-body");
-    body.innerHTML = `<div class="keys-section">
-        <h3>GitHub Personal Access Token</h3>
-        <div class="key-form">
-            <label class="key-label">Token</label>
-            <input type="password" id="gh-token" class="key-input" placeholder="ghp_..." autofocus>
-            <div class="key-form-actions">
-                <button class="btn-small btn-outline" onclick="showKeysModal()">Отмена</button>
-                <button class="btn-small" onclick="saveGithubToken()">Сохранить</button>
-            </div>
-        </div>
-    </div>`;
-    document.getElementById("modal-title").textContent = "GitHub Token";
-}
+        function showAddGithubToken() {
+            const body = document.getElementById("modal-body");
+            body.innerHTML = `<div class="keys-section">
+                <h3>GitHub Personal Access Token</h3>
+                <div class="key-form">
+                    <label class="key-label">Token</label>
+                    <input type="password" id="gh-token" class="key-input" placeholder="ghp_..." autofocus>
+                    <div class="key-form-actions">
+                        <button class="btn-small btn-outline" onclick="showKeysModal()">Отмена</button>
+                        <button class="btn-small" onclick="saveGithubToken()">Сохранить</button>
+                    </div>
+                </div>
+            </div>`;
+            document.getElementById("modal-title").textContent = "GitHub Token";
+        }
 
-async function saveGithubToken() {
-    const token = document.getElementById("gh-token").value.trim();
-    if (!token) { alert("Введите токен"); return; }
-    try {
-        const resp = await fetch("/api/v1/keys/github", {
-            method: "POST", headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({token: token, enabled: true})
-        });
-        if (resp.ok) { showKeysModal(); }
-        else { const err = await resp.json(); alert("Ошибка: " + (err.detail || "Неизвестная ошибка")); }
-    } catch(e) { alert("Ошибка: " + e); }
-}
+        async function saveGithubToken() {
+            const token = document.getElementById("gh-token").value.trim();
+            if (!token) { alert("Введите токен"); return; }
+            try {
+                const resp = await fetch("/api/v1/keys/github", {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({token: token, enabled: true})
+                });
+                if (resp.ok) { showKeysModal(); }
+                else { const err = await resp.json(); alert("Ошибка: " + (err.detail || "Неизвестная ошибка")); }
+            } catch(e) { alert("Ошибка: " + e); }
+        }
 
-async function toggleGitHub(enabled) {
-    try {
-        await fetch("/api/v1/keys/github/toggle", {
-            method: "PUT", headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({enabled: enabled})
-        });
-        showKeysModal();
-    } catch(e) { alert("Ошибка: " + e); }
-}
+        async function toggleGitHub(enabled) {
+            try {
+                await fetch("/api/v1/keys/github/toggle", {
+                    method: "PUT", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({enabled: enabled})
+                });
+                showKeysModal();
+            } catch(e) { alert("Ошибка: " + e); }
+        }
 
-// ═══════════════════════════════════════════════════════
-// STATS & HELP
-// ═══════════════════════════════════════════════════════
-async function showStats() {
-    try {
-        const resp = await fetch("/api/v1/stats"); const stats = await resp.json();
-        const html = `<div class="stats-grid">
-            <div class="stat-card"><div class="stat-value">${stats.projects_count}</div><div class="stat-label">Проекты</div></div>
-            <div class="stat-card"><div class="stat-value">${stats.ideas_count}</div><div class="stat-label">Идеи</div></div>
-            <div class="stat-card"><div class="stat-value">${stats.messages_count}</div><div class="stat-label">Сообщений</div></div>
-            <div class="stat-card"><div class="stat-value">${stats.routing_decisions}</div><div class="stat-label">Роутингов</div></div>
-        </div>`;
-        showModal("Статистика", html);
-    } catch(e) { showModal("Ошибка", "Не удалось загрузить статистику."); }
-}
+        // ═══════════════════════════════════════════════════════
+        // Stats & Help
+        // ═══════════════════════════════════════════════════════
+        async function showStats() {
+            try {
+                const resp = await fetch("/api/v1/stats");
+                const stats = await resp.json();
+                const html = `
+                    <div class="stats-grid">
+                        <div class="stat-card"><div class="stat-value">${stats.projects_count}</div><div class="stat-label">Проекты</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.ideas_count}</div><div class="stat-label">Идеи</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.messages_count}</div><div class="stat-label">Сообщений</div></div>
+                        <div class="stat-card"><div class="stat-value">${stats.routing_decisions}</div><div class="stat-label">Роутингов</div></div>
+                    </div>`;
+                showModal("Статистика системы", html);
+            } catch (e) {
+                showModal("Ошибка", "Не удалось загрузить статистику.");
+            }
+        }
 
-function showHelp() {
-    showModal("Помощь — Fosved Coder v2.0", `
-        <h3>Модели ИИ</h3>
-        <ul><li>Клик по модели в сайдбаре — выбрать для чата</li><li>Зелёная точка — ключ валиден</li><li>Жёлтая — лимит превышен</li><li>Кнопка "Ключи" — управление API-ключами</li></ul>
-        <h3>Команды чата</h3>
-        <ul><li><code>/terminal &lt;cmd&gt;</code> — shell-команда</li><li><code>/git_pull</code> / <code>/git_push</code></li><li><code>/ideas &lt;url&gt;</code> — анализ GitHub репозитория</li><li><code>/repo_map</code> — структура проекта</li><li><code>/clear</code> — очистить чат</li></ul>
-        <h3>Проекты</h3>
-        <ul><li>Каждый проект имеет шкалу прогресса</li><li>Можно выбрать разные модели для разных проектов</li></ul>
-    `);
-}
+        function showHelp() {
+            showModal("Помощь — Fosved Coder v2.0", `
+                <h3>Модели ИИ</h3>
+                <ul>
+                    <li>Клик по модели в сайдбаре — выбрать для чата</li>
+                    <li><span style="color:#4ec9b0">Зелёная точка</span> — ключ валиден</li>
+                    <li><span style="color:#dcdcaa">Жёлтая</span> — лимит превышен</li>
+                    <li><span style="color:#569cd6">Синяя</span> — бесплатная модель</li>
+                    <li>Кнопка "Ключи" — управление API-ключами</li>
+                </ul>
+                <h3>Команды чата</h3>
+                <ul>
+                    <li><code>/terminal &lt;cmd&gt;</code> — shell-команда</li>
+                    <li><code>/git_pull</code> / <code>/git_push</code></li>
+                    <li><code>/ideas &lt;url&gt;</code> — анализ GitHub репозитория</li>
+                    <li><code>/repo_map</code> — структура проекта</li>
+                    <li><code>/clear</code> — очистить чат</li>
+                </ul>
+                <h3>Проекты</h3>
+                <ul>
+                    <li>Каждый проект имеет шкалу прогресса</li>
+                    <li>Можно выбрать разные модели для разных проектов</li>
+                </ul>
+            `);
+        }
 
-// ═══════════════════════════════════════════════════════
-// MODAL
-// ═══════════════════════════════════════════════════════
-function showModal(title, content) {
-    document.getElementById("modal-title").textContent = title;
-    document.getElementById("modal-body").innerHTML = content;
-    document.getElementById("modal-overlay").classList.add("active");
-}
-function closeModal() { document.getElementById("modal-overlay").classList.remove("active"); }
+        // ═══════════════════════════════════════════════════════
+        // Modal
+        // ═══════════════════════════════════════════════════════
+        function showModal(title, content) {
+            document.getElementById("modal-title").textContent = title;
+            document.getElementById("modal-body").innerHTML = content;
+            document.getElementById("modal-overlay").classList.add("active");
+        }
 
-// ═══════════════════════════════════════════════════════
-// Utility
-// ═══════════════════════════════════════════════════════
-function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
-</script>
+        function closeModal() {
+            document.getElementById("modal-overlay").classList.remove("active");
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Utility
+        // ═══════════════════════════════════════════════════════
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
 </body>
 </html>
