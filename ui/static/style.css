@@ -199,6 +199,67 @@ body { font-family: 'Segoe UI', sans-serif; background: var(--bg-dark); color: v
 .refactor-status .spinner { display: inline-block; width: 30px; height: 30px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ===== SEARCH ===== */
+.search-bar { display: flex; gap: 6px; padding: 8px 12px; background: var(--bg-dark); border-bottom: 1px solid var(--border); }
+.search-bar input { flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-size: 13px; outline: none; }
+.search-bar input:focus { border-color: var(--accent); }
+.search-bar input::placeholder { color: var(--text-dim); }
+.search-results { padding: 8px; max-height: 300px; overflow-y: auto; }
+.search-result-item { padding: 6px 10px; cursor: pointer; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; border-bottom: 1px solid var(--border); }
+.search-result-item:hover { background: var(--bg-hover); }
+.search-result-item .sr-file { color: var(--accent); font-weight: bold; }
+.search-result-item .sr-line { color: var(--text-dim); margin: 0 6px; }
+.search-result-item .sr-text { color: var(--text); }
+.search-result-count { padding: 6px 10px; font-size: 11px; color: var(--text-dim); }
+
+/* ===== GIT PANEL ===== */
+.git-panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; }
+.git-panel h4 { font-size: 13px; color: var(--accent); margin-bottom: 8px; }
+.git-log { font-family: 'Consolas', monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
+.git-log-item { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.git-log-item:hover { background: var(--bg-hover); }
+.git-log-item .gl-hash { color: var(--accent); }
+.git-log-item .gl-author { color: var(--success); margin: 0 6px; }
+.git-log-item .gl-date { color: var(--text-dim); margin-right: 8px; }
+.git-log-item .gl-msg { color: var(--text); }
+.git-status { font-family: 'Consolas', monospace; font-size: 12px; padding: 6px; background: var(--bg-dark); border-radius: 4px; margin-bottom: 8px; max-height: 100px; overflow-y: auto; }
+.git-commit-bar { display: flex; gap: 6px; margin-bottom: 8px; }
+.git-commit-bar input { flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-size: 12px; outline: none; }
+
+/* ===== TEMPLATES ===== */
+.template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 10px; }
+.template-card { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 14px; cursor: pointer; transition: all .2s; text-align: center; }
+.template-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.template-card h4 { font-size: 14px; margin-bottom: 4px; }
+.template-card p { font-size: 11px; color: var(--text-dim); }
+
+/* ===== PACKAGES ===== */
+.pkg-input-bar { display: flex; gap: 6px; margin-bottom: 10px; }
+.pkg-input-bar input { flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-size: 12px; outline: none; }
+.pkg-input-bar input:focus { border-color: var(--accent); }
+.pkg-list { max-height: 200px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 12px; }
+.pkg-item { padding: 4px 8px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+.pkg-item .pkg-name { color: var(--accent); }
+.pkg-item .pkg-ver { color: var(--text-dim); }
+.pkg-output { margin-top: 8px; padding: 8px; background: var(--bg-dark); border-radius: 4px; font-family: 'Consolas', monospace; font-size: 11px; max-height: 150px; overflow-y: auto; color: var(--text-dim); white-space: pre-wrap; }
+
+/* ===== DIFF VIEWER ===== */
+.diff-viewer { background: var(--bg-dark); border-radius: 6px; padding: 10px; margin: 8px 0; font-family: 'Consolas', monospace; font-size: 12px; max-height: 300px; overflow: auto; }
+.diff-line { padding: 1px 8px; }
+.diff-line-added { background: #1a3a1a; color: #7dff7d; }
+.diff-line-removed { background: #3a1a1a; color: #ff7d7d; }
+.diff-line-context { color: var(--text-dim); }
+.diff-line-header { color: var(--accent); font-weight: bold; }
+
+/* ===== TOAST ===== */
+.toast-container { position: fixed; top: 60px; right: 16px; z-index: 500; display: flex; flex-direction: column; gap: 6px; }
+.toast { padding: 10px 18px; border-radius: 6px; font-size: 13px; color: #fff; animation: slideIn .3s ease; box-shadow: 0 4px 12px rgba(0,0,0,.4); max-width: 350px; }
+.toast-success { background: #27ae60; }
+.toast-error { background: #e74c3c; }
+.toast-info { background: var(--accent); color: #000; }
+.toast-warning { background: #f39c12; color: #000; }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
     .sidebar { width: 100%; position: absolute; z-index: 50; height: calc(100vh - 50px); display: none; }

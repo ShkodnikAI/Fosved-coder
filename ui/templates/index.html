@@ -13,8 +13,12 @@
     <h1>&#9889; Fosved Coder</h1>
     <div class="header-actions">
       <button class="btn btn-ghost" onclick="toggleSidebar()">&#9776;</button>
+      <button class="btn btn-ghost" onclick="openSearch()" title="Поиск по файлам">&#128269;</button>
       <button class="btn btn-ghost" onclick="openTerminal()" title="Терминал">&#128424;</button>
-      <button class="btn btn-accent" onclick="openSettings()">&#9881; Настройки</button>
+      <button class="btn btn-ghost" onclick="openGitModal()" title="Git">&#128260;</button>
+      <button class="btn btn-ghost" onclick="openTemplates()" title="Шаблоны">&#128221;</button>
+      <button class="btn btn-ghost" onclick="openPackages()" title="Пакеты">&#128230;</button>
+      <button class="btn btn-accent" onclick="openSettings()">&#9881;</button>
     </div>
   </div>
 
@@ -185,6 +189,93 @@
     </div>
   </div>
 </div>
+
+<!-- SEARCH MODAL -->
+<div class="modal-overlay" id="searchModal">
+  <div class="modal" style="width:650px">
+    <h2>&#128269; Поиск по файлам</h2>
+    <div class="search-bar" style="margin:10px 0;padding:0">
+      <input id="searchQuery" placeholder="Поиск текста..." onkeydown="if(event.key==='Enter')doSearch()">
+      <button class="btn btn-accent btn-sm" onclick="doSearch()">&#128269;</button>
+    </div>
+    <div class="search-result-count" id="searchCount"></div>
+    <div class="search-results" id="searchResults"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('searchModal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- GIT MODAL -->
+<div class="modal-overlay" id="gitModal">
+  <div class="modal" style="width:650px">
+    <h2>&#128260; Git</h2>
+    <div class="git-panel">
+      <h4>&#128220; Статус</h4>
+      <div class="git-status" id="gitStatus">Загрузка...</div>
+      <div class="git-commit-bar">
+        <input id="gitCommitMsg" placeholder="Сообщение коммита...">
+        <button class="btn btn-accent btn-sm" onclick="gitCommit()">&#128190; Commit</button>
+        <button class="btn btn-sm btn-ghost" onclick="gitPush()">Push</button>
+        <button class="btn btn-sm btn-ghost" onclick="gitPull()">Pull</button>
+        <button class="btn btn-sm btn-ghost" onclick="loadGitStatus()">&#128260;</button>
+      </div>
+      <h4>&#128336; История коммитов</h4>
+      <div class="git-log" id="gitLog">Загрузка...</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('gitModal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- TEMPLATES MODAL -->
+<div class="modal-overlay" id="templatesModal">
+  <div class="modal" style="width:550px">
+    <h2>&#128221; Шаблоны проектов</h2>
+    <div class="template-grid" id="templateGrid"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('templatesModal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- PACKAGES MODAL -->
+<div class="modal-overlay" id="packagesModal">
+  <div class="modal" style="width:550px">
+    <h2>&#128230; Менеджер пакетов</h2>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn btn-sm btn-ghost pkg-mgr-btn active" onclick="setPkgMgr('pip',this)" id="pipBtn">pip</button>
+      <button class="btn btn-sm btn-ghost pkg-mgr-btn" onclick="setPkgMgr('npm',this)" id="npmBtn">npm</button>
+    </div>
+    <div class="pkg-input-bar">
+      <input id="pkgInput" placeholder="fastapi uvicorn requests..." onkeydown="if(event.key==='Enter')installPkg()">
+      <button class="btn btn-accent btn-sm" onclick="installPkg()">&#128230; Установить</button>
+    </div>
+    <div class="pkg-output" id="pkgOutput" style="display:none"></div>
+    <h4 style="font-size:13px;margin-top:10px">Установленные пакеты</h4>
+    <div class="pkg-list" id="pkgList">Загрузка...</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('packagesModal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- DIFF MODAL -->
+<div class="modal-overlay" id="diffModal">
+  <div class="modal" style="width:700px">
+    <h2>&#128196; Просмотр изменений</h2>
+    <div id="diffInfo" style="font-size:12px;color:var(--text-dim);margin-bottom:6px"></div>
+    <div class="diff-viewer" id="diffViewer"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('diffModal')">Закрыть</button>
+      <button class="btn btn-accent" id="diffApplyBtn" onclick="applyDiff()">&#128190; Применить</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST CONTAINER -->
+<div class="toast-container" id="toastContainer"></div>
 
 <script>
 // ===== STATE =====
@@ -1065,6 +1156,212 @@ async function applyRefactorCode(btn, ext) {
   });
   btn.textContent = '✓ Применено!';
   btn.disabled = true;
+}
+
+// ===== TOAST =====
+function toast(msg, type = 'info', duration = 3000) {
+  const container = document.getElementById('toastContainer');
+  const div = document.createElement('div');
+  div.className = `toast toast-${type}`;
+  div.textContent = msg;
+  container.appendChild(div);
+  setTimeout(() => { div.style.opacity = '0'; div.style.transition = 'opacity .3s'; setTimeout(() => div.remove(), 300); }, duration);
+}
+
+// ===== SEARCH =====
+async function openSearch() {
+  if (!currentProjectId) return toast('Сначала выберите проект', 'warning');
+  openModal('searchModal');
+  setTimeout(() => document.getElementById('searchQuery').focus(), 100);
+}
+
+async function doSearch() {
+  if (!currentProjectId) return;
+  const q = document.getElementById('searchQuery').value.trim();
+  if (!q) return;
+  const el = document.getElementById('searchResults');
+  const cnt = document.getElementById('searchCount');
+  el.innerHTML = '<div style="color:var(--text-dim);padding:10px">Ищу...</div>';
+  const data = await api(`/api/projects/${currentProjectId}/search?q=${encodeURIComponent(q)}`);
+  if (!data || data.error) { el.innerHTML = '<div style="color:var(--danger)">Ошибка поиска</div>'; return; }
+  cnt.textContent = `Найдено: ${data.count} результатов${data.truncated ? ' (показаны первые 100)' : ''}`;
+  if (data.results.length === 0) { el.innerHTML = '<div style="color:var(--text-dim)">Ничего не найдено</div>'; return; }
+  el.innerHTML = data.results.map(r =>
+    `<div class="search-result-item" onclick="viewSearchResult('${esc(r.file)}',${r.line})">
+      <span class="sr-file">${esc(r.file)}</span><span class="sr-line">:${r.line}</span><span class="sr-text">${esc(r.text)}</span>
+    </div>`
+  ).join('');
+}
+
+async function viewSearchResult(file, line) {
+  if (!currentProjectId) return;
+  closeModal('searchModal');
+  openFiles(currentProjectId);
+  setTimeout(() => viewFile(currentProjectId, file), 300);
+}
+
+// ===== GIT =====
+async function openGitModal() {
+  if (!currentProjectId) return toast('Сначала выберите проект', 'warning');
+  openModal('gitModal');
+  await loadGitStatus();
+  await loadGitLog();
+}
+
+async function loadGitStatus() {
+  const data = await api(`/api/projects/${currentProjectId}/git/status`);
+  const el = document.getElementById('gitStatus');
+  if (!data || data.error) { el.textContent = data?.error || 'Нет git'; return; }
+  el.textContent = (data.stdout || data.stderr || '').trim() || 'Нет изменений';
+}
+
+async function loadGitLog() {
+  const data = await api(`/api/projects/${currentProjectId}/git/log?n=15`);
+  const el = document.getElementById('gitLog');
+  if (!data || !data.commits) { el.textContent = 'Нет коммитов'; return; }
+  el.innerHTML = data.commits.map(c =>
+    `<div class="git-log-item"><span class="gl-hash">${c.hash}</span><span class="gl-author">${esc(c.author)}</span><span class="gl-date">${esc(c.date)}</span><span class="gl-msg">${esc(c.message)}</span></div>`
+  ).join('');
+}
+
+async function gitCommit() {
+  const msg = document.getElementById('gitCommitMsg').value.trim();
+  if (!msg) return toast('Введите сообщение коммита', 'warning');
+  const data = await api(`/api/projects/${currentProjectId}/git/commit`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: msg})
+  });
+  if (data && data.returncode === 0) { toast('Коммит создан!', 'success'); document.getElementById('gitCommitMsg').value = ''; }
+  else toast(data?.stderr || 'Ошибка коммита', 'error');
+  await loadGitStatus(); await loadGitLog();
+}
+
+async function gitPush() {
+  toast('Push...', 'info');
+  const data = await api(`/api/projects/${currentProjectId}/git/push`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+  if (data && data.returncode === 0) toast('Push выполнен!', 'success');
+  else toast(data?.stderr || 'Ошибка push', 'error');
+}
+
+async function gitPull() {
+  toast('Pull...', 'info');
+  const data = await api(`/api/projects/${currentProjectId}/git/pull`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+  if (data && data.returncode === 0) toast('Pull выполнен!', 'success');
+  else toast(data?.stderr || 'Ошибка pull', 'error');
+  await loadGitStatus();
+}
+
+// ===== TEMPLATES =====
+async function openTemplates() {
+  const data = (await api('/api/templates')) || [];
+  const grid = document.getElementById('templateGrid');
+  const icons = {'fastapi':'⚡','react':'⚛️','python-cli':'🖥','nextjs':'▲','python-lib':'📦'};
+  grid.innerHTML = data.map(t =>
+    `<div class="template-card" onclick="applyTemplate('${t.id}')">
+      <div style="font-size:28px;margin-bottom:6px">${icons[t.id]||'📄'}</div>
+      <h4>${esc(t.name)}</h4>
+      <p>${esc(t.description)}</p>
+    </div>`
+  ).join('');
+  openModal('templatesModal');
+}
+
+async function applyTemplate(tid) {
+  if (!currentProjectId) return toast('Сначала выберите проект', 'warning');
+  const data = await api(`/api/templates/${tid}`);
+  if (!data || data.error) return toast('Шаблон не найден', 'error');
+  let count = 0;
+  for (const [path, content] of Object.entries(data.files)) {
+    await api(`/api/projects/${currentProjectId}/save-file`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({path, content})
+    });
+    count++;
+  }
+  toast(`Шаблон "${data.name}" — ${count} файлов создано`, 'success');
+  closeModal('templatesModal');
+  openFiles(currentProjectId);
+}
+
+// ===== PACKAGES =====
+let pkgManager = 'pip';
+let pendingDiffData = null;
+
+async function openPackages() {
+  if (!currentProjectId) return toast('Сначала выберите проект', 'warning');
+  openModal('packagesModal');
+  await loadPackages();
+}
+
+function setPkgMgr(mgr, btn) {
+  pkgManager = mgr;
+  document.querySelectorAll('.pkg-mgr-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadPackages();
+}
+
+async function loadPackages() {
+  const data = await api(`/api/projects/${currentProjectId}/packages/list?manager=${pkgManager}`);
+  const el = document.getElementById('pkgList');
+  if (!data || data.error) { el.textContent = data?.error || 'Ошибка'; return; }
+  if (data.packages.length === 0) { el.textContent = 'Нет пакетов'; return; }
+  el.innerHTML = data.packages.map(p =>
+    `<div class="pkg-item"><span class="pkg-name">${esc(p.name)}</span><span class="pkg-ver">${esc(p.version)}</span></div>`
+  ).join('');
+}
+
+async function installPkg() {
+  const input = document.getElementById('pkgInput');
+  const pkgs = input.value.trim();
+  if (!pkgs) return;
+  const outEl = document.getElementById('pkgOutput');
+  outEl.style.display = 'block';
+  outEl.textContent = `Установка ${pkgs}...\n`;
+  const data = await api(`/api/projects/${currentProjectId}/packages/install`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({packages: pkgs, manager: pkgManager})
+  });
+  if (data && data.success) {
+    outEl.textContent = data.output;
+    toast('Пакеты установлены!', 'success');
+    input.value = '';
+    await loadPackages();
+  } else {
+    outEl.textContent = data?.error || data?.output || 'Ошибка установки';
+    toast('Ошибка установки', 'error');
+  }
+}
+
+// ===== DIFF VIEWER =====
+function showDiff(filePath, oldContent, newContent) {
+  pendingDiffData = {filePath, oldContent, newContent};
+  document.getElementById('diffInfo').textContent = filePath;
+  const viewer = document.getElementById('diffViewer');
+  const oldLines = (oldContent || '').split('\n');
+  const newLines = (newContent || '').split('\n');
+  const maxLines = Math.max(oldLines.length, newLines.length);
+  let html = '';
+  for (let i = 0; i < maxLines; i++) {
+    const oldL = oldLines[i] || '';
+    const newL = newLines[i] || '';
+    if (oldL === newL) {
+      html += `<div class="diff-line diff-line-context"> ${esc(oldL)}</div>`;
+    } else {
+      if (oldL) html += `<div class="diff-line diff-line-removed">-${esc(oldL)}</div>`;
+      if (newL) html += `<div class="diff-line diff-line-added">+${esc(newL)}</div>`;
+    }
+  }
+  viewer.innerHTML = html || '<div style="color:var(--text-dim)">Нет различий</div>';
+  openModal('diffModal');
+}
+
+async function applyDiff() {
+  if (!pendingDiffData || !currentProjectId) return;
+  await api(`/api/projects/${currentProjectId}/save-file`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({path: pendingDiffData.filePath, content: pendingDiffData.newContent})
+  });
+  toast('Изменения применены!', 'success');
+  closeModal('diffModal');
 }
 
 // ===== START =====
