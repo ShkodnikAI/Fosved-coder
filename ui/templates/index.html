@@ -18,6 +18,7 @@
     <header>
         <div class="logo"><img src="https://z-cdn-media.chatglm.cn/files/aad38a03-a896-4e99-96a9-69372b91084b.jpg?auth_key=1876148891-a0e5423e9d3d49c8ac35cbcf3dc1fc64-0-9dd38e9bbc11d8836da531dcd7230db3" alt="Logo"></div>
         <div class="header-left">
+            <button class="btn-add" onclick="openProjectModal()" title="Новый проект" style="margin-right:10px; padding:4px 14px;">+ Новый проект</button>
             <div class="header-title" id="current-project-name">FOSVED CODER</div>
             <div class="progress-bar-mini" id="header-progress" style="display:none">
                 <div class="progress-fill" id="header-progress-fill"></div>
@@ -35,7 +36,19 @@
         <!-- SIDEBAR -->
         <div class="sidebar">
 
-            <!-- AI Models -->
+            <!-- Projects (на первом месте) -->
+            <div class="sidebar-section" style="flex:1; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0;">
+                <div class="section-header">
+                    <h3>Проекты</h3>
+                </div>
+                <div class="project-list" id="project-list">
+                    <div class="project-item active" data-id="null" onclick="selectProject(null, this)">
+                        <span>💡 Общий контекст</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Models (под проектами) -->
             <div class="sidebar-section">
                 <div class="section-header">
                     <h3>Модели ИИ</h3>
@@ -51,19 +64,6 @@
                 </div>
                 <div id="models-list">
                     <div class="model-item loading">Загрузка...</div>
-                </div>
-            </div>
-
-            <!-- Projects -->
-            <div class="sidebar-section" style="flex:1; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0;">
-                <div class="section-header">
-                    <h3>Проекты</h3>
-                    <button class="btn-add" onclick="openProjectModal()">+ Новый</button>
-                </div>
-                <div class="project-list" id="project-list">
-                    <div class="project-item active" data-id="null" onclick="selectProject(null, this)">
-                        <span>💡 Общий контекст</span>
-                    </div>
                 </div>
             </div>
 
@@ -101,18 +101,8 @@
                 </div>
             </div>
             <!-- Bottom Bar -->
-            <div class="bottom-bar">
-                <button onclick="insertCommand('/terminal ')" class="bottom-bar-btn">🛠 Terminal</button>
-                <button onclick="insertCommand('/git_pull')" class="bottom-bar-btn">📥 Pull</button>
-                <button onclick="insertCommand('/git_push')" class="bottom-bar-btn">📤 Push</button>
-                <button onclick="insertCommand('/ideas ')" class="bottom-bar-btn">💡 Ideas</button>
-                <button onclick="insertCommand('/clear')" class="bottom-bar-btn">🧹 Clear</button>
-                <button onclick="togglePanel('search')" class="bottom-bar-btn">🔍 Search</button>
-                <button onclick="togglePanel('git')" class="bottom-bar-btn">🔀 Git</button>
-                <button onclick="togglePanel('packages')" class="bottom-bar-btn">📦 Packages</button>
-                <button onclick="togglePanel('files')" class="bottom-bar-btn">📁 Files</button>
-                <button onclick="openRefactorModal()" class="bottom-bar-btn">🔄 Refactor</button>
-                <button onclick="showArchivePanel()" class="bottom-bar-btn">🗃️ Archive</button>
+            <div class="bottom-bar" id="bottom-bar">
+                <!-- Кнопки будут рендериться динамически через renderBottomBar() -->
             </div>
         </div>
     </div>
@@ -264,39 +254,74 @@
         </div>
     </div>
 
-    <!-- PROJECT MODAL -->
-    <div class="modal" id="project-modal">
-        <div class="modal-content">
-            <h2>Создать новый проект</h2>
-            <div class="form-group">
-                <label>Шаблон</label>
-                <select id="proj-template" class="priority-select" onchange="onTemplateChange()" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;">
-                    <option value="">(Custom)</option>
-                    <option value="fastapi">FastAPI</option>
-                    <option value="flask">Flask</option>
-                    <option value="react">React</option>
-                    <option value="nextjs">Next.js</option>
-                    <option value="python-cli">Python CLI</option>
-                </select>
-                <div id="template-desc" style="font-size:12px;color:var(--text-secondary);margin-top:6px;display:none;padding:8px;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;line-height:1.4;"></div>
+    <!-- PROJECT MODAL (создание / редактирование) -->
+    <div class="modal" id="project-modal" onclick="if(event.target===this)closeProjectModal()">
+        <div class="modal-content" style="width:680px;max-width:95vw;max-height:90vh;overflow:hidden;" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2 id="project-modal-title" style="margin-bottom:0;">Создать новый проект</h2>
+                <button class="btn-add" onclick="closeProjectModal()" style="background:var(--bg-tertiary);font-size:16px;">✕</button>
             </div>
-            <div class="form-group">
-                <label>Название проекта</label>
-                <input type="text" id="proj-name" placeholder="Например: WisdomOfDay">
+            <div class="modal-scroll">
+                <div class="form-group">
+                    <label>Шаблон</label>
+                    <select id="proj-template" class="priority-select" onchange="onTemplateChange()" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;">
+                        <option value="">(Без шаблона)</option>
+                        <option value="fastapi">FastAPI</option>
+                        <option value="flask">Flask</option>
+                        <option value="react">React</option>
+                        <option value="nextjs">Next.js</option>
+                        <option value="python-cli">Python CLI</option>
+                    </select>
+                    <div id="template-desc" style="font-size:12px;color:var(--text-secondary);margin-top:6px;display:none;padding:8px;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;line-height:1.4;"></div>
+                </div>
+                <div class="form-group">
+                    <label>Название проекта *</label>
+                    <input type="text" id="proj-name" placeholder="Например: WisdomOfDay">
+                </div>
+                <div class="form-group">
+                    <label>Краткое описание</label>
+                    <input type="text" id="proj-desc" placeholder="О чем этот проект?">
+                </div>
+                <div class="form-group">
+                    <label>Базовый промпт (контекст)</label>
+                    <textarea id="proj-prompt" placeholder="Правила, стек технологий, стиль кода..." style="height:80px;resize:vertical;"></textarea>
+                    <div class="form-upload-row">
+                        <label class="form-upload-label" title="Загрузить промпт из файла">
+                            📎 Загрузить из файла
+                            <input type="file" id="proj-prompt-file" accept=".txt,.md,.prompt" style="display:none" onchange="loadPromptFromFile(event)">
+                        </label>
+                        <span id="proj-prompt-file-name" class="form-upload-name"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Идеи и репозитории для вдохновения</label>
+                    <textarea id="proj-ideas" placeholder="Ссылки на GitHub или описание..."></textarea>
+                </div>
+                <div class="form-row-2col">
+                    <div class="form-group">
+                        <label>GitHub репозиторий</label>
+                        <input type="text" id="proj-github-repo" placeholder="https://github.com/user/repo">
+                    </div>
+                    <div class="form-group">
+                        <label>GitHub токен (индивидуальный)</label>
+                        <input type="password" id="proj-github-token" placeholder="ghp_...">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Путь хранения на диске</label>
+                    <input type="text" id="proj-local-path" placeholder="D:\Projects\MyProject (оставьте пустым для авто)">
+                </div>
+                <div class="form-group">
+                    <label>Приоритетные модели ИИ</label>
+                    <div id="proj-priority-models" class="proj-priority-selectors">
+                        <div style="color:var(--text-secondary);font-size:12px;">Модели можно настроить после создания проекта через ⚡</div>
+                    </div>
+                </div>
             </div>
-            <div class="form-group">
-                <label>Краткое описание</label>
-                <input type="text" id="proj-desc" placeholder="О чем этот проект?">
+            <div class="modal-footer">
+                <button class="btn-small btn-outline" onclick="closeProjectModal()" style="padding:10px 20px;">Отмена</button>
+                <button class="btn-create" id="proj-submit-btn" onclick="createProject()" style="width:auto;padding:10px 30px;">Создать проект</button>
             </div>
-            <div class="form-group">
-                <label>Базовый промпт (контекст)</label>
-                <textarea id="proj-prompt" placeholder="Правила, стек технологий, стиль кода..."></textarea>
-            </div>
-            <div class="form-group">
-                <label>Идеи и репозитории для вдохновения</label>
-                <textarea id="proj-ideas" placeholder="Ссылки на GitHub или описание..."></textarea>
-            </div>
-            <button class="btn-create" onclick="createProject()">Создать проект</button>
         </div>
     </div>
 
@@ -326,6 +351,7 @@
     let diffViewMode = "unified"; // "unified" or "sidebyside"
     let currentFileViewPath = null;
     let openPanels = new Set();
+    let editingProjectId = null;  // null = creating new, number = editing existing
 
     const templateDescriptions = {
         "fastapi": "Современный Python веб-фреймворк для API. Включает: main.py, requirements.txt, Dockerfile, тесты. Автоматическая генерация OpenAPI документации.",
@@ -563,6 +589,8 @@
                 const sel = m.id === activeModelId ? ' active' : '';
                 const priorityIdx = priorityModels.indexOf(m.id);
                 const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
+                const statusLabel = {valid:'OK', rate_limited:'LIMIT', invalid:'ERR'}[m.status] || '';
+                const statusCls = m.status || 'not_configured';
                 html += `<div class="model-item ${cls}${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
                     ${priorityBadge}
                     <span class="model-status-dot ${m.status}">●</span>
@@ -570,6 +598,7 @@
                         <span class="model-name">${escapeHtml(m.name)}</span>
                         <span class="model-provider">${escapeHtml(m.provider_name)}</span>
                     </span>
+                    ${statusLabel ? `<span class="model-validation-badge ${statusCls}">${statusLabel}</span>` : ''}
                 </div>`;
             });
         }
@@ -587,6 +616,7 @@
                         <span class="model-name">${escapeHtml(m.name)}</span>
                         <span class="model-provider">${escapeHtml(m.provider_name)}</span>
                     </span>
+                    <span class="model-validation-badge valid">FREE</span>
                 </div>`;
             });
         }
@@ -600,6 +630,7 @@
                         <span class="model-name">${escapeHtml(m.name)}</span>
                         <span class="model-provider">${escapeHtml(m.provider_name)}</span>
                     </span>
+                    <span class="model-validation-badge not_configured">NO KEY</span>
                 </div>`;
             });
         }
@@ -725,20 +756,168 @@
     // ═══════════════════════════════════════════════════════
     // PROJECTS
     // ═══════════════════════════════════════════════════════
+    let allProjects = [];  // кэш всех проектов
+
+    function openProjectModal(projectId) {
+        editingProjectId = projectId || null;
+        const modal = document.getElementById("project-modal");
+        const title = document.getElementById("project-modal-title");
+        const submitBtn = document.getElementById("proj-submit-btn");
+
+        // Сброс полей
+        document.getElementById("proj-template").value = "";
+        document.getElementById("proj-name").value = "";
+        document.getElementById("proj-desc").value = "";
+        document.getElementById("proj-prompt").value = "";
+        document.getElementById("proj-ideas").value = "";
+        document.getElementById("proj-github-repo").value = "";
+        document.getElementById("proj-github-token").value = "";
+        document.getElementById("proj-local-path").value = "";
+        document.getElementById("proj-prompt-file-name").textContent = "";
+        document.getElementById("template-desc").style.display = "none";
+
+        if (editingProjectId) {
+            // Режим редактирования
+            title.textContent = "Редактировать проект";
+            submitBtn.textContent = "Сохранить";
+            submitBtn.onclick = saveProject;
+            const p = allProjects.find(x => x.id === editingProjectId);
+            if (p) {
+                document.getElementById("proj-name").value = p.name || "";
+                document.getElementById("proj-desc").value = p.description || "";
+                document.getElementById("proj-prompt").value = p.base_prompt || "";
+                document.getElementById("proj-ideas").value = p.ideas || "";
+                document.getElementById("proj-github-repo").value = p.github_repo || "";
+                document.getElementById("proj-github-token").value = p.github_token || "";
+                document.getElementById("proj-local-path").value = p.local_path || p.path || "";
+            }
+        } else {
+            // Режим создания
+            title.textContent = "Создать новый проект";
+            submitBtn.textContent = "Создать проект";
+            submitBtn.onclick = createProject;
+        }
+
+        modal.classList.add("active");
+    }
+
+    function closeProjectModal() {
+        document.getElementById("project-modal").classList.remove("active");
+        editingProjectId = null;
+    }
+
+    function loadPromptFromFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            document.getElementById("proj-prompt").value = e.target.result;
+            document.getElementById("proj-prompt-file-name").textContent = file.name;
+            showToast("Промпт загружен из " + file.name, "success");
+        };
+        reader.readAsText(file);
+    }
+
+    async function createProject() {
+        const template = document.getElementById("proj-template").value;
+        const name = document.getElementById("proj-name").value.trim();
+        if (!name) { showToast("Введите название проекта", "error"); return; }
+
+        const desc = document.getElementById("proj-desc").value.trim();
+        const prompt = document.getElementById("proj-prompt").value.trim();
+        const ideas = document.getElementById("proj-ideas").value.trim();
+        const githubRepo = document.getElementById("proj-github-repo").value.trim();
+        const githubToken = document.getElementById("proj-github-token").value.trim();
+        const localPath = document.getElementById("proj-local-path").value.trim();
+
+        try {
+            const resp = await fetch("/api/v1/projects", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    name: name,
+                    description: desc,
+                    base_prompt: prompt,
+                    ideas: ideas,
+                    github_repo: githubRepo,
+                    github_token: githubToken,
+                    local_path: localPath,
+                    template: template || undefined
+                })
+            });
+            if (resp.ok) {
+                await loadProjects();
+                showToast(`Проект "${name}" создан`, "success");
+                closeProjectModal();
+
+                // Если шаблон — создать из шаблона
+                if (template) {
+                    const projectData = await resp.json();
+                    const projectId = projectData.id;
+                    if (projectId) {
+                        await fetch('/api/v1/projects/create-from-template', {
+                            method: "POST",
+                            headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({ template: template, name: name, description: desc, base_prompt: prompt, ideas: ideas })
+                        }).catch(() => {});
+                    }
+                }
+            } else {
+                const err = await resp.json();
+                showToast(`Ошибка: ${err.detail}`, "error");
+            }
+        } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
+    }
+
+    async function saveProject() {
+        if (!editingProjectId) return;
+        const desc = document.getElementById("proj-desc").value.trim();
+        const prompt = document.getElementById("proj-prompt").value.trim();
+        const ideas = document.getElementById("proj-ideas").value.trim();
+        const githubRepo = document.getElementById("proj-github-repo").value.trim();
+        const githubToken = document.getElementById("proj-github-token").value.trim();
+        const localPath = document.getElementById("proj-local-path").value.trim();
+
+        try {
+            const resp = await fetch('/api/v1/projects/settings', {
+                method: 'PUT',
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    project_id: editingProjectId,
+                    description: desc,
+                    base_prompt: prompt,
+                    ideas: ideas,
+                    github_repo: githubRepo,
+                    github_token: githubToken,
+                    local_path: localPath
+                })
+            });
+            if (resp.ok) {
+                await loadProjects();
+                showToast("Проект сохранён", "success");
+                closeProjectModal();
+            } else {
+                const err = await resp.json();
+                showToast(`Ошибка: ${err.detail}`, "error");
+            }
+        } catch(e) { showToast("Ошибка сохранения", "error"); }
+    }
+
     async function loadProjects() {
         try {
             const resp = await fetch("/api/v1/projects");
-            const projects = await resp.json();
+            allProjects = await resp.json();
             const list = document.getElementById("project-list");
             list.innerHTML = '<div class="project-item active" data-id="null" onclick="selectProject(null, this)"><span>💡 Общий контекст</span></div>';
-            projects.forEach(p => {
+            allProjects.forEach(p => {
                 const div = document.createElement("div");
                 div.className = "project-item"; div.dataset.id = p.id;
                 const progressHtml = p.progress > 0 ? `<div class="project-progress"><div class="project-progress-fill" style="width:${p.progress}%"></div><span class="project-progress-text">${p.progress}%</span></div>` : '';
-                div.innerHTML = `<div class="project-info"><span class="project-name">📁 ${escapeHtml(p.name)}</span>${progressHtml}</div><div style="display:flex;gap:4px;"><button class="btn-delete" onclick="event.stopPropagation();archiveProjectModal(${p.id},'${escapeHtml(p.name)}')" title="Архивировать" style="opacity:1;font-size:12px;">🗃</button><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">✕</button></div>`;
+                div.innerHTML = `<div class="project-info"><span class="project-name">📁 ${escapeHtml(p.name)}</span>${progressHtml}</div><div style="display:flex;gap:4px;"><button class="btn-delete" onclick="event.stopPropagation();openProjectModal(${p.id})" title="Редактировать" style="opacity:1;font-size:12px;">✏</button><button class="btn-delete" onclick="event.stopPropagation();archiveProjectModal(${p.id},'${escapeHtml(p.name)}')" title="Архивировать" style="opacity:1;font-size:12px;">🗃</button><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">✕</button></div>`;
                 div.onclick = () => selectProject(p.id, div);
                 list.appendChild(div);
             });
+            renderBottomBar();
         } catch(e) { console.error("Failed to load projects:", e); }
     }
 
@@ -752,9 +931,7 @@
         const progressBar = document.getElementById("header-progress");
         if (projectId) {
             try {
-                const resp = await fetch("/api/v1/projects");
-                const projects = await resp.json();
-                const p = projects.find(pr => pr.id === projectId);
+                const p = allProjects.find(pr => pr.id === projectId);
                 if (p && p.progress > 0) {
                     progressBar.style.display = "flex";
                     document.getElementById("header-progress-fill").style.width = p.progress + "%";
@@ -769,21 +946,9 @@
                             activeModelId = priorityModels[0];
                             renderModels();
                             renderPriorityBar();
-                        } else {
-                            priorityModels = [];
-                            renderModels();
-                            renderPriorityBar();
-                        }
-                    } catch(e) {
-                        priorityModels = [];
-                        renderModels();
-                        renderPriorityBar();
-                    }
-                } else {
-                    priorityModels = [];
-                    renderModels();
-                    renderPriorityBar();
-                }
+                        } else { priorityModels = []; renderModels(); renderPriorityBar(); }
+                    } catch(e) { priorityModels = []; renderModels(); renderPriorityBar(); }
+                } else { priorityModels = []; renderModels(); renderPriorityBar(); }
             } catch(e) { progressBar.style.display = "none"; }
         } else {
             progressBar.style.display = "none";
@@ -792,10 +957,9 @@
             renderPriorityBar();
         }
 
+        renderBottomBar();
         addMessage("system", "Контекст: " + name);
     }
-
-    function openProjectModal() { document.getElementById("project-modal").classList.add("active"); }
 
     // ═══════════════════════════════════════════════════════
     // TEMPLATE SELECTOR
@@ -811,78 +975,51 @@
         }
     }
 
-    async function createProject() {
-        const template = document.getElementById("proj-template").value;
-        const name = document.getElementById("proj-name").value.trim();
-        if (!name) { showToast("Введите название проекта", "error"); return; }
+    // ═══════════════════════════════════════════════════════
+    // BOTTOM BAR (контекстные кнопки)
+    // ═══════════════════════════════════════════════════════
+    function renderBottomBar() {
+        const bar = document.getElementById("bottom-bar");
+        const p = currentProjectId ? allProjects.find(x => x.id === currentProjectId) : null;
 
-        // If template is selected, use template endpoint
-        if (template) {
-            const desc = document.getElementById("proj-desc").value.trim();
-            const prompt = document.getElementById("proj-prompt").value.trim();
-            const ideas = document.getElementById("proj-ideas").value.trim();
-            try {
-                const resp = await fetch("/api/v1/projects/create-from-template", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({ template: template, name: name, description: desc, base_prompt: prompt, ideas: ideas })
-                });
-                if (resp.ok) {
-                    // После создания проекта из шаблона, сохранить настройки
-                    const projectData = await resp.json();
-                    const projectId = projectData.project?.id;
-                    if (projectId && (desc || prompt || ideas)) {
-                        await fetch('/api/v1/projects/settings', {
-                            method: 'PUT',
-                            headers: {"Content-Type": "application/json"},
-                            body: JSON.stringify({
-                                project_id: projectId,
-                                description: desc,
-                                base_prompt: prompt,
-                                ideas: ideas
-                            })
-                        });
-                    }
-                    await loadProjects();
-                    showToast(`Проект "${name}" создан из шаблона "${template}"`, "success");
-                    document.getElementById("project-modal").classList.remove("active");
-                    document.getElementById("proj-name").value = "";
-                    document.getElementById("proj-desc").value = "";
-                    document.getElementById("proj-prompt").value = "";
-                    document.getElementById("proj-ideas").value = "";
-                    document.getElementById("proj-template").value = "";
-                    document.getElementById("template-desc").style.display = "none";
-                } else {
-                    const err = await resp.json();
-                    showToast(`Ошибка: ${err.detail}`, "error");
-                }
-            } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
-            return;
+        // Общие кнопки (всегда видны)
+        let buttons = [
+            { label: '🛠 Terminal', action: "insertCommand('/terminal ')" },
+            { label: '💡 Ideas', action: "insertCommand('/ideas ')" },
+            { label: '🧹 Clear', action: "insertCommand('/clear')" },
+        ];
+
+        if (p) {
+            // Кнопки для активного проекта
+            buttons.push({ label: '📥 Pull', action: "insertCommand('/git_pull')" });
+            buttons.push({ label: '📤 Push', action: "insertCommand('/git_push')" });
+            buttons.push({ label: '🔍 Search', action: "togglePanel('search')" });
+            buttons.push({ label: '🔀 Git', action: "togglePanel('git')" });
+            buttons.push({ label: '📦 Packages', action: "togglePanel('packages')" });
+            buttons.push({ label: '📁 Files', action: "togglePanel('files')" });
+            buttons.push({ label: '🔄 Refactor', action: "openRefactorModal()" });
+            buttons.push({ label: '🗃️ Archive', action: "showArchivePanel()" });
+
+            // GitHub ссылка
+            if (p.github_repo) {
+                buttons.push({ label: '🔗 GitHub', action: `window.open('${escapeHtml(p.github_repo)}', '_blank')` });
+            }
+
+            // PowerShell кнопка
+            buttons.push({ label: '⚡ PowerShell', action: "insertCommand('/terminal powershell ')" });
+        } else {
+            // Без проекта — только базовые кнопки
+            buttons.push({ label: '🔑 Ключи', action: "showKeysModal()" });
+            buttons.push({ label: '📊 Стат', action: "showStats()" });
         }
 
-        // Custom project (original flow)
-        try {
-            const resp = await fetch("/api/v1/projects", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({name: name.trim()})
-            });
-            if (resp.ok) {
-                await loadProjects();
-                showToast(`Проект "${name.trim()}" создан`, "success");
-                document.getElementById("project-modal").classList.remove("active");
-                document.getElementById("proj-name").value = "";
-                document.getElementById("proj-desc").value = "";
-                document.getElementById("proj-prompt").value = "";
-                document.getElementById("proj-ideas").value = "";
-                document.getElementById("proj-template").value = "";
-                document.getElementById("template-desc").style.display = "none";
-            } else {
-                const err = await resp.json();
-                showToast(`Ошибка: ${err.detail}`, "error");
-            }
-        } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
+        bar.innerHTML = buttons.map(b =>
+            `<button onclick="${b.action}" class="bottom-bar-btn">${b.label}</button>`
+        ).join('');
     }
+
+    // Инициализация нижней панели
+    setTimeout(renderBottomBar, 500);
 
     async function deleteProject(id, name) {
         if (!confirm(`Удалить "${name}"?`)) return;
