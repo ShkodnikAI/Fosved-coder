@@ -68,6 +68,7 @@ async def websocket_chat(websocket: WebSocket):
     """Main chat WebSocket — streaming AI responses + command execution"""
     await websocket.accept()
     current_project_id = None
+    repo_map = None
 
     try:
         while True:
@@ -90,6 +91,11 @@ async def websocket_chat(websocket: WebSocket):
                 model_id = None
                 priority = []
                 payload = {}
+
+            # Handle heartbeat ping
+            if payload.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
 
             # Handle refactor requests
             if payload.get("type") == "refactor":
@@ -117,7 +123,6 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
             # Build project context (Repo Map)
-            repo_map = None
             if current_project_id:
                 project = await get_project(current_project_id)
                 if project:
