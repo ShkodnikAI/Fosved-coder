@@ -36,54 +36,62 @@
         <!-- SIDEBAR -->
         <div class="sidebar">
 
-            <!-- Projects (на первом месте) -->
-            <div class="sidebar-section" style="flex:1; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0;">
+            <!-- Projects (compact, top) -->
+            <div class="sidebar-section" style="flex:0 0 auto; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0; max-height:180px;">
                 <div class="section-header">
                     <h3>Проекты</h3>
+                    <button class="btn-add" onclick="openProjectModal()" title="Новый проект" style="font-size:14px; padding:2px 8px; line-height:1;">+</button>
                 </div>
                 <div class="project-list" id="project-list">
                     <div class="project-empty">Нет проектов</div>
                 </div>
             </div>
 
-            <!-- AI Models (под проектами) -->
-            <div class="sidebar-section">
+            <!-- AI Models (gets most of the space) -->
+            <div class="sidebar-section" style="flex:3; display:flex; flex-direction:column; overflow:hidden; border-bottom:none; padding-bottom:0;">
                 <div class="section-header">
                     <h3>Модели ИИ</h3>
-                    <div style="display:flex; gap:4px;">
+                    <div style="display:flex; gap:4px; align-items:center;">
+                        <div class="active-model-indicator" id="active-model-indicator" style="display:none;">
+                            <div class="active-dot"></div>
+                            <span id="active-model-name"></span>
+                        </div>
                         <button class="btn-add" onclick="showPriorityModal()" title="Приоритетные модели" style="font-size:11px; background:var(--amber); color:#000;">⚡</button>
                         <button class="btn-add" onclick="refreshModels()" title="Обновить" style="font-size:12px">↻</button>
                     </div>
                 </div>
                 <!-- Priority Models Bar -->
                 <div id="priority-bar" style="display:none; margin-bottom:8px;">
-                    <div style="font-size:10px; text-transform:uppercase; color:var(--amber); letter-spacing:0.5px; margin-bottom:4px; font-weight:600;">Приоритетные</div>
+                    <div class="model-section-label" style="color:var(--amber);">⚡ ПРИОРИТЕТНЫЕ</div>
                     <div id="priority-models-bar" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
                 </div>
-                <div id="models-list">
-                    <div class="model-item loading">Загрузка...</div>
+                <div id="models-list" style="flex:1; overflow-y:auto; margin-right:-4px; padding-right:4px;">
+                    <div class="model-card loading">Загрузка...</div>
                 </div>
-                <!-- OpenRouter inline key -->
-                <div id="openrouter-inline" style="margin-top:8px; display:none;">
-                    <div style="font-size:10px; text-transform:uppercase; color:var(--blue); letter-spacing:0.5px; margin-bottom:4px; font-weight:600;">OpenRouter ключ</div>
-                    <div style="display:flex; gap:4px;">
-                        <input type="password" id="openrouter-key-input" placeholder="sk-or-..." style="flex:1; padding:5px 8px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; font-size:11px; font-family:monospace; outline:none;">
-                        <button class="btn-small" onclick="saveOpenRouterKey()" style="white-space:nowrap;">Сохранить</button>
+                <!-- OpenRouter styled block -->
+                <div id="openrouter-inline" class="openrouter-block" style="margin-top:8px; display:none;">
+                    <div class="or-header">
+                        <div class="or-logo">OR</div>
+                        <div>
+                            <div class="or-title">OpenRouter</div>
+                            <div class="or-sub">Мульти-маршрутизация моделей</div>
+                        </div>
+                    </div>
+                    <div class="or-input-row">
+                        <input type="password" id="openrouter-key-input" class="or-input" placeholder="sk-or-...">
+                        <button class="btn-small" onclick="saveOpenRouterKey()" style="white-space:nowrap; flex-shrink:0;">Сохранить</button>
                     </div>
                 </div>
-                <!-- Local models scan -->
-                <div style="margin-top:8px; display:flex; gap:4px; flex-wrap:wrap;">
-                    <button class="btn-small btn-outline" onclick="scanLocalModels('ollama')" title="Найти модели Ollama">🔍 Ollama</button>
-                    <button class="btn-small btn-outline" onclick="scanLocalModels('lmstudio')" title="Найти модели LM Studio">🔍 LM Studio</button>
-                    <button class="btn-small btn-outline" onclick="showAddLocalModelModal()" title="Добавить вручную">+ Локальная</button>
-                    <button class="btn-small btn-outline" onclick="showAddCustomModelModal()" title="Подключить по URL">+ Кастомная</button>
-                </div>
+                <!-- Add model button -->
+                <button class="add-model-btn" onclick="showAddModelMenu(event)">+ Добавить модель вручную</button>
             </div>
 
-            <!-- Bottom buttons -->
-            <div style="display:flex; gap:8px; padding:12px 15px; border-top:1px solid var(--border); background:var(--bg-secondary);">
-                <button class="btn-add" onclick="showKeysModal()" style="flex:1">🔑 Ключи</button>
-                <button class="btn-add" onclick="showStats()" style="flex:1">📊 Стат</button>
+            <!-- Bottom buttons (compact) -->
+            <div style="display:flex; gap:4px; padding:8px 15px; border-top:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0;">
+                <button class="btn-add" onclick="scanLocalModels('ollama')" title="Ollama" style="flex:1; font-size:11px; padding:4px 6px;">🔍 Ollama</button>
+                <button class="btn-add" onclick="scanLocalModels('lmstudio')" title="LM Studio" style="flex:1; font-size:11px; padding:4px 6px;">🔍 LM</button>
+                <button class="btn-add" onclick="showKeysModal()" style="flex:1; font-size:11px; padding:4px 6px;">🔑</button>
+                <button class="btn-add" onclick="showStats()" style="flex:1; font-size:11px; padding:4px 6px;">📊</button>
             </div>
         </div>
 
@@ -574,6 +582,79 @@
         } catch(e) { console.error("Failed to load models:", e); }
     }
 
+    // Helper: get 2-letter avatar initials for a model
+    function getModelInitials(name) {
+        const parts = name.replace(/[^a-zA-Z0-9]/g, ' ').trim().split(/\s+/);
+        if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+        return name.substring(0, 2).toUpperCase();
+    }
+
+    // Helper: get avatar color by model type
+    function getAvatarColor(type) {
+        const colors = { paid: '#C8A97E', free: 'var(--blue)', local: '#e06070', custom: '#c080d0' };
+        return colors[type] || 'var(--text-secondary)';
+    }
+
+    // Helper: get status badge HTML
+    function getStatusBadge(m) {
+        if (m.status === 'valid') return '<span class="model-status-badge badge-ok">OK</span>';
+        if (m.status === 'rate_limited') return '<span class="model-status-badge badge-warn">LIMIT</span>';
+        if (m.status === 'invalid') return '<span class="model-status-badge badge-error">ERR</span>';
+        return '<span class="model-status-badge badge-none">—</span>';
+    }
+
+    // Helper: get tag HTML
+    function getTagHtml(type) {
+        const tags = {
+            paid: '<span class="model-tag tag-paid">Платная</span>',
+            free: '<span class="model-tag tag-free">Бесплатная</span>',
+            local: '<span class="model-tag tag-local">Локальная</span>',
+            custom: '<span class="model-tag tag-custom">Кастомная</span>'
+        };
+        return tags[type] || '';
+    }
+
+    // Helper: build a single model card HTML
+    function buildModelCard(m, type) {
+        const isActive = m.id === activeModelId;
+        const priorityIdx = priorityModels.indexOf(m.id);
+        const avatarColor = getAvatarColor(type);
+        const initials = getModelInitials(m.name || m.provider_name || '??');
+
+        // Card classes
+        let cardCls = 'model-card';
+        if (isActive) cardCls += ' card-active';
+        else if (m.status === 'valid') cardCls += ' card-valid';
+        else if (m.status === 'rate_limited') cardCls += ' card-warning';
+        else if (m.status === 'invalid') cardCls += ' card-error';
+
+        // Priority badge
+        const priorityHtml = priorityIdx >= 0 ? `<span class="priority-badge" style="position:absolute;top:6px;right:6px;width:14px;height:14px;font-size:9px;">${priorityIdx + 1}</span>` : '';
+
+        // Provider subtitle
+        const sub = m.provider_name ? escapeHtml(m.provider_name) : '';
+
+        // Action link for models without keys
+        const actionLink = (!m.status || m.status === 'not_configured') ?
+            '<span class="model-action-link" onclick="event.stopPropagation();showKeysModal()">Настроить →</span>' : '';
+
+        return `<div class="${cardCls}" data-id="${m.id}" onclick="selectModel('${m.id}')" style="position:relative;">
+            <div class="model-card-header">
+                <div class="model-avatar" style="background:${avatarColor};color:#fff;">${initials}</div>
+                <div class="model-card-info">
+                    <div class="model-card-name">${escapeHtml(m.name)}</div>
+                    ${sub ? `<div class="model-card-sub">${sub}</div>` : ''}
+                </div>
+                ${getStatusBadge(m)}
+            </div>
+            <div class="model-card-footer">
+                ${getTagHtml(type)}
+                ${actionLink}
+            </div>
+            ${priorityHtml}
+        </div>`;
+    }
+
     function renderModels() {
         const list = document.getElementById("models-list");
         if (!allModels.length) { list.innerHTML = '<div class="model-empty">Нет моделей. Настройте ключи или подключите локальные.</div>'; return; }
@@ -592,83 +673,32 @@
 
         // 1. Платные модели
         if (paid.length) {
-            html += '<div class="model-section-label">Платные</div>';
-            paid.forEach(m => {
-                const cls = m.status === 'valid' ? 'model-valid' : m.status === 'rate_limited' ? 'model-limited' : '';
-                const sel = m.id === activeModelId ? ' active' : '';
-                const priorityIdx = priorityModels.indexOf(m.id);
-                const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
-                const statusLabel = {valid:'OK', rate_limited:'LIMIT'}[m.status] || '';
-                const statusCls = m.status || 'not_configured';
-                html += `<div class="model-item ${cls}${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
-                    ${priorityBadge}
-                    <span class="model-status-dot ${m.status}">●</span>
-                    <span class="model-info">
-                        <span class="model-name">${escapeHtml(m.name)}</span>
-                        <span class="model-provider">${escapeHtml(m.provider_name)}</span>
-                    </span>
-                    ${statusLabel ? `<span class="model-validation-badge ${statusCls}">${statusLabel}</span>` : ''}
-                </div>`;
-            });
+            html += '<div class="model-section-label">ПЛАТНЫЕ</div>';
+            paid.forEach(m => { html += buildModelCard(m, 'paid'); });
         }
 
-        // 2. Локальные модели
-        if (local.length) {
-            html += '<div class="model-section-label">Локальные</div>';
-            local.forEach(m => {
-                const sel = m.id === activeModelId ? ' active' : '';
-                const priorityIdx = priorityModels.indexOf(m.id);
-                const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
-                html += `<div class="model-item model-local${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
-                    ${priorityBadge}
-                    <span class="model-status-dot local">●</span>
-                    <span class="model-info">
-                        <span class="model-name">${escapeHtml(m.name)}</span>
-                        <span class="model-provider">${escapeHtml(m.provider_name)}</span>
-                    </span>
-                    <span class="model-validation-badge valid">LOCAL</span>
-                </div>`;
-            });
-        }
-
-        // 3. Бесплатные модели
+        // 2. Бесплатные модели
         if (free.length) {
-            html += '<div class="model-section-label">Бесплатные</div>';
-            free.forEach(m => {
-                const sel = m.id === activeModelId ? ' active' : '';
-                const priorityIdx = priorityModels.indexOf(m.id);
-                const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
-                html += `<div class="model-item model-free${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
-                    ${priorityBadge}
-                    <span class="model-status-dot free">●</span>
-                    <span class="model-info">
-                        <span class="model-name">${escapeHtml(m.name)}</span>
-                        <span class="model-provider">${escapeHtml(m.provider_name)}</span>
-                    </span>
-                    <span class="model-validation-badge valid">FREE</span>
-                </div>`;
-            });
+            html += '<div class="model-section-label">БЕСПЛАТНЫЕ</div>';
+            free.forEach(m => { html += buildModelCard(m, 'free'); });
+        }
+
+        // 3. Локальные модели
+        if (local.length) {
+            html += '<div class="model-section-label">ЛОКАЛЬНЫЕ</div>';
+            local.forEach(m => { html += buildModelCard(m, 'local'); });
         }
 
         // 4. Кастомные модели
         if (custom.length) {
-            html += '<div class="model-section-label">Кастомные</div>';
-            custom.forEach(m => {
-                const sel = m.id === activeModelId ? ' active' : '';
-                const priorityIdx = priorityModels.indexOf(m.id);
-                const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
-                html += `<div class="model-item model-custom${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
-                    ${priorityBadge}
-                    <span class="model-status-dot custom">●</span>
-                    <span class="model-info">
-                        <span class="model-name">${escapeHtml(m.name)}</span>
-                    </span>
-                    <span class="model-validation-badge valid">CUSTOM</span>
-                </div>`;
-            });
+            html += '<div class="model-section-label">КАСТОМНЫЕ</div>';
+            custom.forEach(m => { html += buildModelCard(m, 'custom'); });
         }
 
         list.innerHTML = html;
+
+        // Update active model indicator
+        updateActiveModelIndicator();
     }
 
     function renderPriorityBar() {
@@ -690,14 +720,54 @@
 
     function selectModel(modelId) {
         activeModelId = modelId;
-        document.querySelectorAll('#models-list .model-item').forEach(el => el.classList.remove('active'));
-        const el = document.querySelector(`#models-list .model-item[data-id="${modelId}"]`);
-        if (el) el.classList.add('active');
+        // Update card-based active states
+        document.querySelectorAll('#models-list .model-card').forEach(el => {
+            el.classList.remove('card-active');
+            // Restore status border class
+            const id = el.dataset.id;
+            const m = allModels.find(x => x.id === id);
+            if (m && m.status === 'valid') el.classList.add('card-valid');
+            else if (m && m.status === 'rate_limited') el.classList.add('card-warning');
+            else if (m && m.status === 'invalid') el.classList.add('card-error');
+        });
+        const el = document.querySelector(`#models-list .model-card[data-id="${modelId}"]`);
+        if (el) { el.classList.remove('card-valid', 'card-warning', 'card-error'); el.classList.add('card-active'); }
+        updateActiveModelIndicator();
+    }
+
+    function updateActiveModelIndicator() {
+        const indicator = document.getElementById('active-model-indicator');
+        const nameSpan = document.getElementById('active-model-name');
+        if (!indicator || !nameSpan) return;
+        if (activeModelId) {
+            const m = allModels.find(x => x.id === activeModelId);
+            if (m) {
+                // Use short display name
+                const displayName = m.name.length > 20 ? m.name.substring(0, 18) + '…' : m.name;
+                nameSpan.textContent = displayName;
+                indicator.style.display = 'inline-flex';
+                return;
+            }
+        }
+        indicator.style.display = 'none';
+    }
+
+    function showAddModelMenu(e) {
+        const body = `<div class="keys-section\">
+            <h3>Добавить модель</h3>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                <button class="btn-small btn-outline" onclick="scanLocalModels('ollama'); closeGenericModal();" style="padding:10px; font-size:12px;">🔍 Найти модели Ollama</button>
+                <button class="btn-small btn-outline" onclick="scanLocalModels('lmstudio'); closeGenericModal();" style="padding:10px; font-size:12px;">🔍 Найти модели LM Studio</button>
+                <button class="btn-small btn-outline" onclick="showAddLocalModelModal();" style="padding:10px; font-size:12px;">+ Добавить локальную вручную</button>
+                <button class="btn-small btn-outline" onclick="showAddCustomModelModal();" style="padding:10px; font-size:12px;">+ Подключить по URL</button>
+            </div>
+        </div>`;
+        openGenericModal("Добавить модель", body);
     }
 
     async function refreshModels() {
         const list = document.getElementById("models-list");
-        list.innerHTML = '<div class="model-item loading">Обновление...</div>';
+        list.innerHTML = '<div class="model-card loading">Обновление...</div>';
         await loadModels();
     }
 
