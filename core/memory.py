@@ -6,11 +6,29 @@ from datetime import datetime
 import yaml
 
 def load_config():
-    with open("config.yaml", "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    if os.path.exists("config.yaml"):
+        with open("config.yaml", "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    # Default config for Railway (where config.yaml is gitignored)
+    return {
+        "llm": {"default_model": "openrouter/anthropic/claude-3.5-sonnet", "router_model": "openrouter/google/gemini-2.0-flash-exp:free", "api_base": "https://openrouter.ai/api/v1", "api_key": "", "temperature": 0.2, "max_tokens": 4096},
+        "system": {"db_url": "sqlite+aiosqlite:///fosved_coder.db", "projects_dir": "./projects", "ideas_cache_dir": "./.cache/ideas", "archives_dir": "./archives", "max_iterations": 3, "max_context_files": 20, "max_idea_files": 10, "max_file_size_kb": 50},
+        "security": {"allowed_commands": ["git", "python", "pip", "npm", "node", "cat", "ls", "dir", "echo", "mkdir", "cd"], "blocked_patterns": ["rm -rf /", "DROP DATABASE", "FORMAT C:"]},
+    }
 
 CONFIG = load_config()
-engine = create_async_engine(CONFIG["system"]["db_url"], echo=False)
+
+# Railway / Production: use DATABASE_URL (PostgreSQL) if available
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+if DATABASE_URL:
+    # Railway provides postgres:// — asyncpg needs postgresql+asyncpg://
+    DB_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    if "+asyncpg" not in DB_URL:
+        DB_URL = DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+else:
+    DB_URL = CONFIG["system"]["db_url"]
+
+engine = create_async_engine(DB_URL, echo=False)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 class Base(DeclarativeBase):
@@ -157,24 +175,38 @@ async def get_project(project_id: int) -> dict | None:
 
 async def migrate_db():
     """Add new columns if they don't exist (for upgrades)."""
-    import sqlite3
-    db_url = CONFIG["system"]["db_url"]
-    db_file = db_url.split(":///")[-1] if ":///" in db_url else "fosved_coder.db"
-    conn = sqlite3.connect(db_file)
-    cursor = conn.cursor()
-    # Get existing columns
-    cursor.execute("PRAGMA table_info(projects)")
-    existing = {row[1] for row in cursor.fetchall()}
-    new_columns = [
-        ("github_repo", "TEXT", "''"),
-        ("github_token", "TEXT", "''"),
-        ("local_path", "TEXT", "''"),
-    ]
-    for col_name, col_type, col_default in new_columns:
-        if col_name not in existing:
-            cursor.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_type} DEFAULT {col_default}")
-    conn.commit()
-    conn.close()
+    db_url = DB_URL
+    if "sqlite" in db_url:
+        import sqlite3
+        db_file = db_url.split(":///")[-1] if ":///" in db_url else "fosved_coder.db"
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(projects)")
+        existing = {row[1] for row in cursor.fetchall()}
+        new_columns = [
+            ("github_repo", "TEXT", "''"),
+            ("github_token", "TEXT", "''"),
+            ("local_path", "TEXT", "''"),
+        ]
+        for col_name, col_type, col_default in new_columns:
+            if col_name not in existing:
+                cursor.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_type} DEFAULT {col_default}")
+        conn.commit()
+        conn.close()
+    elif "postgres" in db_url:
+        from sqlalchemy import text, inspect
+        async with engine.begin() as conn:
+            insp = inspect(conn)
+            existing = await conn.run_sync(lambda sync_conn: insp.get_columns("projects"))
+            existing_names = {col["name"] for col in existing}
+            new_columns = {
+                "github_repo": "TEXT DEFAULT ''",
+                "github_token": "TEXT DEFAULT ''",
+                "local_path": "TEXT DEFAULT ''",
+            }
+            for col_name, col_def in new_columns.items():
+                if col_name not in existing_names:
+                    await conn.execute(text(f"ALTER TABLE projects ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
 
 async def update_project_progress(project_id: int, progress: int) -> bool:
     """Update project progress (0-100)."""

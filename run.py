@@ -285,8 +285,10 @@ async def websocket_executor(websocket: WebSocket):
 
 
 if __name__ == "__main__":
+    import os
+    port = int(os.environ.get("PORT", 8000))
     print("  ╔══════════════════════════════════════╗")
     print("  ║   Fosved Coder v2.0 — Starting...    ║")
-    print("  ║   http://localhost:8000               ║")
+    print(f"  ║   http://0.0.0.0:{port}               ║")
     print("  ╚══════════════════════════════════════╝")
-    uvicorn.run("run:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("run:app", host="0.0.0.0", port=port, reload=False)
