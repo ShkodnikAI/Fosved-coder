@@ -13,3 +13,7 @@ keys.yaml
 fosvedcoder.env
 .DS_Store
 Thumbs.db
+data/
+download/
+worklog.md
+nixpacks.toml
