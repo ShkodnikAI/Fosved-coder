@@ -46,6 +46,12 @@ class ToggleGitHubRequest(BaseModel):
 
 class CreateProjectRequest(BaseModel):
     name: str
+    description: str = ""
+    base_prompt: str = ""
+    ideas: str = ""
+    github_repo: str = ""
+    github_token: str = ""
+    local_path: str = ""
 
 class UpdateProgressRequest(BaseModel):
     project_id: int
@@ -87,6 +93,9 @@ class UpdateProjectSettingsRequest(BaseModel):
     description: str = ""
     base_prompt: str = ""
     ideas: str = ""
+    github_repo: str = ""
+    github_token: str = ""
+    local_path: str = ""
 
 class ArchiveProjectRequest(BaseModel):
     project_id: int
@@ -177,7 +186,7 @@ async def create_project_endpoint(req: CreateProjectRequest):
     from core.memory import CONFIG
     projects_dir = CONFIG["system"]["projects_dir"]
     project_path = f"{projects_dir}/{req.name.replace(' ', '_').lower()}"
-    result = await create_project(req.name, project_path)
+    result = await create_project(req.name, project_path, description=req.description, base_prompt=req.base_prompt, ideas=req.ideas, github_repo=req.github_repo, github_token=req.github_token, local_path=req.local_path)
     if not result:
         raise HTTPException(400, "Проект с таким именем уже существует")
     return result
@@ -213,6 +222,9 @@ async def update_project_settings(req: UpdateProjectSettingsRequest):
             project.description = req.description
             project.base_prompt = req.base_prompt
             project.ideas = req.ideas
+            project.github_repo = req.github_repo
+            project.github_token = req.github_token
+            project.local_path = req.local_path
             return {"success": True}
 
 

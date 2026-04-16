@@ -25,6 +25,9 @@ class Project(Base):
     base_prompt: Mapped[str] = mapped_column(Text, default="")
     ideas: Mapped[str] = mapped_column(Text, default="")
     selected_models: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of model IDs
+    github_repo: Mapped[str] = mapped_column(Text, default="")  # GitHub repository URL
+    github_token: Mapped[str] = mapped_column(Text, default="")  # Individual GitHub token
+    local_path: Mapped[str] = mapped_column(Text, default="")  # Custom local storage path
     progress: Mapped[int] = mapped_column(default=0)  # 0-100 percent
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
@@ -105,6 +108,7 @@ class ProjectArchive(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await migrate_db()
     os.makedirs(CONFIG["system"]["projects_dir"], exist_ok=True)
     os.makedirs(CONFIG["system"]["ideas_cache_dir"], exist_ok=True)
 
@@ -112,7 +116,7 @@ async def init_db():
 # PROJECTS CRUD
 # ═══════════════════════════════════════════════════════════════
 
-async def create_project(name: str, path: str) -> dict:
+async def create_project(name: str, path: str, description: str = "", base_prompt: str = "", ideas: str = "", github_repo: str = "", github_token: str = "", local_path: str = "") -> dict:
     """Create a new project. Returns dict representation."""
     import json
     async with async_session() as session:
@@ -122,12 +126,12 @@ async def create_project(name: str, path: str) -> dict:
             )
             if existing.scalar_one_or_none():
                 return None
-            project = Project(name=name, path=path)
+            project = Project(name=name, path=path, description=description, base_prompt=base_prompt, ideas=ideas, github_repo=github_repo, github_token=github_token, local_path=local_path)
             session.add(project)
             await session.flush()
             await session.refresh(project)
             os.makedirs(path, exist_ok=True)
-            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "progress": project.progress, "created_at": str(project.created_at)}
+            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "github_repo": project.github_repo, "github_token": project.github_token, "local_path": project.local_path, "progress": project.progress, "created_at": str(project.created_at)}
 
 async def get_all_projects() -> list[dict]:
     """Get all projects as list of dicts."""
@@ -136,7 +140,7 @@ async def get_all_projects() -> list[dict]:
             select(Project).order_by(Project.created_at.desc())
         )
         return [
-            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "progress": p.progress, "created_at": str(p.created_at)}
+            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "progress": p.progress, "created_at": str(p.created_at)}
             for p in result.scalars().all()
         ]
 
@@ -148,8 +152,28 @@ async def get_project(project_id: int) -> dict | None:
         )
         p = result.scalar_one_or_none()
         if p:
-            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "progress": p.progress, "created_at": str(p.created_at)}
+            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "progress": p.progress, "created_at": str(p.created_at)}
         return None
+
+async def migrate_db():
+    """Add new columns if they don't exist (for upgrades)."""
+    import sqlite3
+    from core.config import DB_PATH
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # Get existing columns
+    cursor.execute("PRAGMA table_info(projects)")
+    existing = {row[1] for row in cursor.fetchall()}
+    new_columns = [
+        ("github_repo", "TEXT", "''"),
+        ("github_token", "TEXT", "''"),
+        ("local_path", "TEXT", "''"),
+    ]
+    for col_name, col_type, col_default in new_columns:
+        if col_name not in existing:
+            cursor.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_type} DEFAULT {col_default}")
+    conn.commit()
+    conn.close()
 
 async def update_project_progress(project_id: int, progress: int) -> bool:
     """Update project progress (0-100)."""
