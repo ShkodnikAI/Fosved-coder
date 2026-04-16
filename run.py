@@ -31,8 +31,14 @@ async def lifespan(app: FastAPI):
     print("  ⏳ Проверка API-ключей...")
     results = await keys_manager.startup_validation()
     for pid, info in results.items():
-        status_icon = {"valid": "✓", "rate_limited": "⚠", "invalid": "✗"}.get(info["status"], "?")
-        print(f"    {status_icon} {pid}: {info['status']} ({len(info.get('models', []))} моделей)")
+        if pid == "local" and isinstance(info, dict):
+            # info — dict of {model_id: {status, name}}
+            count = len(info)
+            print(f"    ● local: {count} локальных моделей")
+            continue
+        status_icon = {"valid": "✓", "rate_limited": "⚠", "invalid": "✗", "available": "●"}.get(info.get("status", "?"), "?")
+        model_count = len(info.get("models", []))
+        print(f"    {status_icon} {pid}: {info.get('status', '?')} ({model_count} моделей)")
     gh = keys_manager.get_github_status()
     if gh["has_token"]:
         icon = "✓" if gh["enabled"] else "○"
