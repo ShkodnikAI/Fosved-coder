@@ -182,6 +182,8 @@ header {
 .model-status-dot.rate_limited { color: var(--amber); }
 .model-status-dot.free { color: var(--blue); }
 .model-status-dot.disabled { color: var(--text-secondary); opacity: 0.4; }
+.model-status-dot.local { color: #e06070; }  /* красно-розовый для локальных */
+.model-status-dot.custom { color: #c080d0; }  /* фиолетовый для кастомных */
 
 .model-info { display: flex; flex-direction: column; min-width: 0; }
 .model-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -191,6 +193,8 @@ header {
 .model-valid .model-name { color: var(--green); }
 .model-limited .model-name { color: var(--amber); }
 .model-free .model-name { color: var(--blue); }
+.model-local .model-name { color: #e06070; }
+.model-custom .model-name { color: #c080d0; }
 .model-disabled { opacity: 0.4; cursor: default; }
 .model-disabled:hover { background: transparent; }
 .model-empty { color: var(--text-secondary); font-size: 12px; padding: 5px; }

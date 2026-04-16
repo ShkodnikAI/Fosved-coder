@@ -1,6 +1,6 @@
 """
 Fosved Coder v2.0 — Keys Manager
-Управление API-ключами, валидация, провайдеры, бесплатные модели.
+Управление API-ключами, валидация, провайдеры, бесплатные модели, локальные модели.
 """
 import os
 import yaml
@@ -56,6 +56,13 @@ PROVIDER_DEFS = {
         "api_base": "https://generativelanguage.googleapis.com/v1beta",
         "suggested_models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
     },
+    "zai": {
+        "name": "Z.AI",
+        "litellm_prefix": "openai",
+        "api_base": "https://chat.z.ai/v1",
+        "suggested_models": ["default"],
+        "is_custom": True,
+    },
 }
 
 # Бесплатные модели (через OpenRouter)
@@ -69,6 +76,35 @@ FREE_MODELS = [
     {"id": "gemini-2.5-flash-free", "name": "Gemini 2.5 Flash", "model": "google/gemini-2.5-flash-preview:free", "provider": "openrouter"},
     {"id": "llama-3.3-70b-free", "name": "Llama 3.3 70B", "model": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"},
 ]
+
+# Локальные провайдеры по умолчанию
+LOCAL_PROVIDERS = {
+    "ollama": {
+        "name": "Ollama",
+        "default_base_url": "http://localhost:11434/v1",
+        "litellm_prefix": "openai",
+    },
+    "lmstudio": {
+        "name": "LM Studio",
+        "default_base_url": "http://localhost:1234/v1",
+        "litellm_prefix": "openai",
+    },
+    "vllm": {
+        "name": "vLLM",
+        "default_base_url": "http://localhost:8000/v1",
+        "litellm_prefix": "openai",
+    },
+    "llamacpp": {
+        "name": "llama.cpp",
+        "default_base_url": "http://localhost:8080/v1",
+        "litellm_prefix": "openai",
+    },
+    "custom_local": {
+        "name": "Кастомный",
+        "default_base_url": "http://localhost:5000/v1",
+        "litellm_prefix": "openai",
+    },
+}
 
 KEYS_FILE = "keys.yaml"
 
@@ -87,6 +123,8 @@ class KeysManager:
 
     def __init__(self):
         self.providers: dict = {}
+        self.local_models: list = []  # [{id, name, model, provider_name, base_url}]
+        self.custom_models: list = []  # [{id, name, model, api_base, api_key}]
         self.github_token: str = ""
         self.github_enabled: bool = False
         self.github_user: str = ""
@@ -100,16 +138,22 @@ class KeysManager:
                 with open(KEYS_FILE, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
                 self.providers = data.get("providers", {})
+                self.local_models = data.get("local_models", [])
+                self.custom_models = data.get("custom_models", [])
                 github = data.get("github", {})
                 self.github_token = github.get("token", "")
                 self.github_enabled = github.get("enabled", False)
                 self.github_user = github.get("user", "")
             except Exception:
                 self.providers = {}
+                self.local_models = []
+                self.custom_models = []
 
     def _save_keys(self):
         data = {
             "providers": self.providers,
+            "local_models": self.local_models,
+            "custom_models": self.custom_models,
             "github": {
                 "token": self.github_token,
                 "enabled": self.github_enabled,
@@ -121,7 +165,7 @@ class KeysManager:
 
     # ─── Validation ──────────────────────────────────────────
 
-    async def validate_key(self, provider_id: str, api_key: str, model: str = None) -> dict:
+    async def validate_key(self, provider_id: str, api_key: str, model: str = None, api_base: str = None) -> dict:
         """
         Валидация API-ключа минимальным запросом.
         Returns: {"status": "valid"|"invalid"|"rate_limited", "error": str}
@@ -132,13 +176,14 @@ class KeysManager:
 
         test_model = model or provider["suggested_models"][0]
         litellm_model = f"{provider['litellm_prefix']}/{test_model}"
+        base_url = api_base or provider["api_base"]
 
         try:
             response = await litellm.acompletion(
                 model=litellm_model,
                 messages=[{"role": "user", "content": "hi"}],
                 api_key=api_key,
-                api_base=provider["api_base"],
+                api_base=base_url,
                 max_tokens=1,
                 temperature=0,
                 timeout=15,
@@ -156,7 +201,12 @@ class KeysManager:
             elif "insufficient" in error_str or "billing" in error_str:
                 return {"status": "rate_limited", "error": "Недостаточно средств на счёте"}
             elif "timeout" in error_str:
-                return {"status": "valid", "error": ""}  # Таймаут при валидации = ключ скорее всего ок
+                return {"status": "valid", "error": ""}
+            elif "404" in error_str or "not found" in error_str or "model not found" in error_str:
+                # 404 может означать что модель не найдена, а не что ключ неверный
+                return {"status": "valid", "error": "Модель может быть недоступна"}
+            elif "connection" in error_str or "connect" in error_str:
+                return {"status": "invalid", "error": f"Не удалось подключиться к {provider.get('name', provider_id)}"}
             else:
                 return {"status": "invalid", "error": f"Ошибка: {str(e)[:150]}"}
 
@@ -192,12 +242,11 @@ class KeysManager:
         if not provider:
             return {"success": False, "status": "invalid", "error": f"Неизвестный провайдер: {provider_id}", "provider": provider_id}
 
-        # Валидируем ключ
         test_model = (models or provider["suggested_models"])[0] if (models or provider["suggested_models"]) else None
         if not test_model:
             return {"success": False, "status": "invalid", "error": "Не указана ни одна модель", "provider": provider_id}
 
-        validation = await self.validate_key(provider_id, api_key, test_model)
+        validation = await self.validate_key(provider_id, api_key, test_model, api_base)
 
         if validation["status"] == "invalid" and "Неверный" in validation["error"]:
             return {"success": False, "status": "invalid", "error": validation["error"], "provider": provider_id}
@@ -246,6 +295,199 @@ class KeysManager:
         self._save_keys()
         return {"enabled": self.github_enabled, "has_token": bool(self.github_token)}
 
+    # ─── Local Models ────────────────────────────────────────
+
+    async def discover_local_models(self, provider_key: str = "ollama", base_url: str = None) -> dict:
+        """
+        Автообнаружение моделей на локальном сервере.
+        Проверяет стандартные эндпоинты: /v1/models или /api/tags.
+        """
+        provider_info = LOCAL_PROVIDERS.get(provider_key)
+        if not provider_info:
+            return {"success": False, "error": f"Неизвестный локальный провайдер: {provider_key}"}
+
+        url = base_url or provider_info["default_base_url"]
+
+        # Убираем /v1 если есть, для ollama используем /api/tags
+        if provider_key == "ollama":
+            check_url = url.replace("/v1", "").rstrip("/") + "/api/tags"
+            headers = {}
+        else:
+            check_url = url.rstrip("/") + "/models"
+            headers = {}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    check_url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status != 200:
+                        return {"success": False, "error": f"Сервер недоступен: {resp.status}", "provider": provider_key, "base_url": url}
+
+                    data = await resp.json()
+
+                    # Ollama format: {"models": [{"name": "...", ...}]}
+                    # OpenAI format: {"data": [{"id": "...", ...}]}
+                    models = []
+                    if provider_key == "ollama" and "models" in data:
+                        for m in data["models"]:
+                            model_name = m.get("name", "")
+                            # Убираем теги версий для отображения
+                            display_name = model_name.split(":")[0]
+                            models.append({
+                                "id": f"local_{provider_key}_{model_name.replace(':', '_')}",
+                                "name": display_name,
+                                "model": model_name,
+                                "provider": provider_key,
+                                "provider_name": provider_info["name"],
+                                "base_url": url.replace("/v1", "").rstrip("/"),  # Ollama needs base without /v1
+                                "litellm_prefix": "ollama" if provider_key == "ollama" else "openai",
+                            })
+                    elif "data" in data:
+                        for m in data["data"]:
+                            model_id = m.get("id", "")
+                            models.append({
+                                "id": f"local_{provider_key}_{model_id.replace('/', '_').replace(':', '_')}",
+                                "name": model_id,
+                                "model": model_id,
+                                "provider": provider_key,
+                                "provider_name": provider_info["name"],
+                                "base_url": url,
+                                "litellm_prefix": provider_info["litellm_prefix"],
+                            })
+
+                    if not models:
+                        return {"success": False, "error": "Модели не найдены на сервере", "provider": provider_key}
+
+                    # Добавляем найденные модели, не дублируя
+                    existing_ids = {m["id"] for m in self.local_models}
+                    added = 0
+                    for m in models:
+                        if m["id"] not in existing_ids:
+                            self.local_models.append(m)
+                            existing_ids.add(m["id"])
+                            added += 1
+
+                    if added > 0:
+                        self._save_keys()
+
+                    return {
+                        "success": True,
+                        "models": models,
+                        "added": added,
+                        "total": len(self.local_models),
+                        "provider": provider_key,
+                        "provider_name": provider_info["name"],
+                    }
+
+        except aiohttp.ClientError:
+            return {"success": False, "error": f"Не удалось подключиться к {url}", "provider": provider_key}
+        except Exception as e:
+            return {"success": False, "error": str(e)[:150], "provider": provider_key}
+
+    async def add_local_model(self, provider_key: str, model_name: str, base_url: str, display_name: str = None) -> dict:
+        """Ручное добавление локальной модели."""
+        provider_info = LOCAL_PROVIDERS.get(provider_key)
+        if not provider_info:
+            return {"success": False, "error": f"Неизвестный провайдер: {provider_key}"}
+
+        model_id = f"local_{provider_key}_{model_name.replace('/', '_').replace(':', '_')}"
+
+        # Проверяем дубликат
+        if any(m["id"] == model_id for m in self.local_models):
+            return {"success": False, "error": "Модель уже добавлена"}
+
+        model_entry = {
+            "id": model_id,
+            "name": display_name or model_name,
+            "model": model_name,
+            "provider": provider_key,
+            "provider_name": provider_info["name"],
+            "base_url": base_url,
+            "litellm_prefix": "ollama" if provider_key == "ollama" else "openai",
+        }
+
+        self.local_models.append(model_entry)
+        self._save_keys()
+
+        return {"success": True, "model": model_entry}
+
+    def remove_local_model(self, model_id: str) -> bool:
+        before = len(self.local_models)
+        self.local_models = [m for m in self.local_models if m["id"] != model_id]
+        if len(self.local_models) < before:
+            self._save_keys()
+            return True
+        return False
+
+    # ─── Custom Models (force connect) ───────────────────────
+
+    async def add_custom_model(self, name: str, api_base: str, api_key: str = "", model_id: str = "", litellm_prefix: str = "openai") -> dict:
+        """
+        Принудительное добавление любой модели по URL.
+        """
+        custom_id = f"custom_{name.replace(' ', '_').lower()}_{model_id.replace('/', '_').replace(':', '_')}" if model_id else f"custom_{name.replace(' ', '_').lower()}"
+
+        # Проверяем дубликат
+        if any(m["id"] == custom_id for m in self.custom_models):
+            return {"success": False, "error": "Модель уже добавлена"}
+
+        # Пробуем валидацию если api_base указан
+        status = "valid"
+        error = ""
+        if api_base and model_id:
+            try:
+                litellm_model = f"{litellm_prefix}/{model_id}"
+                response = await litellm.acompletion(
+                    model=litellm_model,
+                    messages=[{"role": "user", "content": "hi"}],
+                    api_key=api_key or "not-needed",
+                    api_base=api_base,
+                    max_tokens=1,
+                    temperature=0,
+                    timeout=10,
+                )
+                if not response or not response.choices:
+                    status = "invalid"
+                    error = "Пустой ответ"
+            except Exception as e:
+                err_str = str(e).lower()
+                if "connect" in err_str:
+                    status = "invalid"
+                    error = "Не удалось подключиться"
+                elif "401" in err_str or "unauthorized" in err_str:
+                    status = "invalid"
+                    error = "Неверный ключ"
+                else:
+                    status = "valid"  # Пробуем всё равно
+                    error = ""
+
+        entry = {
+            "id": custom_id,
+            "name": name,
+            "model": model_id or name,
+            "api_base": api_base,
+            "api_key": api_key,
+            "litellm_prefix": litellm_prefix,
+            "status": status,
+            "error": error,
+        }
+
+        self.custom_models.append(entry)
+        self._save_keys()
+
+        return {"success": True, "model": entry}
+
+    def remove_custom_model(self, model_id: str) -> bool:
+        before = len(self.custom_models)
+        self.custom_models = [m for m in self.custom_models if m["id"] != model_id]
+        if len(self.custom_models) < before:
+            self._save_keys()
+            return True
+        return False
+
     # ─── Startup Validation ──────────────────────────────────
 
     async def startup_validation(self) -> dict:
@@ -271,6 +513,11 @@ class KeysManager:
             self.providers[provider_id]["status"] = validation["status"]
             results[provider_id] = {"status": validation["status"], "models": config.get("models", [])}
 
+        # Проверяем локальные модели
+        local_results = {}
+        for lm in self.local_models:
+            local_results[lm["id"]] = {"status": "available", "name": lm["name"]}
+
         # GitHub
         if self.github_enabled and self.github_token:
             gh_val = await self.validate_github_token(self.github_token)
@@ -281,18 +528,19 @@ class KeysManager:
             self._save_keys()
 
         self._save_keys()
+        results["local"] = local_results
         return results
 
     # ─── Model Access ────────────────────────────────────────
 
     def get_all_models(self) -> list[dict]:
         """
-        Все доступные модели (платные + бесплатные).
+        Все доступные модели: платные → локальные → OpenRouter(inline key) → бесплатные → кастомные.
         Returns: [{id, name, model, provider, provider_name, type, status}]
         """
         models = []
 
-        # Платные модели из настроенных провайдеров
+        # 1. Платные модели из настроенных провайдеров (с валидными ключами)
         for provider_id, config in self.providers.items():
             provider_def = PROVIDER_DEFS.get(provider_id, {})
             prefix = config.get("litellm_prefix", provider_id)
@@ -312,13 +560,26 @@ class KeysManager:
                     "status": status,
                 })
 
-        # Бесплатные модели
-        for fm in FREE_MODELS:
-            provider_config = self.providers.get(fm["provider"], {})
-            has_key = bool(provider_config.get("api_key"))
-            provider_status = provider_config.get("status", "not_configured")
-            available = has_key and provider_status in ("valid", "rate_limited")
+        # 2. Локальные модели
+        for lm in self.local_models:
+            models.append({
+                "id": lm["id"],
+                "name": lm["name"],
+                "model": lm["model"],
+                "provider": lm.get("provider", "local"),
+                "provider_name": lm.get("provider_name", "Локальная"),
+                "type": "local",
+                "status": "available",
+                "base_url": lm.get("base_url", ""),
+            })
 
+        # 3. Бесплатные модели через OpenRouter
+        openrouter_config = self.providers.get("openrouter", {})
+        has_openrouter_key = bool(openrouter_config.get("api_key"))
+        openrouter_status = openrouter_config.get("status", "not_configured")
+
+        for fm in FREE_MODELS:
+            available = has_openrouter_key and openrouter_status in ("valid", "rate_limited")
             models.append({
                 "id": fm["id"],
                 "name": fm["name"],
@@ -326,7 +587,19 @@ class KeysManager:
                 "provider": fm["provider"],
                 "provider_name": PROVIDER_DEFS.get(fm["provider"], {}).get("name", fm["provider"]),
                 "type": "free",
-                "status": "available" if available else "no_provider",
+                "status": "available" if available else "no_key",
+            })
+
+        # 4. Кастомные модели (force connect)
+        for cm in self.custom_models:
+            models.append({
+                "id": cm["id"],
+                "name": cm["name"],
+                "model": cm["model"],
+                "provider": "custom",
+                "provider_name": "Кастомная",
+                "type": "custom",
+                "status": cm.get("status", "valid"),
             })
 
         return models
@@ -347,6 +620,17 @@ class KeysManager:
                         "api_base": config.get("api_base", ""),
                     }
 
+        # Локальные модели
+        for lm in self.local_models:
+            if lm["id"] == model_id:
+                prefix = lm.get("litellm_prefix", "openai")
+                base_url = lm.get("base_url", "")
+                return {
+                    "model": f"{prefix}/{lm['model']}",
+                    "api_key": "",  # Локальные не нуждаются в ключе
+                    "api_base": base_url,
+                }
+
         # Бесплатные модели
         for fm in FREE_MODELS:
             if fm["id"] == model_id:
@@ -356,6 +640,16 @@ class KeysManager:
                     "model": fm["model"],
                     "api_key": provider_config.get("api_key", ""),
                     "api_base": provider_config.get("api_base", provider_def.get("api_base", "")),
+                }
+
+        # Кастомные модели
+        for cm in self.custom_models:
+            if cm["id"] == model_id:
+                prefix = cm.get("litellm_prefix", "openai")
+                return {
+                    "model": f"{prefix}/{cm['model']}",
+                    "api_key": cm.get("api_key", ""),
+                    "api_base": cm.get("api_base", ""),
                 }
 
         return None

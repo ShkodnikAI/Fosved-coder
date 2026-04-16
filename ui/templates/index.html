@@ -42,9 +42,7 @@
                     <h3>Проекты</h3>
                 </div>
                 <div class="project-list" id="project-list">
-                    <div class="project-item active" data-id="null" onclick="selectProject(null, this)">
-                        <span>💡 Общий контекст</span>
-                    </div>
+                    <div class="project-empty">Нет проектов</div>
                 </div>
             </div>
 
@@ -65,16 +63,21 @@
                 <div id="models-list">
                     <div class="model-item loading">Загрузка...</div>
                 </div>
-            </div>
-
-            <!-- Ideas -->
-            <div class="sidebar-section">
-                <div class="section-header"><h3>Идеи</h3></div>
-                <div class="idea-input-row">
-                    <input type="text" id="idea-input" placeholder="GitHub ссылка..." onkeypress="if(event.key==='Enter')analyzeIdea()" style="flex:1; padding:6px 8px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; font-size:12px;">
-                    <button class="btn-add" onclick="analyzeIdea()">OK</button>
+                <!-- OpenRouter inline key -->
+                <div id="openrouter-inline" style="margin-top:8px; display:none;">
+                    <div style="font-size:10px; text-transform:uppercase; color:var(--blue); letter-spacing:0.5px; margin-bottom:4px; font-weight:600;">OpenRouter ключ</div>
+                    <div style="display:flex; gap:4px;">
+                        <input type="password" id="openrouter-key-input" placeholder="sk-or-..." style="flex:1; padding:5px 8px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; font-size:11px; font-family:monospace; outline:none;">
+                        <button class="btn-small" onclick="saveOpenRouterKey()" style="white-space:nowrap;">Сохранить</button>
+                    </div>
                 </div>
-                <div id="ideas-list"></div>
+                <!-- Local models scan -->
+                <div style="margin-top:8px; display:flex; gap:4px; flex-wrap:wrap;">
+                    <button class="btn-small btn-outline" onclick="scanLocalModels('ollama')" title="Найти модели Ollama">🔍 Ollama</button>
+                    <button class="btn-small btn-outline" onclick="scanLocalModels('lmstudio')" title="Найти модели LM Studio">🔍 LM Studio</button>
+                    <button class="btn-small btn-outline" onclick="showAddLocalModelModal()" title="Добавить вручную">+ Локальная</button>
+                    <button class="btn-small btn-outline" onclick="showAddCustomModelModal()" title="Подключить по URL">+ Кастомная</button>
+                </div>
             </div>
 
             <!-- Bottom buttons -->
@@ -409,7 +412,6 @@
             addMessage("system", "Fosved Coder готов. Выберите модель и начните работу.");
             loadModels();
             loadProjects();
-            loadIdeas();
             // Start heartbeat
             wsHeartbeatInterval = setInterval(() => {
                 if (ws && ws.readyState === WebSocket.OPEN) {
@@ -574,14 +576,21 @@
 
     function renderModels() {
         const list = document.getElementById("models-list");
-        if (!allModels.length) { list.innerHTML = '<div class="model-empty">Нет моделей. Настройте ключи.</div>'; return; }
+        if (!allModels.length) { list.innerHTML = '<div class="model-empty">Нет моделей. Настройте ключи или подключите локальные.</div>'; return; }
 
         const paid = allModels.filter(m => m.type === "paid");
+        const local = allModels.filter(m => m.type === "local");
         const free = allModels.filter(m => m.type === "free" && m.status === "available");
-        const freeDisabled = allModels.filter(m => m.type === "free" && m.status !== "available");
+        const custom = allModels.filter(m => m.type === "custom");
+
+        // Show/hide OpenRouter inline key input
+        const hasOpenRouterKey = allModels.some(m => m.type === 'paid' && m.provider === 'openrouter');
+        const openRouterInline = document.getElementById('openrouter-inline');
+        if (openRouterInline) openRouterInline.style.display = (hasOpenRouterKey || free.length > 0) ? 'block' : 'none';
 
         let html = "";
 
+        // 1. Платные модели
         if (paid.length) {
             html += '<div class="model-section-label">Платные</div>';
             paid.forEach(m => {
@@ -589,7 +598,7 @@
                 const sel = m.id === activeModelId ? ' active' : '';
                 const priorityIdx = priorityModels.indexOf(m.id);
                 const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
-                const statusLabel = {valid:'OK', rate_limited:'LIMIT', invalid:'ERR'}[m.status] || '';
+                const statusLabel = {valid:'OK', rate_limited:'LIMIT'}[m.status] || '';
                 const statusCls = m.status || 'not_configured';
                 html += `<div class="model-item ${cls}${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
                     ${priorityBadge}
@@ -603,6 +612,26 @@
             });
         }
 
+        // 2. Локальные модели
+        if (local.length) {
+            html += '<div class="model-section-label">Локальные</div>';
+            local.forEach(m => {
+                const sel = m.id === activeModelId ? ' active' : '';
+                const priorityIdx = priorityModels.indexOf(m.id);
+                const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
+                html += `<div class="model-item model-local${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
+                    ${priorityBadge}
+                    <span class="model-status-dot local">●</span>
+                    <span class="model-info">
+                        <span class="model-name">${escapeHtml(m.name)}</span>
+                        <span class="model-provider">${escapeHtml(m.provider_name)}</span>
+                    </span>
+                    <span class="model-validation-badge valid">LOCAL</span>
+                </div>`;
+            });
+        }
+
+        // 3. Бесплатные модели
         if (free.length) {
             html += '<div class="model-section-label">Бесплатные</div>';
             free.forEach(m => {
@@ -621,16 +650,20 @@
             });
         }
 
-        if (freeDisabled.length) {
-            html += '<div class="model-section-label">Нужен OpenRouter</div>';
-            freeDisabled.forEach(m => {
-                html += `<div class="model-item model-disabled" title="Нужен API ключ OpenRouter">
-                    <span class="model-status-dot disabled">●</span>
+        // 4. Кастомные модели
+        if (custom.length) {
+            html += '<div class="model-section-label">Кастомные</div>';
+            custom.forEach(m => {
+                const sel = m.id === activeModelId ? ' active' : '';
+                const priorityIdx = priorityModels.indexOf(m.id);
+                const priorityBadge = priorityIdx >= 0 ? `<span class="priority-badge">${priorityIdx + 1}</span>` : '';
+                html += `<div class="model-item model-custom${sel}" data-id="${m.id}" onclick="selectModel('${m.id}')">
+                    ${priorityBadge}
+                    <span class="model-status-dot custom">●</span>
                     <span class="model-info">
                         <span class="model-name">${escapeHtml(m.name)}</span>
-                        <span class="model-provider">${escapeHtml(m.provider_name)}</span>
                     </span>
-                    <span class="model-validation-badge not_configured">NO KEY</span>
+                    <span class="model-validation-badge valid">CUSTOM</span>
                 </div>`;
             });
         }
@@ -908,7 +941,8 @@
             const resp = await fetch("/api/v1/projects");
             allProjects = await resp.json();
             const list = document.getElementById("project-list");
-            list.innerHTML = '<div class="project-item active" data-id="null" onclick="selectProject(null, this)"><span>💡 Общий контекст</span></div>';
+            list.innerHTML = '';
+            if (!allProjects.length) { list.innerHTML = '<div class="model-empty">Нет проектов. Создайте новый.</div>'; }
             allProjects.forEach(p => {
                 const div = document.createElement("div");
                 div.className = "project-item"; div.dataset.id = p.id;
@@ -1006,7 +1040,7 @@
             }
 
             // PowerShell кнопка
-            buttons.push({ label: '⚡ PowerShell', action: "insertCommand('/terminal powershell ')" });
+            buttons.push({ label: '⚡ PowerShell', action: "runTerminalCommand('powershell')" });
         } else {
             // Без проекта — только базовые кнопки
             buttons.push({ label: '🔑 Ключи', action: "showKeysModal()" });
@@ -1034,45 +1068,129 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    // IDEAS
+    // LOCAL MODELS
     // ═══════════════════════════════════════════════════════
-    async function loadIdeas() {
+    async function scanLocalModels(providerKey) {
+        showToast(`Ищем модели ${providerKey}...`, "info");
         try {
-            const resp = await fetch("/api/v1/ideas");
-            const ideas = await resp.json();
-            const list = document.getElementById("ideas-list"); list.innerHTML = "";
-            if (!ideas.length) { list.innerHTML = '<div class="idea-empty">Нет идей. Вставьте ссылку.</div>'; return; }
-            ideas.forEach(i => {
-                const div = document.createElement("div"); div.className = "idea-item";
-                div.innerHTML = `<div class="idea-name" onclick="showIdeaDetail(${i.id})">${escapeHtml(i.name)}</div><div class="idea-summary">${escapeHtml(i.summary).substring(0,80)}...</div><button class="btn-delete" onclick="event.stopPropagation();deleteIdea(${i.id},'${escapeHtml(i.name)}')">✕</button>`;
-                list.appendChild(div);
+            const resp = await fetch("/api/v1/models/local/discover", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({provider_key: providerKey})
             });
-        } catch(e) { console.error("Failed to load ideas:", e); }
+            const data = await resp.json();
+            if (data.success) {
+                showToast(`Найдено: ${data.added} новых моделей (${data.total} всего)`, "success");
+                await loadModels();
+            } else {
+                showToast(data.error || "Сервер недоступен", "error");
+            }
+        } catch(e) { showToast("Ошибка: " + e, "error"); }
     }
 
-    async function analyzeIdea() {
-        const input = document.getElementById("idea-input"); const url = input.value.trim(); if (!url) return;
-        input.value = "";
-        showToast("Анализирую: " + url + "...", "info");
+    function showAddLocalModelModal() {
+        const body = `<div class="keys-section"><h3>Добавить локальную модель</h3>
+            <div class="key-form">
+                <label class="key-label">Провайдер</label>
+                <select id="local-provider" class="key-input" style="padding:8px;">
+                    <option value="ollama">Ollama</option>
+                    <option value="lmstudio">LM Studio</option>
+                    <option value="vllm">vLLM</option>
+                    <option value="llamacpp">llama.cpp</option>
+                    <option value="custom_local">Кастомный</option>
+                </select>
+                <label class="key-label">URL сервера</label>
+                <input type="text" id="local-base-url" class="key-input" placeholder="http://localhost:11434/v1">
+                <label class="key-label">Имя модели</label>
+                <input type="text" id="local-model-name" class="key-input" placeholder="llama3:8b">
+                <label class="key-label">Отображаемое имя (необязательно)</label>
+                <input type="text" id="local-display-name" class="key-input" placeholder="Llama 3 8B">
+                <div class="key-form-actions">
+                    <button class="btn-small btn-outline" onclick="closeGenericModal()">Отмена</button>
+                    <button class="btn-small" onclick="doAddLocalModel()">Добавить</button>
+                </div>
+            </div>
+        </div>`;
+        openGenericModal("Локальная модель", body);
+    }
+
+    async function doAddLocalModel() {
+        const provider = document.getElementById("local-provider").value;
+        const baseUrl = document.getElementById("local-base-url").value.trim();
+        const modelName = document.getElementById("local-model-name").value.trim();
+        const displayName = document.getElementById("local-display-name").value.trim();
+        if (!modelName) { showToast("Введите имя модели", "error"); return; }
         try {
-            const resp = await fetch("/api/v1/ideas", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({repo_url: url}) });
-            if (resp.ok) { const data = await resp.json(); addMessage("idea", data.analysis); await loadIdeas(); showToast("Анализ завершён", "success"); }
-            else { const err = await resp.json(); showToast(`Ошибка: ${err.detail}`, "error"); }
-        } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
+            const resp = await fetch("/api/v1/models/local", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({provider_key: provider, model_name: modelName, base_url: baseUrl, display_name: displayName})
+            });
+            const data = await resp.json();
+            if (data.success) { await loadModels(); closeGenericModal(); showToast("Модель добавлена", "success"); }
+            else { showToast(data.error || "Ошибка", "error"); }
+        } catch(e) { showToast("Ошибка: " + e, "error"); }
     }
 
-    async function showIdeaDetail(id) {
+    function showAddCustomModelModal() {
+        const body = `<div class="keys-section"><h3>Подключить модель по URL</h3>
+            <div class="key-form">
+                <label class="key-label">Название</label>
+                <input type="text" id="custom-name" class="key-input" placeholder="Моя модель">
+                <label class="key-label">API Base URL *</label>
+                <input type="text" id="custom-base-url" class="key-input" placeholder="http://localhost:5000/v1">
+                <label class="key-label">API Key (опционально)</label>
+                <input type="password" id="custom-api-key" class="key-input" placeholder="sk-...">
+                <label class="key-label">Model ID</label>
+                <input type="text" id="custom-model-id" class="key-input" placeholder="gpt-4o">
+                <div class="key-form-actions">
+                    <button class="btn-small btn-outline" onclick="closeGenericModal()">Отмена</button>
+                    <button class="btn-small" onclick="doAddCustomModel()">Подключить</button>
+                </div>
+            </div>
+        </div>`;
+        openGenericModal("Кастомная модель", body);
+    }
+
+    async function doAddCustomModel() {
+        const name = document.getElementById("custom-name").value.trim();
+        const apiBase = document.getElementById("custom-base-url").value.trim();
+        const apiKey = document.getElementById("custom-api-key").value.trim();
+        const modelId = document.getElementById("custom-model-id").value.trim();
+        if (!name || !apiBase) { showToast("Заполните название и URL", "error"); return; }
         try {
-            const resp = await fetch("/api/v1/ideas"); const ideas = await resp.json();
-            const idea = ideas.find(i => i.id === id);
-            if (idea) openGenericModal("Идея: " + idea.name, renderMarkdown(idea.summary));
-        } catch(e) { showToast(`Ошибка: ${e}`, "error"); }
+            const resp = await fetch("/api/v1/models/custom", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({name: name, api_base: apiBase, api_key: apiKey, model_id: modelId})
+            });
+            const data = await resp.json();
+            if (data.success) { await loadModels(); closeGenericModal(); showToast("Модель подключена", "success"); }
+            else { showToast(data.error || "Ошибка", "error"); }
+        } catch(e) { showToast("Ошибка: " + e, "error"); }
     }
 
-    async function deleteIdea(id, name) {
-        if (!confirm(`Удалить "${name}"?`)) return;
-        try { const resp = await fetch(`/api/v1/ideas/${id}`, {method: "DELETE"}); if (resp.ok) { await loadIdeas(); showToast(`"${name}" удалена`, "success"); } }
-        catch(e) { showToast(`Ошибка: ${e}`, "error"); }
+    async function saveOpenRouterKey() {
+        const key = document.getElementById("openrouter-key-input").value.trim();
+        if (!key) { showToast("Введите ключ OpenRouter", "error"); return; }
+        openGenericModal("Проверка...", '<div class="key-validating">Проверяем ключ...</div>');
+        try {
+            const resp = await fetch("/api/v1/keys/add", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({provider: "openrouter", api_key: key})
+            });
+            const data = await resp.json();
+            if (resp.ok) { await loadModels(); closeGenericModal(); showToast("Ключ OpenRouter добавлен", "success"); document.getElementById("openrouter-key-input").value = ""; }
+            else { closeGenericModal(); showToast(data.detail || "Ошибка", "error"); }
+        } catch(e) { closeGenericModal(); showToast("Ошибка: " + e, "error"); }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TERMINAL (real launch)
+    // ═══════════════════════════════════════════════════════
+    function runTerminalCommand(cmd) {
+        wsSend('/terminal ' + cmd);
     }
 
     // ═══════════════════════════════════════════════════════

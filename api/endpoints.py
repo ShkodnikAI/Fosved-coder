@@ -1,6 +1,6 @@
 """
 Fosved Coder v2.0 — REST API Endpoints
-Включает управление ключами, моделями, проектами, идеями, чатом.
+Включает управление ключами, моделями, проектами, локальные модели, кастомные модели.
 Поиск файлов, гит, шаблоны, пакеты, архив.
 """
 from fastapi import APIRouter, HTTPException, Body
@@ -22,7 +22,7 @@ from core.memory import (
     save_routing_stat, get_routing_stats, get_history, save_message,
     save_project_archive, get_all_archives, get_archive,
 )
-from core.keys_manager import keys_manager, PROVIDER_DEFS
+from core.keys_manager import keys_manager, PROVIDER_DEFS, LOCAL_PROVIDERS
 
 router = APIRouter(prefix="/api/v1")
 
@@ -101,6 +101,23 @@ class ArchiveProjectRequest(BaseModel):
     project_id: int
     description: str
 
+class AddLocalModelRequest(BaseModel):
+    provider_key: str  # ollama, lmstudio, vllm, llamacpp, custom_local
+    model_name: str
+    base_url: str = ""
+    display_name: str = ""
+
+class AddCustomModelRequest(BaseModel):
+    name: str
+    api_base: str
+    api_key: str = ""
+    model_id: str = ""
+    litellm_prefix: str = "openai"
+
+class DiscoverLocalModelsRequest(BaseModel):
+    provider_key: str  # ollama, lmstudio, vllm, llamacpp, custom_local
+    base_url: str = ""
+
 
 # ═══════════════════════════════════════════════════════════════
 # KEYS & MODELS
@@ -156,7 +173,7 @@ async def toggle_github(req: ToggleGitHubRequest):
 
 @router.get("/models")
 async def get_all_models():
-    """Список всех доступных моделей (платные + бесплатные)."""
+    """Список всех доступных моделей (платные + локальные + бесплатные + кастомные)."""
     return {"models": keys_manager.get_all_models()}
 
 @router.post("/models/validate/{provider_id}")
@@ -171,6 +188,79 @@ async def revalidate_provider(provider_id: str):
     keys_manager.providers[provider_id]["status"] = result["status"]
     keys_manager._save_keys()
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# LOCAL MODELS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/models/local")
+async def list_local_models():
+    """Список сохранённых локальных моделей."""
+    return {
+        "models": keys_manager.local_models,
+        "providers": LOCAL_PROVIDERS,
+    }
+
+@router.post("/models/local/discover")
+async def discover_local_models(req: DiscoverLocalModelsRequest):
+    """Автообнаружение моделей на локальном сервере (Ollama, LM Studio и т.д.)."""
+    result = await keys_manager.discover_local_models(
+        provider_key=req.provider_key,
+        base_url=req.base_url if req.base_url else None,
+    )
+    return result
+
+@router.post("/models/local")
+async def add_local_model(req: AddLocalModelRequest):
+    """Ручное добавление локальной модели."""
+    result = await keys_manager.add_local_model(
+        provider_key=req.provider_key,
+        model_name=req.model_name,
+        base_url=req.base_url,
+        display_name=req.display_name,
+    )
+    if not result["success"]:
+        raise HTTPException(400, result["error"])
+    return result
+
+@router.delete("/models/local/{model_id}")
+async def remove_local_model(model_id: str):
+    """Удаление локальной модели."""
+    if keys_manager.remove_local_model(model_id):
+        return {"success": True, "model_id": model_id}
+    raise HTTPException(404, f"Локальная модель {model_id} не найдена")
+
+
+# ═══════════════════════════════════════════════════════════════
+# CUSTOM MODELS (force connect)
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/models/custom")
+async def list_custom_models():
+    """Список кастомных (принудительно подключённых) моделей."""
+    return {"models": keys_manager.custom_models}
+
+@router.post("/models/custom")
+async def add_custom_model(req: AddCustomModelRequest):
+    """Принудительное добавление модели по URL (force connect)."""
+    result = await keys_manager.add_custom_model(
+        name=req.name,
+        api_base=req.api_base,
+        api_key=req.api_key,
+        model_id=req.model_id,
+        litellm_prefix=req.litellm_prefix,
+    )
+    if not result["success"]:
+        raise HTTPException(400, result["error"])
+    return result
+
+@router.delete("/models/custom/{model_id}")
+async def remove_custom_model(model_id: str):
+    """Удаление кастомной модели."""
+    if keys_manager.remove_custom_model(model_id):
+        return {"success": True, "model_id": model_id}
+    raise HTTPException(404, f"Кастомная модель {model_id} не найдена")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -765,7 +855,6 @@ def _generate_master_prompt(project_name: str, history: list, file_list: list) -
         "## Описание проекта",
     ]
 
-    # Извлечь важные моменты из истории (первые и последние сообщения)
     user_messages = [m for m in history if m["role"] == "user"]
     ai_messages = [m for m in history if m["role"] == "ai"]
 
