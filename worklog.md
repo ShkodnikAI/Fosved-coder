@@ -215,3 +215,131 @@ Stage Summary:
 - Добавлено 10 новых REST эндпоинтов (5 для threads, 5 для context)
 - Добавлено 2 типа WebSocket сообщений (refactor, ping/pong)
 - Все Python файлы проходят py_compile
+
+---
+Task ID: 4
+Agent: Backend Memory + Compressor Agent
+Task: Реализовать все изменения в core/memory.py и создать core/context_compressor.py
+
+Work Log:
+- Проанализировал текущее состояние core/memory.py и worklog.md
+- Исправлен баг: добавлен `await session.refresh(project)` после `session.flush()` в `create_project()` (строка 128)
+- Исправлен баг: добавлен `await session.refresh(archive)` после `session.flush()` в `save_project_archive()` (строка 543)
+- Добавлена колонка `thread_id: Mapped[int | None]` (nullable, indexed) в модель ChatHistory
+- Добавлена модель ChatThread (5 полей: id, project_id, parent_id, title, created_at) после ChatHistory
+- Добавлена модель ContextSnapshot (13 полей: id, project_id, thread_id, snapshot_type, title, summary, key_decisions, file_changes, errors_fixed, message_count_before, message_count_after, created_at) после ChatThread
+- Обновлена функция `save_message()` — добавлен параметр `thread_id=None`, передаётся в конструктор ChatHistory
+- Обновлена функция `get_history()` — добавлен параметр `thread_id=None`, фильтрация по thread_id если указан
+- Добавлены 6 CRUD-функций для ChatThread: create_thread, get_threads, get_thread, rename_thread, delete_thread, get_thread_messages
+  - delete_thread также удаляет все сообщения с данным thread_id
+- Добавлены 4 CRUD-функции для ContextSnapshot: save_context_snapshot, get_context_snapshots, delete_context_snapshot, delete_old_messages
+  - delete_old_messages: удаляет старые сообщения, оставляя последние N, возвращает количество удалённых
+- Создан файл core/context_compressor.py с классом ContextCompressor:
+  - should_compress() — проверяет порог срабатывания (30 сообщений по умолчанию)
+  - compress() — сжимает старые сообщения, сохраняет слепок в БД, возвращает результат
+  - _extract_key_info() — эвристическое извлечение файлов, ошибок, решений через regex
+  - create_milestone() — ручное создание контрольной точки контекста
+  - get_snapshots() — получение списка слепков
+  - get_stats() — статистика контекста (число сообщений, слепков, порог, процент сжатия)
+- Оба файла прошли py_compile без ошибок
+
+Stage Summary:
+- Изменён 1 файл: core/memory.py (584 строки → 3 новых модели, 2 багфикса, 10 новых функций)
+- Создан 1 новый файл: core/context_compressor.py (120 строк, класс ContextCompressor)
+- Добавлено 3 новых SQLAlchemy модели: ChatThread, ContextSnapshot, thread_id в ChatHistory
+- Добавлено 10 новых CRUD-функций (6 для ChatThread, 4 для ContextSnapshot)
+- Исправлено 2 бага: null id при создании проекта/архива из-за отсутствия session.refresh()
+- Все Python файлы проходят py_compile
+
+---
+Task ID: 6
+Agent: Frontend UI Features Agent
+Task: Implement ALL UI features in ui/templates/index.html and ui/static/style.css
+
+Work Log:
+- Полностью прочитал оба файла (index.html: 1720 строк, style.css: 1189 строк)
+- Реализована полная система тем (CSS custom properties):
+  - `[data-theme="dark"]` — тёмная тема по умолчанию (VS Code-стиль: #1e1e1e фон, #007acc акцент)
+  - `[data-theme="light"]` — светлая тема (#ffffff фон, #0066b8 акцент)
+  - 50+ CSS переменных: --bg-primary/secondary/tertiary, --text-primary/secondary, --accent, --border, --green/amber/red/blue, --shadow, --modal-overlay, --pre-bg, --logo-filter, --msg-*-bg/border, --diff-add/del-bg/text, --toast-*-bg
+  - Хардкоженные цвета заменены на переменные в: body, header, sidebar, chat area, modals, messages, toasts, diff viewer
+- Добавлена кнопка смены темы (header-actions):
+  - `<button class="btn-theme">` с иконками ☀️/🌙
+  - JS: initTheme() (localStorage), toggleTheme(), updateThemeIcon()
+- Реализован drag-and-drop загрузчик файлов:
+  - Drop zone overlay с визуальной обратной связью
+  - Поддержка множественных файлов (multiple), лимит 10
+  - File chips с иконками по типу файла и удалением отдельных файлов
+  - File badge на кнопке 📎
+  - FileReader для чтения содержимого файлов
+  - JS: initFileUpload (IIFE), handleFileSelect, addFiles, removeFile, renderFileChips, formatFileSize
+- Добавлена панель потоков (thread bar):
+  - Кнопки: + Новый, ⑂ Ветка, ☰ Список
+  - Редактируемое название потока
+  - Dropdown-список с удалением
+  - JS: loadThreads, createThread, branchThread, selectThread, selectMainThread, renameThread, deleteThread, toggleThreadDropdown, clearChatUI, appendMessageToUI, updateThreadUI
+- Добавлен просмотрщик diff (inline renderDiff):
+  - parseUnifiedDiff — парсинг в файлы/hunks/строки с номерами строк
+  - renderDiff — рендеринг с цветовым кодированием и нумерацией
+- Добавлена панель контекста:
+  - Модальное окно contextModal
+  - Статистика: сообщения, снепшоты, порог, статус сжатия, %
+  - Кнопки: Сжать, Контрольная точка
+  - Раскрывающиеся снепшоты с деталями
+  - JS: showContextPanel, closeContextModal, toggleSnapshotDetail, compressContext, doCreateMilestone, deleteSnapshot
+- Обновлён sendMessage:
+  - Отправляет thread_id в WebSocket payload
+  - Поддерживает массив attachedFiles с содержимым
+- loadThreads() вызывается при ws.onopen и при смене проекта
+- Добавлены все CSS стили: .btn-theme, .drop-zone, .file-chips, .file-badge, .chip-remove, .diff-view, .thread-bar, .thread-btn, .thread-dropdown, .btn-context, .context-stats, .snapshot-item, .modal-header, .modal-close и др.
+- Верификация: 227 div тегов (открыто=закрыто), 312 CSS фигурных скобок (баланс), 617 JS фигурных скобок (баланс), 104 JS функции, 2176 строк HTML
+
+Stage Summary:
+- Изменены 2 файла: ui/templates/index.html (1720→2176 строк), ui/static/style.css (1189→1447 строк)
+- Реализовано 7 UI-фич: тема, drag-drop файлы, thread bar, diff viewer, context panel, file chips, file badge
+- Все хардкоженные цвета в CSS заменены на CSS переменные для поддержки тем
+- 104 JS функций (включая 20+ новых)
+- HTML и CSS сбалансированы (без синтаксических ошибок)
+
+---
+Task ID: 5
+Agent: Backend Endpoints + Agent + Run Agent
+Task: Update api/endpoints.py, core/agent.py, and run.py with thread/context endpoints, project context injection, auto-compression, and message type handling
+
+Work Log:
+- Добавлен `import fnmatch` в api/endpoints.py (после `import json`)
+- Исправлен баг поиска файлов: убран `.lower()` из `file_pattern` для корректной работы fnmatch
+- Исправлен баг поиска файлов: заменён `file_pattern not in f.lower()` на `fnmatch.fnmatch(f, file_pattern)`
+- Добавлены 5 REST эндпоинтов для THREADS в api/endpoints.py:
+  - POST /threads — создание потока (CreateThreadRequest: project_id, title, parent_thread_id)
+  - GET /projects/{project_id}/threads — список потоков проекта
+  - DELETE /threads/{thread_id} — удаление потока
+  - GET /threads/{thread_id}/messages — сообщения потока
+  - PUT /threads/{thread_id}/rename — переименование потока
+- Добавлены 5 REST эндпоинтов для CONTEXT COMPRESSION в api/endpoints.py:
+  - GET /projects/{project_id}/context — статистика + слепки
+  - POST /projects/{project_id}/context/compress — ручное сжатие
+  - POST /projects/{project_id}/context/milestone — создать контрольную точку
+  - GET /projects/{project_id}/context/snapshots — список слепков
+  - DELETE /projects/{project_id}/context/snapshots/{snapshot_id} — удалить слепок
+- В core/agent.py добавлен импорт `from core.context_compressor import ContextCompressor`
+- SYSTEM_PROMPT_TEMPLATE обновлён: добавлены плейсхолдеры `{project_context}` и `{compressed_context}`
+- В stream_llm_response() обновлён fallback формат: 4 плейсхолдера (repo_map, ideas_context, project_context, compressed_context)
+- В handle_chat_message() добавлена логика project context (description + base_prompt из проекта)
+- В handle_chat_message() добавлено автосжатие: проверка порога через compressor.should_compress(), вызов compress(), уведомление через WebSocket
+- system_prompt в handle_chat_message() обновлён для передачи project_context и compressed_context
+- В run.py обновлён импорт: `from core.agent import handle_chat_message, stream_llm_response`
+- В run.py добавлено извлечение thread_id и msg_type из JSON-payload
+- В run.py добавлена обработка msg_type == "ping" (pong ответ)
+- В run.py добавлена обработка msg_type == "refactor" (РЕФАКТОРИНГ ЗАДАЧА с repo_map)
+- В run.py обновлён save_message(): передаётся thread_id=thread_id
+- Все 3 файла прошли py_compile без ошибок
+
+Stage Summary:
+- Изменены 3 файла: api/endpoints.py (+88 строк), core/agent.py (+28 строк), run.py (+18 строк)
+- Добавлено 10 новых REST эндпоинтов (5 threads, 5 context compression)
+- Исправлен баг fnmatch: glob-паттерны теперь работают корректно
+- Системный промпт ИИ теперь включает описание проекта, инструкции, и сжатый контекст
+- Автосжатие контекста при превышении порога (30 сообщений) с уведомлением пользователя
+- WebSocket поддерживает thread_id для привязки сообщений к потокам
+- WebSocket поддерживает ping/pong и refactor типы сообщений
