@@ -13,6 +13,8 @@ COPY . .
 # Create data directory for SQLite
 RUN mkdir -p /app/data
 
+RUN chmod +x start.sh
+
 EXPOSE 8000
 
-CMD uvicorn run:app --host 0.0.0.0 --port ${PORT:-8000}
+ENTRYPOINT ["./start.sh"]
