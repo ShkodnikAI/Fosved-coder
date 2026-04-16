@@ -158,8 +158,9 @@ async def get_project(project_id: int) -> dict | None:
 async def migrate_db():
     """Add new columns if they don't exist (for upgrades)."""
     import sqlite3
-    from core.config import DB_PATH
-    conn = sqlite3.connect(DB_PATH)
+    db_url = CONFIG["system"]["db_url"]
+    db_file = db_url.split(":///")[-1] if ":///" in db_url else "fosved_coder.db"
+    conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     # Get existing columns
     cursor.execute("PRAGMA table_info(projects)")
