@@ -1589,3 +1589,110 @@ pre:hover .copy-btn { opacity: 1; }
     .input-area { padding: 12px 8px; }
     .slide-panel-right { width: 100%; max-width: 100%; }
 }
+
+/* ═══════════════════════════════════════════════════════
+   RESIZABLE SIDEBAR
+   ═══════════════════════════════════════════════════════ */
+.sidebar {
+    width: 278px; /* 260px + ~1cm (18px) */
+    min-width: 200px;
+    max-width: 500px;
+    resize: horizontal;
+    overflow: auto;
+}
+.sidebar-section {
+    min-height: 0;
+    flex-shrink: 0;
+}
+.sidebar-section[style*="flex:3"] {
+    min-height: 0;
+}
+
+/* ═══════════════════════════════════════════════════════
+   PROJECT MODELS SECTION
+   ═══════════════════════════════════════════════════════ */
+.project-models-section {
+    padding: 8px 15px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+    display: none; /* shown only when project is active */
+}
+.project-models-section.visible {
+    display: block;
+}
+.project-models-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    padding: 4px 0 6px;
+    font-weight: 600;
+}
+.project-model-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    margin: 2px 3px 2px 0;
+    white-space: nowrap;
+}
+.project-model-chip.type-paid {
+    background: rgba(200,169,126,0.15);
+    color: #C8A97E;
+    border: 1px solid rgba(200,169,126,0.3);
+}
+.project-model-chip.type-free {
+    background: rgba(86,156,214,0.15);
+    color: #569cd6;
+    border: 1px solid rgba(86,156,214,0.3);
+}
+.project-model-chip.type-openrouter {
+    background: rgba(160,120,200,0.15);
+    color: #a078c8;
+    border: 1px solid rgba(160,120,200,0.3);
+}
+.project-model-chip.type-local {
+    background: rgba(224,96,112,0.15);
+    color: #e06070;
+    border: 1px solid rgba(224,96,112,0.3);
+}
+.project-model-chip .chip-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.project-model-chip.type-paid .chip-dot { background: #C8A97E; }
+.project-model-chip.type-free .chip-dot { background: #569cd6; }
+.project-model-chip.type-openrouter .chip-dot { background: #a078c8; }
+.project-model-chip.type-local .chip-dot { background: #e06070; }
+
+/* ═══════════════════════════════════════════════════════
+   COLOR LEGEND (bottom of sidebar)
+   ═══════════════════════════════════════════════════════ */
+.color-legend {
+    display: flex;
+    gap: 8px;
+    padding: 4px 15px 6px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+}
+.color-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    color: var(--text-secondary);
+}
+.color-legend-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}

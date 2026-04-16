@@ -86,12 +86,25 @@
                 <button class="add-model-btn" onclick="showAddModelMenu(event)">+ Добавить модель вручную</button>
             </div>
 
+            <!-- Project Models (shown when project is active) -->
+            <div class="project-models-section" id="project-models-section">
+                <div class="project-models-label">Модели проекта</div>
+                <div id="project-models-list"></div>
+            </div>
+
             <!-- Bottom buttons (compact) -->
             <div style="display:flex; gap:4px; padding:8px 15px; border-top:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0;">
                 <button class="btn-add" onclick="scanLocalModels('ollama')" title="Ollama" style="flex:1; font-size:11px; padding:4px 6px;">🔍 Ollama</button>
                 <button class="btn-add" onclick="scanLocalModels('lmstudio')" title="LM Studio" style="flex:1; font-size:11px; padding:4px 6px;">🔍 LM</button>
                 <button class="btn-add" onclick="showKeysModal()" style="flex:1; font-size:11px; padding:4px 6px;">🔑</button>
                 <button class="btn-add" onclick="showStats()" style="flex:1; font-size:11px; padding:4px 6px;">📊</button>
+            </div>
+            <!-- Color Legend -->
+            <div class="color-legend" id="color-legend">
+                <div class="color-legend-item"><span class="color-legend-dot" style="background:#C8A97E;"></span>Платные</div>
+                <div class="color-legend-item"><span class="color-legend-dot" style="background:#569cd6;"></span>Бесплатные</div>
+                <div class="color-legend-item"><span class="color-legend-dot" style="background:#a078c8;"></span>OpenRouter</div>
+                <div class="color-legend-item"><span class="color-legend-dot" style="background:#e06070;"></span>Локальные</div>
             </div>
         </div>
 
@@ -916,6 +929,7 @@
 
         renderModels();
         renderPriorityBar();
+        renderProjectModels();
     }
 
     // ═══════════════════════════════════════════════════════
@@ -1124,6 +1138,7 @@
         }
 
         renderBottomBar();
+        renderProjectModels();
         addMessage("system", "Контекст: " + name);
     }
 
@@ -1157,6 +1172,8 @@
 
         if (p) {
             // Кнопки только для активного проекта
+            buttons.push({ label: '🖥 Сервер', action: "insertCommand('/terminal ')" });
+            buttons.push({ label: '🌐 Сайт', action: "openProjectSite()" });
             buttons.push({ label: '📥 Pull', action: "insertCommand('/git_pull')" });
             buttons.push({ label: '📤 Push', action: "insertCommand('/git_push')" });
             buttons.push({ label: '🔍 Search', action: "togglePanel('search')" });
@@ -1177,6 +1194,56 @@
 
     // Инициализация нижней панели
     setTimeout(renderBottomBar, 500);
+
+    // Open project site (local dev server or configured URL)
+    function openProjectSite() {
+        const p = currentProjectId ? allProjects.find(x => x.id === currentProjectId) : null;
+        if (p && p.local_path) {
+            // Try to detect a local dev server URL from the project path
+            const commonPorts = [3000, 8000, 8080, 5000, 5173, 4173, 4200, 443, 80];
+            const defaultPort = 8000; // Python/FastAPI default
+            const url = 'http://localhost:' + defaultPort;
+            window.open(url, '_blank');
+            showToast('Открываем ' + url, 'info');
+        } else {
+            showToast('У проекта не указан локальный путь', 'error');
+        }
+    }
+
+    // Render models working on the current project
+    function renderProjectModels() {
+        const section = document.getElementById('project-models-section');
+        const container = document.getElementById('project-models-list');
+        if (!section || !container) return;
+
+        if (!currentProjectId || !priorityModels.length) {
+            section.classList.remove('visible');
+            return;
+        }
+
+        section.classList.add('visible');
+        let html = '';
+        priorityModels.forEach(mid => {
+            const m = allModels.find(x => x.id === mid);
+            if (!m) return;
+
+            // Determine chip type for color coding
+            let chipType = 'type-paid';
+            if (m.type === 'free') {
+                chipType = 'type-free';
+            } else if (m.type === 'local') {
+                chipType = 'type-local';
+            } else if (m.provider === 'openrouter') {
+                chipType = 'type-openrouter';
+            }
+
+            html += '<span class="project-model-chip ' + chipType + '">' +
+                '<span class="chip-dot"></span>' +
+                escapeHtml(m.name) + '</span>';
+        });
+
+        container.innerHTML = html || '<span style="font-size:11px;color:var(--text-secondary);">Модели не назначены</span>';
+    }
 
     async function deleteProject(id, name) {
         if (!confirm(`Удалить "${name}"?`)) return;

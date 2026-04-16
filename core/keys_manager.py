@@ -248,8 +248,16 @@ class KeysManager:
 
         validation = await self.validate_key(provider_id, api_key, test_model, api_base)
 
-        if validation["status"] == "invalid" and "Неверный" in validation["error"]:
-            return {"success": False, "status": "invalid", "error": validation["error"], "provider": provider_id}
+        if validation["status"] == "invalid"]:
+            # Only fail on clear authentication errors, not connectivity issues
+            err_lower = validation.get("error", "").lower()
+            if "не удалось подключиться" in err_lower or "connection" in err_lower or "timeout" in err_lower:
+                # Connection issue — save key anyway and mark as rate_limited for retry
+                validation["status"] = "rate_limited"
+                validation["error"] = "Ошибка подключения — ключ сохранён, проверьте позже"
+            elif "Неверный" in validation["error"] or "unauthorized" in validation["error"] or "401" in validation["error"]:
+                return {"success": False, "status": "invalid", "error": validation["error"], "provider": provider_id}
+            # For other errors (404, model not found, etc.), save key anyway
 
         # Сохраняем ключ (даже если rate_limited — всё равно полезен)
         self.providers[provider_id] = {
@@ -545,9 +553,6 @@ class KeysManager:
             provider_def = PROVIDER_DEFS.get(provider_id, {})
             prefix = config.get("litellm_prefix", provider_id)
             status = config.get("status", "not_configured")
-
-            if status == "invalid":
-                continue  # Скрываем невалидные
 
             for model_name in config.get("models", []):
                 models.append({
