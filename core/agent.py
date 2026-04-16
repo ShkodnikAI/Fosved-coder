@@ -2,6 +2,7 @@ import litellm
 import json
 from core.memory import CONFIG, save_message, get_history, get_project
 from core.keys_manager import keys_manager
+from core.context_compressor import ContextCompressor
 
 litellm.suppress_debug_info = True
 
@@ -11,6 +12,10 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 {repo_map}
 
 {ideas_context}
+
+{project_context}
+
+{compressed_context}
 
 Правила:
 - Отвечай на том языке, на котором задан вопрос
@@ -24,7 +29,7 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
     if model is None:
         model = CONFIG["llm"].get("default_model")
     if system_prompt is None:
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="")
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="", project_context="", compressed_context="")
 
     # Resolve model config from keys_manager if model_id is provided
     api_key = CONFIG["llm"].get("api_key", "")
@@ -141,13 +146,41 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     """Main entry point: get history, add repo_map context, stream response with fallback."""
     history = await get_history(project_id)
 
+    # Project context (description + base_prompt)
+    project_context_text = ""
+    if project_id:
+        project = await get_project(project_id)
+        if project:
+            if project.get("description"):
+                project_context_text += f"О ПРОЕКТЕ: {project['description']}\n"
+            if project.get("base_prompt"):
+                project_context_text += f"ИНСТРУКЦИИ: {project['base_prompt']}\n"
+
+    # Auto-compression check
+    compressed_context_text = ""
+    if project_id:
+        try:
+            compressor = ContextCompressor()
+            if await compressor.should_compress(project_id):
+                compress_result = await compressor.compress(project_id)
+                if compress_result.get("compressed"):
+                    compressed_context_text = f"[Контекст сжат: {compress_result['messages_removed']} сообщений удалено, {compress_result['messages_kept']} оставлено]"
+                    await websocket.send_json({
+                        "type": "info",
+                        "content": f"Автосжатие: {compress_result['messages_removed']} старых сообщений архивировано"
+                    })
+        except Exception:
+            pass
+
     repo_map_text = ""
     if repo_map:
         repo_map_text = f"СТРУКТУРА ПРОЕКТА (Repo Map):\n{repo_map}"
 
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         repo_map=repo_map_text,
-        ideas_context=""
+        ideas_context="",
+        project_context=project_context_text,
+        compressed_context=compressed_context_text,
     )
 
     await save_message(project_id, "user", prompt)

@@ -41,9 +41,33 @@ class ChatHistory(Base):
     __tablename__ = "chat_history"
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     project_id: Mapped[int | None] = mapped_column(nullable=True)
+    thread_id: Mapped[int | None] = mapped_column(nullable=True, index=True, default=None)
     role: Mapped[str]
     content: Mapped[str] = mapped_column(Text)
     timestamp: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+class ChatThread(Base):
+    __tablename__ = "chat_threads"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(index=True)
+    parent_id: Mapped[int | None] = mapped_column(nullable=True, default=None)
+    title: Mapped[str] = mapped_column(default="Новый поток")
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+class ContextSnapshot(Base):
+    __tablename__ = "context_snapshots"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(index=True)
+    thread_id: Mapped[int | None] = mapped_column(nullable=True, default=None)
+    snapshot_type: Mapped[str] = mapped_column(default="auto")
+    title: Mapped[str] = mapped_column(default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    key_decisions: Mapped[str] = mapped_column(Text, default="")
+    file_changes: Mapped[str] = mapped_column(Text, default="")
+    errors_fixed: Mapped[str] = mapped_column(Text, default="")
+    message_count_before: Mapped[int] = mapped_column(default=0)
+    message_count_after: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 class RepoMap(Base):
     __tablename__ = "repo_maps"
@@ -100,7 +124,8 @@ async def create_project(name: str, path: str) -> dict:
                 return None
             project = Project(name=name, path=path)
             session.add(project)
-            session.flush()
+            await session.flush()
+            await session.refresh(project)
             os.makedirs(path, exist_ok=True)
             return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "progress": project.progress, "created_at": str(project.created_at)}
 
@@ -237,18 +262,20 @@ async def delete_idea(idea_id: int) -> bool:
 # CHAT HISTORY CRUD
 # ═══════════════════════════════════════════════════════════════
 
-async def save_message(project_id: int | None, role: str, content: str):
+async def save_message(project_id: int | None, role: str, content: str, thread_id: int | None = None):
     """Save a chat message."""
     async with async_session() as session:
         async with session.begin():
-            session.add(ChatHistory(project_id=project_id, role=role, content=content))
+            session.add(ChatHistory(project_id=project_id, role=role, content=content, thread_id=thread_id))
 
-async def get_history(project_id: int | None, limit: int = 50) -> list[dict]:
-    """Get chat history for a project."""
+async def get_history(project_id: int | None, limit: int = 50, thread_id: int | None = None) -> list[dict]:
+    """Get chat history for a project, optionally filtered by thread_id."""
     async with async_session() as session:
+        query = select(ChatHistory).where(ChatHistory.project_id == project_id)
+        if thread_id is not None:
+            query = query.where(ChatHistory.thread_id == thread_id)
         result = await session.execute(
-            select(ChatHistory).where(ChatHistory.project_id == project_id)
-            .order_by(ChatHistory.timestamp.asc()).limit(limit)
+            query.order_by(ChatHistory.timestamp.asc()).limit(limit)
         )
         return [{"role": m.role, "content": m.content} for m in result.scalars().all()]
 
@@ -267,6 +294,177 @@ async def get_message_count(project_id: int | None) -> int:
             select(func.count(ChatHistory.id)).where(ChatHistory.project_id == project_id)
         )
         return result.scalar() or 0
+
+# ═══════════════════════════════════════════════════════════════
+# CHAT THREADS CRUD
+# ═══════════════════════════════════════════════════════════════
+
+async def create_thread(project_id: int, title: str = "Новый поток", parent_id: int | None = None) -> dict:
+    """Create a new chat thread."""
+    async with async_session() as session:
+        async with session.begin():
+            thread = ChatThread(project_id=project_id, title=title, parent_id=parent_id)
+            session.add(thread)
+            await session.flush()
+            await session.refresh(thread)
+            return {"id": thread.id, "project_id": thread.project_id, "parent_id": thread.parent_id, "title": thread.title, "created_at": str(thread.created_at)}
+
+async def get_threads(project_id: int) -> list[dict]:
+    """Get all threads for a project."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChatThread).where(ChatThread.project_id == project_id)
+            .order_by(ChatThread.created_at.desc())
+        )
+        return [
+            {"id": t.id, "project_id": t.project_id, "parent_id": t.parent_id, "title": t.title, "created_at": str(t.created_at)}
+            for t in result.scalars().all()
+        ]
+
+async def get_thread(thread_id: int) -> dict | None:
+    """Get a single thread by ID."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChatThread).where(ChatThread.id == thread_id)
+        )
+        t = result.scalar_one_or_none()
+        if t:
+            return {"id": t.id, "project_id": t.project_id, "parent_id": t.parent_id, "title": t.title, "created_at": str(t.created_at)}
+        return None
+
+async def rename_thread(thread_id: int, title: str) -> bool:
+    """Rename a thread."""
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(ChatThread).where(ChatThread.id == thread_id)
+            )
+            thread = result.scalar_one_or_none()
+            if thread:
+                thread.title = title
+                return True
+            return False
+
+async def delete_thread(thread_id: int) -> bool:
+    """Delete a thread and all its messages."""
+    async with async_session() as session:
+        async with session.begin():
+            # Удаляем все сообщения с этим thread_id
+            await session.execute(
+                delete(ChatHistory).where(ChatHistory.thread_id == thread_id)
+            )
+            # Удаляем сам поток
+            result = await session.execute(
+                select(ChatThread).where(ChatThread.id == thread_id)
+            )
+            thread = result.scalar_one_or_none()
+            if thread:
+                await session.delete(thread)
+                return True
+            return False
+
+async def get_thread_messages(thread_id: int, limit: int = 50) -> list[dict]:
+    """Get messages for a specific thread."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChatHistory).where(ChatHistory.thread_id == thread_id)
+            .order_by(ChatHistory.timestamp.asc()).limit(limit)
+        )
+        return [{"role": m.role, "content": m.content, "timestamp": str(m.timestamp)} for m in result.scalars().all()]
+
+# ═══════════════════════════════════════════════════════════════
+# CONTEXT SNAPSHOTS CRUD
+# ═══════════════════════════════════════════════════════════════
+
+async def save_context_snapshot(
+    project_id: int, thread_id: int | None, snapshot_type: str,
+    title: str, summary: str, key_decisions: str,
+    file_changes: str, errors_fixed: str,
+    message_count_before: int, message_count_after: int
+) -> dict:
+    """Save a context snapshot."""
+    async with async_session() as session:
+        async with session.begin():
+            snapshot = ContextSnapshot(
+                project_id=project_id, thread_id=thread_id,
+                snapshot_type=snapshot_type, title=title,
+                summary=summary, key_decisions=key_decisions,
+                file_changes=file_changes, errors_fixed=errors_fixed,
+                message_count_before=message_count_before,
+                message_count_after=message_count_after,
+            )
+            session.add(snapshot)
+            await session.flush()
+            await session.refresh(snapshot)
+            return {
+                "id": snapshot.id, "project_id": snapshot.project_id,
+                "thread_id": snapshot.thread_id, "snapshot_type": snapshot.snapshot_type,
+                "title": snapshot.title, "summary": snapshot.summary,
+                "key_decisions": snapshot.key_decisions,
+                "file_changes": snapshot.file_changes,
+                "errors_fixed": snapshot.errors_fixed,
+                "message_count_before": snapshot.message_count_before,
+                "message_count_after": snapshot.message_count_after,
+                "created_at": str(snapshot.created_at),
+            }
+
+async def get_context_snapshots(project_id: int, thread_id: int | None = None) -> list[dict]:
+    """Get context snapshots for a project, optionally filtered by thread."""
+    async with async_session() as session:
+        query = select(ContextSnapshot).where(ContextSnapshot.project_id == project_id)
+        if thread_id is not None:
+            query = query.where(ContextSnapshot.thread_id == thread_id)
+        query = query.order_by(ContextSnapshot.created_at.desc())
+        result = await session.execute(query)
+        return [
+            {
+                "id": s.id, "project_id": s.project_id, "thread_id": s.thread_id,
+                "snapshot_type": s.snapshot_type, "title": s.title,
+                "summary": s.summary, "key_decisions": s.key_decisions,
+                "file_changes": s.file_changes, "errors_fixed": s.errors_fixed,
+                "message_count_before": s.message_count_before,
+                "message_count_after": s.message_count_after,
+                "created_at": str(s.created_at),
+            }
+            for s in result.scalars().all()
+        ]
+
+async def delete_context_snapshot(snapshot_id: int) -> bool:
+    """Delete a context snapshot."""
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(ContextSnapshot).where(ContextSnapshot.id == snapshot_id)
+            )
+            snapshot = result.scalar_one_or_none()
+            if snapshot:
+                await session.delete(snapshot)
+                return True
+            return False
+
+async def delete_old_messages(project_id: int, keep_last: int = 10, thread_id: int | None = None) -> int:
+    """Удалить старые сообщения, оставив последние N. Возвращает количество удалённых."""
+    async with async_session() as session:
+        async with session.begin():
+            # Получаем ID последних keep_last сообщений
+            query = select(ChatHistory.id).where(ChatHistory.project_id == project_id)
+            if thread_id is not None:
+                query = query.where(ChatHistory.thread_id == thread_id)
+            query = query.order_by(ChatHistory.timestamp.desc()).limit(keep_last)
+            result = await session.execute(query)
+            keep_ids = [row[0] for row in result.all()]
+
+            if not keep_ids:
+                return 0
+
+            # Удаляем все сообщения кроме последних
+            del_query = delete(ChatHistory).where(ChatHistory.project_id == project_id)
+            if thread_id is not None:
+                del_query = del_query.where(ChatHistory.thread_id == thread_id)
+            if keep_ids:
+                del_query = del_query.where(ChatHistory.id.notin_(keep_ids))
+            result = await session.execute(del_query)
+            return result.rowcount
 
 # ═══════════════════════════════════════════════════════════════
 # REPO MAP CACHE
@@ -342,7 +540,8 @@ async def save_project_archive(
                 file_list=file_list, file_count=file_count, archive_path=archive_path,
             )
             session.add(archive)
-            session.flush()
+            await session.flush()
+            await session.refresh(archive)
             return {
                 "id": archive.id, "project_id": project_id,
                 "project_name": project_name, "description": description,

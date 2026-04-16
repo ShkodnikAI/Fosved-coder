@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
+import fnmatch
 import os
 import subprocess
 import shutil
@@ -304,7 +305,7 @@ async def search_files(req: SearchFilesRequest):
         return {"results": [], "query": req.query, "total": 0}
 
     query = req.query.lower()
-    file_pattern = req.file_pattern.lower() if req.file_pattern else ""
+    file_pattern = req.file_pattern if req.file_pattern else ""
     results = []
     skip_dirs = {'.git', '__pycache__', 'node_modules', '.next', 'venv', '.venv', '.idea', '.vscode', 'dist', 'build', '.cache'}
     skip_exts = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'}
@@ -315,7 +316,7 @@ async def search_files(req: SearchFilesRequest):
         for f in files:
             if any(f.endswith(ext) for ext in skip_exts):
                 continue
-            if file_pattern and file_pattern not in f.lower():
+            if file_pattern and not fnmatch.fnmatch(f, file_pattern):
                 continue
 
             full_path = os.path.join(root, f)
@@ -847,3 +848,90 @@ async def get_config():
             "api_key": CONFIG["llm"].get("api_key", "")[:12] + "..." if CONFIG["llm"].get("api_key") else "not set",
         }
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# THREADS
+# ═══════════════════════════════════════════════════════════════
+
+class CreateThreadRequest(BaseModel):
+    project_id: int
+    title: str = "Новый поток"
+    parent_thread_id: int | None = None
+
+class RenameThreadRequest(BaseModel):
+    title: str
+
+@router.post("/threads")
+async def create_thread_endpoint(req: CreateThreadRequest):
+    from core.memory import create_thread
+    result = await create_thread(req.project_id, req.title, req.parent_thread_id)
+    return result
+
+@router.get("/projects/{project_id}/threads")
+async def list_threads(project_id: int):
+    from core.memory import get_threads
+    return await get_threads(project_id)
+
+@router.delete("/threads/{thread_id}")
+async def delete_thread_endpoint(thread_id: int):
+    from core.memory import delete_thread
+    if await delete_thread(thread_id):
+        return {"success": True}
+    raise HTTPException(404, "Поток не найден")
+
+@router.get("/threads/{thread_id}/messages")
+async def get_thread_messages_endpoint(thread_id: int):
+    from core.memory import get_thread_messages
+    messages = await get_thread_messages(thread_id)
+    return {"messages": messages}
+
+@router.put("/threads/{thread_id}/rename")
+async def rename_thread_endpoint(thread_id: int, req: RenameThreadRequest):
+    from core.memory import rename_thread
+    if await rename_thread(thread_id, req.title):
+        return {"success": True, "title": req.title}
+    raise HTTPException(404, "Поток не найден")
+
+
+# ═══════════════════════════════════════════════════════════════
+# CONTEXT COMPRESSION
+# ═══════════════════════════════════════════════════════════════
+
+class MilestoneRequest(BaseModel):
+    project_id: int
+    title: str
+
+@router.get("/projects/{project_id}/context")
+async def get_context_info(project_id: int):
+    from core.context_compressor import ContextCompressor
+    compressor = ContextCompressor()
+    stats = await compressor.get_stats(project_id)
+    snapshots = await compressor.get_snapshots(project_id)
+    return {"stats": stats, "snapshots": snapshots}
+
+@router.post("/projects/{project_id}/context/compress")
+async def compress_context(project_id: int):
+    from core.context_compressor import ContextCompressor
+    compressor = ContextCompressor()
+    result = await compressor.compress(project_id)
+    return result
+
+@router.post("/projects/{project_id}/context/milestone")
+async def create_milestone(req: MilestoneRequest):
+    from core.context_compressor import ContextCompressor
+    compressor = ContextCompressor()
+    result = await compressor.create_milestone(req.project_id, req.title)
+    return result
+
+@router.get("/projects/{project_id}/context/snapshots")
+async def list_snapshots(project_id: int):
+    from core.memory import get_context_snapshots
+    return await get_context_snapshots(project_id)
+
+@router.delete("/projects/{project_id}/context/snapshots/{snapshot_id}")
+async def delete_snapshot_endpoint(project_id: int, snapshot_id: int):
+    from core.memory import delete_context_snapshot
+    if await delete_context_snapshot(snapshot_id):
+        return {"success": True}
+    raise HTTPException(404, "Снепшот не найден")
