@@ -343,3 +343,25 @@ Stage Summary:
 - Автосжатие контекста при превышении порога (30 сообщений) с уведомлением пользователя
 - WebSocket поддерживает thread_id для привязки сообщений к потокам
 - WebSocket поддерживает ping/pong и refactor типы сообщений
+
+---
+Task ID: 2
+Agent: main
+Task: Добавление поддержки локальных моделей, кастомных моделей, z.ai, переработка UI
+
+Work Log:
+- Клонировал репозиторий, изучил текущее состояние всех файлов
+- Полностью переписал core/keys_manager.py: добавлены LOCAL_PROVIDERS (Ollama, LM Studio, vLLM, llama.cpp), кастомные модели (force connect), z.ai провайдер, исправлена валидация (404, timeout, connection errors)
+- Обновил api/endpoints.py: 6 новых эндпоинтов (GET/POST /models/local, POST /models/local/discover, GET/POST /models/custom, DELETE /models/local/{id}, DELETE /models/custom/{id})
+- Переделал ui/templates/index.html: убрана панель "Идеи", убран "Общий контекст" из проектов, новая иерархия моделей (платные→локальные→бесплатные→кастомные), inline поле ключа OpenRouter, кнопки сканирования Ollama/LM Studio, модальные окна добавления локальных/кастомных моделей, PowerShell теперь реально запускается через /terminal
+- Обновил ui/static/style.css: новые цвета точек для локальных (#e06070) и кастомных (#c080d0) моделей
+- Запушен commit 2f64869 в GitHub
+
+Stage Summary:
+- Полная переработка архитектуры моделей
+- Поддержка локальных AI-серверов (Ollama, LM Studio, vLLM, llama.cpp)
+- Принудительное подключение любой модели по URL (force connect)
+- z.ai добавлен как провайдер
+- Убраны ненужные панели из UI
+- PowerShell кнопка теперь работает
+- Коммит успешно запушен
