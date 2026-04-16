@@ -57,10 +57,10 @@ header {
 }
 .logo { position: absolute; left: 20px; }
 .logo img { height: 32px; filter: var(--logo-filter); }
-.header-left { display: flex; align-items: center; gap: 10px; margin-left: 60px; flex: 1; min-width: 0; overflow: hidden; }
-.header-left .btn-add { flex-shrink: 0; }
-.header-title { font-size: 18px; font-weight: 600; letter-spacing: 1px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.header-actions { flex-shrink: 0; display: flex; gap: 6px; }
+.header-center { display: flex; align-items: center; gap: 10px; position: absolute; left: 50%; transform: translateX(-50%); }
+.header-center .btn-add { flex-shrink: 0; }
+.header-title { font-size: 18px; font-weight: 600; letter-spacing: 2px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.header-actions { position: absolute; right: 20px; flex-shrink: 0; display: flex; gap: 6px; }
 
 /* ─── MAIN LAYOUT ─── */
 .main-container { display: flex; flex: 1; overflow: hidden; }
@@ -246,7 +246,7 @@ header {
     padding: 10px;
     margin-bottom: 6px;
 }
-.or-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.or-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; width: 100%; }
 .or-logo {
     width: 26px; height: 26px; background: var(--accent); border-radius: 6px;
     display: flex; align-items: center; justify-content: center;

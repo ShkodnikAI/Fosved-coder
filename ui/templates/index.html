@@ -17,8 +17,7 @@
     <!-- HEADER -->
     <header>
         <div class="logo"><img src="https://z-cdn-media.chatglm.cn/files/aad38a03-a896-4e99-96a9-69372b91084b.jpg?auth_key=1876148891-a0e5423e9d3d49c8ac35cbcf3dc1fc64-0-9dd38e9bbc11d8836da531dcd7230db3" alt="Logo"></div>
-        <div class="header-left">
-            <button class="btn-add" onclick="openProjectModal()" title="Новый проект" style="margin-right:10px; padding:4px 14px;">+ Новый проект</button>
+        <div class="header-center">
             <div class="header-title" id="current-project-name">FOSVED CODER</div>
             <div class="progress-bar-mini" id="header-progress" style="display:none">
                 <div class="progress-fill" id="header-progress-fill"></div>
@@ -62,23 +61,24 @@
                 </div>
                 <!-- Priority Models Bar -->
                 <div id="priority-bar" style="display:none; margin-bottom:8px;">
-                    <div class="model-section-label" style="color:var(--amber);">⚡ ПРИОРИТЕТНЫЕ</div>
+                    <div class="model-section-label" style="color:var(--amber);">ПРИОРИТЕТНЫЕ</div>
                     <div id="priority-models-bar" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
                 </div>
                 <div id="models-list" style="flex:1; overflow-y:auto; margin-right:-4px; padding-right:4px;">
                     <div class="model-card loading">Загрузка...</div>
                 </div>
-                <!-- OpenRouter styled block -->
-                <div id="openrouter-inline" class="openrouter-block" style="margin-top:8px; display:none;">
+                <!-- OpenRouter inline key (always visible) -->
+                <div id="openrouter-inline" class="openrouter-block" style="margin-top:8px;">
                     <div class="or-header">
                         <div class="or-logo">OR</div>
-                        <div>
+                        <div style="flex:1;min-width:0;">
                             <div class="or-title">OpenRouter</div>
-                            <div class="or-sub">Мульти-маршрутизация моделей</div>
+                            <div class="or-sub" id="or-status-text">Введите ключ для доступа к бесплатным моделям</div>
                         </div>
+                        <span class="model-status-badge badge-none" id="or-key-badge" style="display:none;">—</span>
                     </div>
                     <div class="or-input-row">
-                        <input type="password" id="openrouter-key-input" class="or-input" placeholder="sk-or-...">
+                        <input type="password" id="openrouter-key-input" class="or-input" placeholder="sk-or-v1-...">
                         <button class="btn-small" onclick="saveOpenRouterKey()" style="white-space:nowrap; flex-shrink:0;">Сохранить</button>
                     </div>
                 </div>
@@ -104,9 +104,13 @@
                 <div class="input-wrapper">
                     <textarea id="user-input" placeholder="Опишите задачу для ИИ..." rows="1" onkeydown="handleKeyDown(event)"></textarea>
                     <div class="input-actions">
-                        <label class="file-label">📎 Прикрепить файл
-                            <input type="file" id="file-input" style="display:none" onchange="handleFile(event)">
-                        </label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label class="file-label">📎 Прикрепить файл
+                                <input type="file" id="file-input" style="display:none" onchange="handleFile(event)">
+                            </label>
+                            <span id="file-preview" style="display:none;font-size:12px;color:var(--green);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                            <button id="file-remove" onclick="removeAttachedFile()" style="display:none;background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:0 4px;" title="Убрать файл">✕</button>
+                        </div>
                         <button class="btn-send" onclick="sendMessage()">Отправить ➤</button>
                     </div>
                 </div>
@@ -546,6 +550,11 @@
         input.value = ""; attachedFile = null;
         document.getElementById("file-input").value = "";
         input.style.height = "auto";
+        // Clear file preview
+        const fp = document.getElementById("file-preview");
+        const fr = document.getElementById("file-remove");
+        if (fp) fp.style.display = "none";
+        if (fr) fr.style.display = "none";
     }
 
     function handleKeyDown(e) {
@@ -563,8 +572,25 @@
         try {
             const res = await fetch("/upload", { method: "POST", body: formData });
             attachedFile = await res.json();
+            // Show file preview
+            const preview = document.getElementById("file-preview");
+            const removeBtn = document.getElementById("file-remove");
+            if (preview && attachedFile) {
+                const sizeStr = attachedFile.size ? ` (${Math.round(attachedFile.size / 1024)}KB)` : '';
+                preview.textContent = "📎 " + attachedFile.filename + sizeStr;
+                preview.style.display = "inline";
+                removeBtn.style.display = "inline";
+            }
             showToast("Файл готов: " + attachedFile.filename, "success");
         } catch(e) { showToast("Ошибка загрузки файла", "error"); }
+    }
+
+    function removeAttachedFile() {
+        attachedFile = null;
+        document.getElementById("file-input").value = "";
+        document.getElementById("file-preview").style.display = "none";
+        document.getElementById("file-remove").style.display = "none";
+        showToast("Файл убран", "info");
     }
 
     // ═══════════════════════════════════════════════════════
@@ -659,40 +685,76 @@
         const list = document.getElementById("models-list");
         if (!allModels.length) { list.innerHTML = '<div class="model-empty">Нет моделей. Настройте ключи или подключите локальные.</div>'; return; }
 
-        const paid = allModels.filter(m => m.type === "paid");
+        // 1. Платные и прошедшие валидацию
+        const paidValid = allModels.filter(m => m.type === "paid" && (m.status === 'valid' || m.status === 'rate_limited'));
+        const paidInvalid = allModels.filter(m => m.type === "paid" && m.status !== 'valid' && m.status !== 'rate_limited');
+
+        // 2. Модели через OpenRouter (paid + provider=openrouter OR free models)
+        const openrouterPaid = allModels.filter(m => m.type === 'paid' && m.provider === 'openrouter');
+        const freeModels = allModels.filter(m => m.type === "free");
+
+        // 3. Локальные и кастомные
         const local = allModels.filter(m => m.type === "local");
-        const free = allModels.filter(m => m.type === "free" && m.status === "available");
         const custom = allModels.filter(m => m.type === "custom");
 
-        // Show/hide OpenRouter inline key input
-        const hasOpenRouterKey = allModels.some(m => m.type === 'paid' && m.provider === 'openrouter');
-        const openRouterInline = document.getElementById('openrouter-inline');
-        if (openRouterInline) openRouterInline.style.display = (hasOpenRouterKey || free.length > 0) ? 'block' : 'none';
+        // Update OpenRouter status
+        const orStatusText = document.getElementById('or-status-text');
+        const orKeyBadge = document.getElementById('or-key-badge');
+        const hasORKey = allModels.some(m => (m.type === 'paid' && m.provider === 'openrouter') && (m.status === 'valid' || m.status === 'rate_limited'));
+        if (orStatusText) {
+            if (hasORKey) {
+                orStatusText.textContent = 'Подключён — доступны бесплатные модели';
+                orStatusText.style.color = 'var(--green)';
+            } else {
+                orStatusText.textContent = 'Введите ключ для доступа к бесплатным моделям';
+                orStatusText.style.color = 'var(--text-secondary)';
+            }
+        }
+        if (orKeyBadge) {
+            orKeyBadge.style.display = 'inline';
+            if (hasORKey) { orKeyBadge.className = 'model-status-badge badge-ok'; orKeyBadge.textContent = 'OK'; }
+            else { orKeyBadge.className = 'model-status-badge badge-none'; orKeyBadge.textContent = '—'; }
+        }
 
         let html = "";
 
-        // 1. Платные модели
-        if (paid.length) {
-            html += '<div class="model-section-label">ПЛАТНЫЕ</div>';
-            paid.forEach(m => { html += buildModelCard(m, 'paid'); });
+        // ═══ 1. ПЛАТНЫЕ И ПРОШЕДШИЕ ВАЛИДАЦИЮ ═══
+        if (paidValid.length) {
+            html += '<div class="model-section-label" style="color:var(--accent);">ПЛАТНЫЕ И ВАЛИДИРОВАННЫЕ</div>';
+            paidValid.forEach(m => { html += buildModelCard(m, 'paid'); });
         }
 
-        // 2. Бесплатные модели
-        if (free.length) {
-            html += '<div class="model-section-label">БЕСПЛАТНЫЕ</div>';
-            free.forEach(m => { html += buildModelCard(m, 'free'); });
+        // ═══ 2. OPENROUTER — платные модели OR ═══
+        if (openrouterPaid.length) {
+            html += '<div class="model-section-label" style="color:var(--accent);">ЧЕРЕЗ OPENROUTER</div>';
+            openrouterPaid.forEach(m => { html += buildModelCard(m, 'paid'); });
         }
 
-        // 3. Локальные модели
-        if (local.length) {
-            html += '<div class="model-section-label">ЛОКАЛЬНЫЕ</div>';
+        // ═══ 3. БЕСПЛАТНЫЕ (через OpenRouter :free) ═══
+        if (freeModels.length) {
+            html += '<div class="model-section-label" style="color:var(--blue);">БЕСПЛАТНЫЕ (OPENROUTER)</div>';
+            freeModels.forEach(m => {
+                // Show free models even if status is 'no_key' — indicate needs key
+                if (m.status === 'no_key' || m.status === 'not_configured') {
+                    const card = buildModelCard(m, 'free');
+                    html += card.replace('card-valid', '').replace('card-active', '').replace('class="model-card"', 'class="model-card card-warning"');
+                } else {
+                    html += buildModelCard(m, 'free');
+                }
+            });
+        }
+
+        // ═══ 4. ЛОКАЛЬНЫЕ И КАСТОМНЫЕ ═══
+        const localOrCustom = local.concat(custom);
+        if (localOrCustom.length) {
+            html += '<div class="model-section-label" style="color:#e06070;">ЛОКАЛЬНЫЕ И КАСТОМНЫЕ</div>';
             local.forEach(m => { html += buildModelCard(m, 'local'); });
+            custom.forEach(m => { html += buildModelCard(m, 'custom'); });
         }
 
-        // 4. Кастомные модели
-        if (custom.length) {
-            html += '<div class="model-section-label">КАСТОМНЫЕ</div>';
-            custom.forEach(m => { html += buildModelCard(m, 'custom'); });
+        // Если совсем пусто
+        if (!paidValid.length && !openrouterPaid.length && !freeModels.length && !local.length && !custom.length) {
+            html = '<div class="model-empty">Нет моделей. Настройте ключи или подключите локальные.</div>';
         }
 
         list.innerHTML = html;
@@ -1086,11 +1148,12 @@
         const bar = document.getElementById("bottom-bar");
         const p = currentProjectId ? allProjects.find(x => x.id === currentProjectId) : null;
 
-        // Общие кнопки (всегда видны)
+        // Все кнопки — всегда видны (без дублирования)
         let buttons = [
             { label: '🛠 Terminal', action: "insertCommand('/terminal ')" },
-            { label: '💡 Ideas', action: "insertCommand('/ideas ')" },
-            { label: '🧹 Clear', action: "insertCommand('/clear')" },
+            { label: '⚡ PowerShell', action: "runTerminalCommand('powershell')" },
+            { label: '🔑 Ключи', action: "showKeysModal()" },
+            { label: '📊 Стат', action: "showStats()" },
         ];
 
         if (p) {
@@ -1108,13 +1171,6 @@
             if (p.github_repo) {
                 buttons.push({ label: '🔗 GitHub', action: `window.open('${escapeHtml(p.github_repo)}', '_blank')` });
             }
-
-            // PowerShell кнопка
-            buttons.push({ label: '⚡ PowerShell', action: "runTerminalCommand('powershell')" });
-        } else {
-            // Без проекта — только базовые кнопки
-            buttons.push({ label: '🔑 Ключи', action: "showKeysModal()" });
-            buttons.push({ label: '📊 Стат', action: "showStats()" });
         }
 
         bar.innerHTML = buttons.map(b =>
