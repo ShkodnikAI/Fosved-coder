@@ -1148,28 +1148,25 @@
         const bar = document.getElementById("bottom-bar");
         const p = currentProjectId ? allProjects.find(x => x.id === currentProjectId) : null;
 
-        // Все кнопки — всегда видны (без дублирования)
+        // Кнопки без проекта (базовый набор, без дублей с сайдбаром)
         let buttons = [
             { label: '🛠 Terminal', action: "insertCommand('/terminal ')" },
             { label: '⚡ PowerShell', action: "runTerminalCommand('powershell')" },
-            { label: '🔑 Ключи', action: "showKeysModal()" },
-            { label: '📊 Стат', action: "showStats()" },
+            { label: '🔗 GitHub', action: "window.open('https://github.com/ShkodnikAI/Fosved-coder','_blank')" },
         ];
 
         if (p) {
-            // Кнопки для активного проекта
+            // Кнопки только для активного проекта
             buttons.push({ label: '📥 Pull', action: "insertCommand('/git_pull')" });
             buttons.push({ label: '📤 Push', action: "insertCommand('/git_push')" });
             buttons.push({ label: '🔍 Search', action: "togglePanel('search')" });
             buttons.push({ label: '🔀 Git', action: "togglePanel('git')" });
             buttons.push({ label: '📦 Packages', action: "togglePanel('packages')" });
             buttons.push({ label: '📁 Files', action: "togglePanel('files')" });
-            buttons.push({ label: '🔄 Refactor', action: "openRefactorModal()" });
-            buttons.push({ label: '🗃️ Archive', action: "showArchivePanel()" });
 
-            // GitHub ссылка
+            // GitHub проекта (если указан свой репо)
             if (p.github_repo) {
-                buttons.push({ label: '🔗 GitHub', action: `window.open('${escapeHtml(p.github_repo)}', '_blank')` });
+                buttons.push({ label: '📂 Repo', action: `window.open('${escapeHtml(p.github_repo)}','_blank')` });
             }
         }
 
