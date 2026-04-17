@@ -12,21 +12,14 @@ def load_config():
     # Default config for Railway (where config.yaml is gitignored)
     return {
         "llm": {"default_model": "openrouter/anthropic/claude-3.5-sonnet", "router_model": "openrouter/google/gemini-2.0-flash-exp:free", "api_base": "https://openrouter.ai/api/v1", "api_key": "", "temperature": 0.2, "max_tokens": 4096},
-        "system": {"db_url": "sqlite+aiosqlite:///fosved_coder.db", "projects_dir": "./projects", "ideas_cache_dir": "./.cache/ideas", "archives_dir": "./archives", "max_iterations": 3, "max_context_files": 20, "max_idea_files": 10, "max_file_size_kb": 50},
+        "system": {"db_url": "sqlite+aiosqlite:////app/data/fosved_coder.db", "projects_dir": "/app/data/projects", "ideas_cache_dir": "/app/data/.cache/ideas", "archives_dir": "/app/data/archives", "max_iterations": 3, "max_context_files": 20, "max_idea_files": 10, "max_file_size_kb": 50},
         "security": {"allowed_commands": ["git", "python", "pip", "npm", "node", "cat", "ls", "dir", "echo", "mkdir", "cd"], "blocked_patterns": ["rm -rf /", "DROP DATABASE", "FORMAT C:"]},
     }
 
 CONFIG = load_config()
 
-# Railway / Production: use DATABASE_URL (PostgreSQL) if available
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-if DATABASE_URL:
-    # Railway provides postgres:// — asyncpg needs postgresql+asyncpg://
-    DB_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    if "+asyncpg" not in DB_URL:
-        DB_URL = DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-else:
-    DB_URL = CONFIG["system"]["db_url"]
+# Railway: use SQLite by default (Railway auto-sets DATABASE_URL, ignore it)
+DB_URL = CONFIG["system"]["db_url"]
 
 engine = create_async_engine(DB_URL, echo=False)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
