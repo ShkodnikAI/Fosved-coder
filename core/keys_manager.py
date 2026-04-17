@@ -660,17 +660,28 @@ class KeysManager:
         """
         Получить конфиг для litellm по ID модели.
         Returns: {model, api_key, api_base} или None
+        
+        api_base включается ТОЛЬКО для кастомных/нестандартных провайдеров.
+        Для стандартных (claude, openai, gemini, grok, minimax) litellm
+        строит URL сам — передача api_base ломает маршрутизацию.
         """
         # Платные модели
         for provider_id, config in self.providers.items():
             for model_name in config.get("models", []):
                 if f"{provider_id}__{model_name}" == model_id:
                     prefix = config.get("litellm_prefix", provider_id)
-                    return {
+                    provider_def = PROVIDER_DEFS.get(provider_id, {})
+                    result = {
                         "model": f"{prefix}/{model_name}",
                         "api_key": config.get("api_key", ""),
-                        "api_base": config.get("api_base", ""),
                     }
+                    # Only include api_base for custom providers or when explicitly overridden
+                    is_custom = provider_def.get("is_custom", False)
+                    default_base = provider_def.get("api_base", "")
+                    current_base = config.get("api_base", "")
+                    if is_custom or (current_base and current_base != default_base):
+                        result["api_base"] = current_base
+                    return result
 
         # Локальные модели
         for lm in self.local_models:
@@ -683,15 +694,13 @@ class KeysManager:
                     "api_base": base_url,
                 }
 
-        # Бесплатные модели
+        # Бесплатные модели (OpenRouter)
         for fm in FREE_MODELS:
             if fm["id"] == model_id:
                 provider_config = self.providers.get(fm["provider"], {})
-                provider_def = PROVIDER_DEFS.get(fm["provider"], {})
                 return {
                     "model": fm["model"],
                     "api_key": provider_config.get("api_key", ""),
-                    "api_base": provider_config.get("api_base", provider_def.get("api_base", "")),
                 }
 
         # Кастомные модели

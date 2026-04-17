@@ -39,7 +39,7 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
     if model_config:
         model = model_config["model"]  # full litellm model name
         api_key = model_config["api_key"]
-        api_base = model_config["api_base"]
+        api_base = model_config.get("api_base", "")
 
     # Debug logging
     has_key = bool(api_key)
