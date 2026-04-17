@@ -41,6 +41,14 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
         api_key = model_config["api_key"]
         api_base = model_config["api_base"]
 
+    # Debug logging
+    has_key = bool(api_key)
+    print(f"  [agent] stream_llm_response: model={model}, has_key={has_key}, api_base={api_base}")
+
+    if not has_key:
+        await websocket.send_json({"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках (ключ ⚙) или через Environment Variables на сервере."})
+        return None
+
     try:
         messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": prompt}]
 
@@ -142,7 +150,7 @@ async def _route_with_priority(prompt: str, priority_models: list[str]) -> str |
     return priority_models[0]
 
 
-async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket):
+async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None):
     """Main entry point: get history, add repo_map context, stream response with fallback."""
     history = await get_history(project_id)
 
@@ -184,6 +192,25 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     )
 
     await save_message(project_id, "user", prompt)
+
+    # If model_id is explicitly passed from the UI, use it directly (highest priority)
+    if model_id:
+        # Verify model has a valid config
+        model_config = keys_manager.get_model_config(model_id)
+        if model_config and model_config.get("api_key"):
+            ai_response = await stream_llm_response(
+                prompt, history, websocket,
+                model=model_id, system_prompt=system_prompt
+            )
+            if ai_response:
+                await save_message(project_id, "ai", ai_response)
+                return
+        # If model has no key, try priority models as fallback
+        elif model_config and not model_config.get("api_key"):
+            await websocket.send_json({
+                "type": "info",
+                "content": f"Нет API ключа для модели. Переключаюсь на приоритетные..."
+            })
 
     # Get priority models for this project
     project = await get_project(project_id) if project_id else None
@@ -232,7 +259,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     else:
         # No priority models set — use single model from UI or config
-        model = None
+        model = model_id or None
         if project and project.get("selected_models"):
             try:
                 models = json.loads(project["selected_models"])

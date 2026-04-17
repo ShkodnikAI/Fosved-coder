@@ -145,8 +145,8 @@ async def websocket_chat(websocket: WebSocket):
                             project["path"], current_project_id
                         )
 
-            # Route and execute AI response
-            await handle_chat_message(prompt, current_project_id, repo_map, websocket)
+            # Route and execute AI response (pass model_id from UI)
+            await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id)
 
     except WebSocketDisconnect:
         pass

@@ -685,6 +685,124 @@ export default function RootLayout({{ children }}) {{
             ".gitignore": "node_modules/\n.next/\n.env*\n",
         }
     },
+    "expo": {
+        "name": "Expo SDK 53",
+        "description": "Expo SDK 53 Universal App (iOS + Android + Web)",
+        "files": {
+            "package.json": '''{{
+  "name": "{name}",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {{
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  }},
+  "dependencies": {{
+    "expo": "~53.0.0",
+    "expo-router": "~4.0.0",
+    "expo-status-bar": "~2.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.5",
+    "react-native-safe-area-context": "5.3.0",
+    "react-native-screens": "~4.10.0",
+    "expo-linking": "~7.0.0",
+    "expo-constants": "~17.0.0",
+    "@expo/vector-icons": "^14.1.0"
+  }},
+  "devDependencies": {{
+    "@types/react": "~18.3.12",
+    "typescript": "~5.3.3"
+  }}
+}}
+''',
+            "app/_layout.tsx": '''import {{ Stack }} from "expo-router";
+import {{ StatusBar }} from "expo-status-bar";
+import {{ useColorScheme }} from "react-native";
+
+export default function RootLayout() {{
+  const colorScheme = useColorScheme();
+  return (
+    <>
+      <StatusBar style="auto" />
+      <Stack screenOptions={{
+        headerStyle: {{ backgroundColor: colorScheme === "dark" ? "#1a1a1a" : "#fff" }},
+        headerTintColor: colorScheme === "dark" ? "#fff" : "#000",
+      }} />
+    </>
+  );
+}}
+''',
+            "app/index.tsx": '''import {{ View, Text, StyleSheet }} from "react-native";
+
+export default function HomeScreen() {{
+  return (
+    <View style={{styles.container}}>
+      <Text style={{styles.title}}>{name}</Text>
+      <Text style={{styles.subtitle}}>Expo SDK 53 Universal App</Text>
+    </View>
+  );
+}}
+
+const styles = StyleSheet.create({{
+  container: {{
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  }},
+  title: {{
+    fontSize: 28,
+    fontWeight: "bold",
+  }},
+  subtitle: {{
+    fontSize: 16,
+    color: "#888",
+    marginTop: 8,
+  }},
+}});
+''',
+            "tsconfig.json": '''{{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {{
+    "strict": true,
+    "paths": {{
+      "@/*": ["./*"]
+    }}
+  }}
+}}
+''',
+            "app.json": '''{{
+  "expo": {{
+    "name": "{name}",
+    "slug": "{name}".toLowerCase().replace(/\\s+/g, "-"),
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "scheme": "{name}".toLowerCase().replace(/\\s+/g, "-"),
+    "ios": {{
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fosved.{name}".toLowerCase().replace(/\\s+/g, "")
+    }},
+    "android": {{
+      "adaptiveIcon": {{
+        "backgroundColor": "#1a1a1a"
+      }},
+      "package": "com.fosved.{name}".toLowerCase().replace(/\\s+/g, "")
+    }},
+    "web": {{
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    }},
+    "plugins": ["expo-router"]
+  }}
+}}
+''',
+            ".gitignore": "node_modules/\n.expo/\n*.jks\n*.keystore\n.env\n.DS_Store\n",
+        }
+    },
     "python-cli": {
         "name": "Python CLI",
         "description": "Python CLI приложение с argparse",

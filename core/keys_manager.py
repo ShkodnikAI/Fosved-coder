@@ -106,7 +106,7 @@ LOCAL_PROVIDERS = {
     },
 }
 
-KEYS_FILE = "keys.yaml"
+KEYS_FILE = os.environ.get("KEYS_FILE_PATH", "keys.yaml")
 
 # Mapping: env var name -> provider_id
 ENV_KEY_MAP = {
@@ -190,18 +190,25 @@ class KeysManager:
             self.github_enabled = True
 
     def _save_keys(self):
-        data = {
-            "providers": self.providers,
-            "local_models": self.local_models,
-            "custom_models": self.custom_models,
-            "github": {
-                "token": self.github_token,
-                "enabled": self.github_enabled,
-                "user": self.github_user,
-            },
-        }
-        with open(KEYS_FILE, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        try:
+            # Ensure directory exists
+            keys_dir = os.path.dirname(KEYS_FILE)
+            if keys_dir:
+                os.makedirs(keys_dir, exist_ok=True)
+            data = {
+                "providers": self.providers,
+                "local_models": self.local_models,
+                "custom_models": self.custom_models,
+                "github": {
+                    "token": self.github_token,
+                    "enabled": self.github_enabled,
+                    "user": self.github_user,
+                },
+            }
+            with open(KEYS_FILE, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            print(f"  [keys_manager] Warning: could not save keys to {KEYS_FILE}: {e}")
 
     # ─── Validation ──────────────────────────────────────────
 

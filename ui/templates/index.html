@@ -298,6 +298,7 @@
                         <option value="flask">Flask</option>
                         <option value="react">React</option>
                         <option value="nextjs">Next.js</option>
+                        <option value="expo">Expo SDK 53</option>
                         <option value="python-cli">Python CLI</option>
                     </select>
                     <div id="template-desc" style="font-size:12px;color:var(--text-secondary);margin-top:6px;display:none;padding:8px;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;line-height:1.4;"></div>
@@ -382,11 +383,12 @@
     let editingProjectId = null;  // null = creating new, number = editing existing
 
     const templateDescriptions = {
-        "fastapi": "Современный Python веб-фреймворк для API. Включает: main.py, requirements.txt, Dockerfile, тесты. Автоматическая генерация OpenAPI документации.",
-        "flask": "Лёгкий Python веб-фреймворк. Включает: app.py, requirements.txt, базовые шаблоны. Подходит для небольших проектов и микросервисов.",
-        "react": "Библиотека JavaScript для UI. Включает: React + Vite, компоненты, роутинг. SPA приложение с современным стеком.",
-        "nextjs": "React-фреймворк с SSR/SSG. Включает: Next.js, TypeScript, Tailwind CSS, App Router. Полноценное веб-приложение.",
-        "python-cli": "CLI приложение на Python. Включает: click/argparse, модульную структуру, setup.py, тесты. Консольная утилита."
+        "fastapi": "Современный Python фреймворк для высокопроизводительных API. Автоматическая генерация OpenAPI/Swagger документации, встроенная поддержка async/await, валидация данных через Pydantic. Идеален для REST API, микросервисов и бэкендов.",
+        "flask": "Лёгкий и гибкий Python веб-фреймворк с минимальным boilerplate. Даёт полный контроль над компонентами — подходит для небольших проектов, прототипов и микросервисов. Простой синтаксис, легко расширяемый через плагины.",
+        "react": "Популярная библиотека JavaScript для создания пользовательских интерфейсов. На базе React + Vite — быстрая сборка, горячая перезагрузка. Создаёт SPA (Single Page Application) с компонентной архитектурой.",
+        "nextjs": "Полноценный React-фреймворк с серверным рендерингом (SSR/SSG), App Router и встроенной оптимизацией. Подходит для продакшн-приложений: сайты, дашборды, e-commerce. Поддержка TypeScript из коробки.",
+        "expo": "Expo SDK 53 — фреймворк для создания Universal App (iOS + Android + Web) на React Native. Expo Router для навигации, TypeScript, New Architecture включена. Идеален для мобильных и кроссплатформенных приложений.",
+        "python-cli": "Консольное приложение на Python с argparse. Подходит для утилит, скриптов автоматизации и CLI-инструментов. Поддержка аргументов командной строки, справки (--help) и модульной структуры."
     };
 
     marked.setOptions({
