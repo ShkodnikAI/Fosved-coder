@@ -108,6 +108,17 @@ LOCAL_PROVIDERS = {
 
 KEYS_FILE = "keys.yaml"
 
+# Mapping: env var name -> provider_id
+ENV_KEY_MAP = {
+    "OPENROUTER_API_KEY": "openrouter",
+    "ANTHROPIC_API_KEY": "claude",
+    "OPENAI_API_KEY": "openai",
+    "XAI_API_KEY": "grok",
+    "GEMINI_API_KEY": "gemini",
+    "GOOGLE_API_KEY": "gemini",
+    "MINIMAX_API_KEY": "minimax",
+}
+
 
 class KeysManager:
     """
@@ -148,6 +159,35 @@ class KeysManager:
                 self.providers = {}
                 self.local_models = []
                 self.custom_models = []
+
+        # Load API keys from environment variables (Render, Railway, etc.)
+        self._load_env_keys()
+
+    def _load_env_keys(self):
+        """Populate providers from environment variables if not already set."""
+        for env_var, provider_id in ENV_KEY_MAP.items():
+            api_key = os.environ.get(env_var, "")
+            if not api_key:
+                continue
+            provider_def = PROVIDER_DEFS.get(provider_id)
+            if not provider_def:
+                continue
+            # Env var overrides only if no key saved, or if saved key is empty/invalid
+            existing = self.providers.get(provider_id, {})
+            existing_key = existing.get("api_key", "")
+            if not existing_key or existing.get("status") == "invalid":
+                self.providers[provider_id] = {
+                    "api_key": api_key,
+                    "api_base": provider_def["api_base"],
+                    "litellm_prefix": provider_def["litellm_prefix"],
+                    "models": provider_def["suggested_models"],
+                    "status": "valid",  # Assume valid, startup_validation will re-check
+                }
+        # GitHub token from env
+        gh_token = os.environ.get("GITHUB_TOKEN", "")
+        if gh_token and not self.github_token:
+            self.github_token = gh_token
+            self.github_enabled = True
 
     def _save_keys(self):
         data = {
