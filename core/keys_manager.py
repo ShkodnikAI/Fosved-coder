@@ -248,7 +248,7 @@ class KeysManager:
 
         validation = await self.validate_key(provider_id, api_key, test_model, api_base)
 
-        if validation["status"] == "invalid"]:
+        if validation["status"] == "invalid":
             # Only fail on clear authentication errors, not connectivity issues
             err_lower = validation.get("error", "").lower()
             if "не удалось подключиться" in err_lower or "connection" in err_lower or "timeout" in err_lower:
