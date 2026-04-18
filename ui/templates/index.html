@@ -25,8 +25,8 @@
             </div>
         </div>
         <div class="header-actions">
-            <button class="btn-add" onclick="showHelp()" title="Помощь">❓</button>
-            <button class="btn-add" onclick="clearChat()" title="Очистить">🗑</button>
+            <button class="btn-add" onclick="showHelp()" title="Помощь" data-hint="Справка, горячие клавиши и список команд">❓</button>
+            <button class="btn-add" onclick="clearChat()" title="Очистить" data-hint="Очистить историю чата текущего проекта">🗑</button>
         </div>
     </header>
 
@@ -37,7 +37,7 @@
 
             <!-- Projects (compact, top) -->
             <div class="sidebar-section" style="flex:0 0 auto; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0; max-height:180px;">
-                <div class="section-header">
+                <div class="section-header" data-hint="Создавайте проекты для организации кода, каждый со своим контекстом и настройками ИИ">
                     <h3>Проекты</h3>
                     <button class="btn-add" onclick="openProjectModal()" title="Новый проект" style="font-size:14px; padding:2px 8px; line-height:1;">+</button>
                 </div>
@@ -48,15 +48,15 @@
 
             <!-- AI Models (gets most of the space) -->
             <div class="sidebar-section" style="flex:3; display:flex; flex-direction:column; overflow:hidden; border-bottom:none; padding-bottom:0;">
-                <div class="section-header">
+                <div class="section-header" data-hint="Выбирайте модели ИИ для чата. Кликните на модель, чтобы сделать её активной.">
                     <h3>Модели ИИ</h3>
                     <div style="display:flex; gap:4px; align-items:center;">
                         <div class="active-model-indicator" id="active-model-indicator" style="display:none;">
                             <div class="active-dot"></div>
                             <span id="active-model-name"></span>
                         </div>
-                        <button class="btn-add" onclick="showPriorityModal()" title="Приоритетные модели" style="font-size:11px; background:var(--amber); color:#000;">⚡</button>
-                        <button class="btn-add" onclick="refreshModels()" title="Обновить" style="font-size:12px">↻</button>
+                        <button class="btn-add" onclick="showPriorityModal()" title="Приоритетные модели" data-hint="Настройте приоритетные модели для проекта — система автоматически выберет оптимальную" style="font-size:11px; background:var(--amber); color:#000;">⚡</button>
+                        <button class="btn-add" onclick="refreshModels()" title="Обновить" data-hint="Обновить список моделей и перепроверить API ключи" style="font-size:12px">↻</button>
                     </div>
                 </div>
                 <!-- Priority Models Bar -->
@@ -67,21 +67,7 @@
                 <div id="models-list" style="flex:1; overflow-y:auto; margin-right:-4px; padding-right:4px;">
                     <div class="model-card loading">Загрузка...</div>
                 </div>
-                <!-- OpenRouter inline key (always visible) -->
-                <div id="openrouter-inline" class="openrouter-block" style="margin-top:8px;">
-                    <div class="or-header">
-                        <div class="or-logo">OR</div>
-                        <div style="flex:1;min-width:0;">
-                            <div class="or-title">OpenRouter</div>
-                            <div class="or-sub" id="or-status-text">Введите ключ для доступа к бесплатным моделям</div>
-                        </div>
-                        <span class="model-status-badge badge-none" id="or-key-badge" style="display:none;">—</span>
-                    </div>
-                    <div class="or-input-row">
-                        <input type="password" id="openrouter-key-input" class="or-input" placeholder="sk-or-v1-...">
-                        <button class="btn-small" onclick="saveOpenRouterKey()" style="white-space:nowrap; flex-shrink:0;">Сохранить</button>
-                    </div>
-                </div>
+
                 <!-- Add model button -->
                 <button class="add-model-btn" onclick="showAddModelMenu(event)">+ Добавить модель вручную</button>
             </div>
@@ -94,10 +80,10 @@
 
             <!-- Bottom buttons (compact) -->
             <div style="display:flex; gap:4px; padding:8px 15px; border-top:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0;">
-                <button class="btn-add" onclick="scanLocalModels('ollama')" title="Ollama" style="flex:1; font-size:11px; padding:4px 6px;">🔍 Ollama</button>
-                <button class="btn-add" onclick="scanLocalModels('lmstudio')" title="LM Studio" style="flex:1; font-size:11px; padding:4px 6px;">🔍 LM</button>
-                <button class="btn-add" onclick="showKeysModal()" style="flex:1; font-size:11px; padding:4px 6px;">🔑</button>
-                <button class="btn-add" onclick="showStats()" style="flex:1; font-size:11px; padding:4px 6px;">📊</button>
+                <button class="btn-add" onclick="scanLocalModels('ollama')" title="Ollama" data-hint="Найти локальные модели Ollama на этом устройстве" style="flex:1; font-size:11px; padding:4px 6px;">🔍 Ollama</button>
+                <button class="btn-add" onclick="scanLocalModels('lmstudio')" title="LM Studio" data-hint="Найти локальные модели LM Studio на этом устройстве" style="flex:1; font-size:11px; padding:4px 6px;">🔍 LM</button>
+                <button class="btn-add" onclick="showKeysModal()" data-hint="Управление API ключами — добавляйте и проверяйте ключи для Claude, OpenAI, Gemini, Grok, OpenRouter" style="flex:1; font-size:11px; padding:4px 6px;">🔑</button>
+                <button class="btn-add" onclick="showStats()" data-hint="Статистика использования моделей и роутинга" style="flex:1; font-size:11px; padding:4px 6px;">📊</button>
             </div>
             <!-- Color Legend -->
             <div class="color-legend" id="color-legend">
@@ -712,24 +698,7 @@
         const local = allModels.filter(m => m.type === "local");
         const custom = allModels.filter(m => m.type === "custom");
 
-        // Update OpenRouter status
-        const orStatusText = document.getElementById('or-status-text');
-        const orKeyBadge = document.getElementById('or-key-badge');
-        const hasORKey = allModels.some(m => (m.type === 'paid' && m.provider === 'openrouter') && (m.status === 'valid' || m.status === 'rate_limited'));
-        if (orStatusText) {
-            if (hasORKey) {
-                orStatusText.textContent = 'Подключён — доступны бесплатные модели';
-                orStatusText.style.color = 'var(--green)';
-            } else {
-                orStatusText.textContent = 'Введите ключ для доступа к бесплатным моделям';
-                orStatusText.style.color = 'var(--text-secondary)';
-            }
-        }
-        if (orKeyBadge) {
-            orKeyBadge.style.display = 'inline';
-            if (hasORKey) { orKeyBadge.className = 'model-status-badge badge-ok'; orKeyBadge.textContent = 'OK'; }
-            else { orKeyBadge.className = 'model-status-badge badge-none'; orKeyBadge.textContent = '—'; }
-        }
+        // OpenRouter status is managed via Keys modal (no inline block)
 
         let html = "";
 
@@ -1362,21 +1331,7 @@
         } catch(e) { showToast("Ошибка: " + e, "error"); }
     }
 
-    async function saveOpenRouterKey() {
-        const key = document.getElementById("openrouter-key-input").value.trim();
-        if (!key) { showToast("Введите ключ OpenRouter", "error"); return; }
-        openGenericModal("Проверка...", '<div class="key-validating">Проверяем ключ...</div>');
-        try {
-            const resp = await fetch("/api/v1/keys/add", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({provider: "openrouter", api_key: key})
-            });
-            const data = await resp.json();
-            if (resp.ok) { await loadModels(); closeGenericModal(); showToast("Ключ OpenRouter добавлен", "success"); document.getElementById("openrouter-key-input").value = ""; }
-            else { closeGenericModal(); showToast(data.detail || "Ошибка", "error"); }
-        } catch(e) { closeGenericModal(); showToast("Ошибка: " + e, "error"); }
-    }
+
 
     // ═══════════════════════════════════════════════════════
     // TERMINAL (real launch)
@@ -2268,6 +2223,61 @@
             <button class="btn-create" onclick="sendRefactor()" style="margin-top:10px;">🔄 Рефакторить</button>
         </div>
     </div>
+
+    <!-- TOOLTIP SYSTEM -->
+    <div class="fosved-tooltip" id="fosved-tooltip"></div>
+    <script>
+    (function() {
+        const tip = document.getElementById('fosved-tooltip');
+        let activeTimer = null;
+        let hideTimer = null;
+
+        function showTooltip(el) {
+            const text = el.getAttribute('data-hint');
+            if (!text) return;
+            clearTimeout(hideTimer);
+            tip.textContent = text;
+            const rect = el.getBoundingClientRect();
+            let left = rect.left;
+            let top = rect.bottom + 10;
+            // Keep tooltip within viewport
+            tip.style.left = '0px';
+            tip.style.top = top + 'px';
+            tip.classList.add('visible');
+            requestAnimationFrame(() => {
+                const tipRect = tip.getBoundingClientRect();
+                if (left + tipRect.width > window.innerWidth - 10) {
+                    left = window.innerWidth - tipRect.width - 10;
+                }
+                if (left < 10) left = 10;
+                tip.style.left = left + 'px';
+            });
+        }
+
+        function hideTooltip() {
+            tip.classList.remove('visible');
+        }
+
+        document.addEventListener('mouseover', function(e) {
+            const el = e.target.closest('[data-hint]');
+            if (!el) return;
+            clearTimeout(hideTimer);
+            activeTimer = setTimeout(() => showTooltip(el), 2500);
+        });
+
+        document.addEventListener('mouseout', function(e) {
+            const el = e.target.closest('[data-hint]');
+            if (!el) return;
+            clearTimeout(activeTimer);
+            hideTimer = setTimeout(hideTooltip, 200);
+        });
+
+        document.addEventListener('click', function() {
+            clearTimeout(activeTimer);
+            hideTooltip();
+        });
+    })();
+    </script>
 
 </body>
 </html>

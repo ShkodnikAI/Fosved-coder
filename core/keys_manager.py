@@ -164,7 +164,8 @@ class KeysManager:
         self._load_env_keys()
 
     def _load_env_keys(self):
-        """Populate providers from environment variables if not already set."""
+        """Populate providers from environment variables (highest priority — source of truth on cloud)."""
+        env_loaded = 0
         for env_var, provider_id in ENV_KEY_MAP.items():
             api_key = os.environ.get(env_var, "")
             if not api_key:
@@ -172,10 +173,10 @@ class KeysManager:
             provider_def = PROVIDER_DEFS.get(provider_id)
             if not provider_def:
                 continue
-            # Env var overrides only if no key saved, or if saved key is empty/invalid
+            # Env var ALWAYS overrides saved keys — on Render/Railway env vars are the source of truth
             existing = self.providers.get(provider_id, {})
             existing_key = existing.get("api_key", "")
-            if not existing_key or existing.get("status") == "invalid":
+            if api_key != existing_key or existing.get("status") in ("invalid", "not_configured", ""):
                 self.providers[provider_id] = {
                     "api_key": api_key,
                     "api_base": provider_def["api_base"],
@@ -183,6 +184,9 @@ class KeysManager:
                     "models": provider_def["suggested_models"],
                     "status": "valid",  # Assume valid, startup_validation will re-check
                 }
+                env_loaded += 1
+        if env_loaded:
+            print(f"  [keys] Loaded {env_loaded} API key(s) from environment variables")
         # GitHub token from env
         gh_token = os.environ.get("GITHUB_TOKEN", "")
         if gh_token and not self.github_token:
@@ -223,18 +227,26 @@ class KeysManager:
 
         test_model = model or provider["suggested_models"][0]
         litellm_model = f"{provider['litellm_prefix']}/{test_model}"
-        base_url = api_base or provider["api_base"]
+
+        # For standard providers, let litellm handle the URL natively.
+        # Only pass api_base for custom providers or explicit overrides.
+        is_custom = provider.get("is_custom", False)
+        default_base = provider["api_base"]
+        explicit_base = api_base or default_base
+        use_base = explicit_base if (is_custom or explicit_base != default_base) else None
 
         try:
-            response = await litellm.acompletion(
-                model=litellm_model,
-                messages=[{"role": "user", "content": "hi"}],
-                api_key=api_key,
-                api_base=base_url,
-                max_tokens=1,
-                temperature=0,
-                timeout=15,
-            )
+            kwargs = {
+                "model": litellm_model,
+                "messages": [{"role": "user", "content": "hi"}],
+                "api_key": api_key,
+                "max_tokens": 1,
+                "temperature": 0,
+                "timeout": 15,
+            }
+            if use_base:
+                kwargs["api_base"] = use_base
+            response = await litellm.acompletion(**kwargs)
             if response and response.choices:
                 return {"status": "valid", "error": ""}
             return {"status": "invalid", "error": "Пустой ответ от API"}

@@ -1764,6 +1764,41 @@ pre:hover .copy-btn { opacity: 1; }
     .color-legend { flex-wrap: wrap; gap: 6px !important; }
 }
 
+/* Tooltip System — delayed popup hints */
+.fosved-tooltip {
+    position: fixed;
+    z-index: 10000;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 260px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.fosved-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+.fosved-tooltip::after {
+    content: '';
+    position: absolute;
+    top: -5px;
+    left: 16px;
+    width: 10px;
+    height: 10px;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    transform: rotate(45deg);
+}
+
 /* Touch targets — bigger tap area on mobile */
 @media (hover: none) and (pointer: coarse) {
     .btn-add, .btn-small, .btn-send { min-height: 40px; }

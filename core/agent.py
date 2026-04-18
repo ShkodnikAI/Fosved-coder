@@ -35,6 +35,10 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
     api_key = CONFIG["llm"].get("api_key", "")
     api_base = CONFIG["llm"].get("api_base", "")
 
+    # Safety: never use placeholder API keys from config
+    if "YOUR_" in api_key.upper() or api_key == "YOUR_OPENROUTER_API_KEY_HERE":
+        api_key = ""
+
     model_config = keys_manager.get_model_config(model)
     if model_config:
         model = model_config["model"]  # full litellm model name
