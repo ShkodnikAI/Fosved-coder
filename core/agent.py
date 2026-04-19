@@ -54,7 +54,14 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
         return None
 
     try:
-        messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": prompt}]
+        # Map internal roles to API-compatible roles
+        # Anthropic requires "assistant" (not "ai"), OpenAI accepts both
+        api_messages = []
+        role_map = {"ai": "assistant", "system": "system", "user": "user"}
+        for msg in history:
+            mapped_role = role_map.get(msg.get("role", ""), msg.get("role", "user"))
+            api_messages.append({"role": mapped_role, "content": msg.get("content", "")})
+        messages = [{"role": "system", "content": system_prompt}] + api_messages + [{"role": "user", "content": prompt}]
 
         kwargs = {
             "model": model,
