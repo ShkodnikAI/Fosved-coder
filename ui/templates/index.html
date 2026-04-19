@@ -359,6 +359,7 @@
     const chatBox = document.getElementById("chat-box");
     let currentAiDiv = null;
     let currentAiText = "";
+    let currentTypingDiv = null;
     let currentProjectId = null;
     let allModels = [];
     let activeModelId = null;
@@ -443,6 +444,8 @@
             // Handle pong
             if (data.type === "pong") return;
             if (data.type === "chunk") {
+                // Remove typing indicator on first chunk
+                if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 if (!currentAiDiv) {
                     currentAiDiv = document.createElement("div");
                     currentAiDiv.className = "msg ai";
@@ -453,13 +456,26 @@
                 addCopyButtons(currentAiDiv);
                 chatBox.scrollTop = chatBox.scrollHeight;
             } else if (data.type === "done") {
+                if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 currentAiDiv = null; currentAiText = "";
             } else if (data.type === "error") {
+                if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 addMessage("error", data.content);
                 showToast(data.content, "error");
                 currentAiDiv = null; currentAiText = "";
             } else if (data.type === "system") {
                 addMessage("system", data.content);
+            } else if (data.type === "typing") {
+                // Show typing indicator with model name
+                if (currentTypingDiv) currentTypingDiv.remove();
+                currentTypingDiv = document.createElement("div");
+                currentTypingDiv.className = "msg ai typing-indicator";
+                const modelName = data.model || "";
+                const shortName = modelName.includes('__') ? modelName.split('__').pop() : modelName;
+                currentTypingDiv.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div><span>Думаю' +
+                    (shortName ? ' (' + escapeHtml(shortName) + ')' : '') + '...</span>';
+                chatBox.appendChild(currentTypingDiv);
+                chatBox.scrollTop = chatBox.scrollHeight;
             } else if (data.type === "command_result") {
                 addMessage("terminal", data.content);
             } else if (data.type === "idea_result") {
@@ -717,15 +733,11 @@
         // ═══ 3. БЕСПЛАТНЫЕ (через OpenRouter :free) ═══
         if (freeModels.length) {
             html += '<div class="model-section-label" style="color:var(--blue);">БЕСПЛАТНЫЕ (OPENROUTER)</div>';
-            freeModels.forEach(m => {
-                // Show free models even if status is 'no_key' — indicate needs key
-                if (m.status === 'no_key' || m.status === 'not_configured') {
-                    const card = buildModelCard(m, 'free');
-                    html += card.replace('card-valid', '').replace('card-active', '').replace('class="model-card"', 'class="model-card card-warning"');
-                } else {
-                    html += buildModelCard(m, 'free');
-                }
-            });
+            const hasORKey = allModels.some(m => m.type === 'paid' && m.provider === 'openrouter' && (m.status === 'valid' || m.status === 'rate_limited'));
+            if (!hasORKey) {
+                html += '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0 6px 4px;">Нужен ключ OpenRouter — нажмите 🔑 ниже</div>';
+            }
+            freeModels.forEach(m => { html += buildModelCard(m, 'free'); });
         }
 
         // ═══ 4. ЛОКАЛЬНЫЕ И КАСТОМНЫЕ ═══

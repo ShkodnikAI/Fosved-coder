@@ -20,21 +20,35 @@ PROVIDER_DEFS = {
         "name": "Claude (Anthropic)",
         "litellm_prefix": "anthropic",
         "api_base": "https://api.anthropic.com",
-        "suggested_models": ["claude-sonnet-4-20250514", "claude-3.5-sonnet", "claude-3-opus", "claude-3-haiku"],
+        "suggested_models": [
+            "claude-opus-4-20250514",
+            "claude-sonnet-4-20250514",
+            "claude-3.5-sonnet",
+            "claude-3-haiku",
+        ],
     },
     "openai": {
         "name": "OpenAI",
         "litellm_prefix": "openai",
         "api_base": "https://api.openai.com/v1",
-        "suggested_models": ["gpt-4o", "gpt-4o-mini", "o3-mini", "gpt-4-turbo"],
+        "suggested_models": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "o3",
+            "o3-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+        ],
     },
     "openrouter": {
         "name": "OpenRouter",
         "litellm_prefix": "openrouter",
         "api_base": "https://openrouter.ai/api/v1",
         "suggested_models": [
+            "anthropic/claude-opus-4-20250514",
             "anthropic/claude-sonnet-4-20250514",
-            "openai/gpt-4o",
+            "openai/gpt-4.1",
             "google/gemini-2.5-flash-preview",
         ],
     },
@@ -42,7 +56,7 @@ PROVIDER_DEFS = {
         "name": "Grok (xAI)",
         "litellm_prefix": "xai",
         "api_base": "https://api.x.ai/v1",
-        "suggested_models": ["grok-3", "grok-3-mini", "grok-2"],
+        "suggested_models": ["grok-3", "grok-3-mini"],
     },
     "minimax": {
         "name": "MiniMax",
@@ -54,7 +68,20 @@ PROVIDER_DEFS = {
         "name": "Google AI (Gemini)",
         "litellm_prefix": "gemini",
         "api_base": "https://generativelanguage.googleapis.com/v1beta",
-        "suggested_models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
+        "suggested_models": [
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+        ],
+    },
+    "deepseek": {
+        "name": "DeepSeek",
+        "litellm_prefix": "deepseek",
+        "api_base": "https://api.deepseek.com",
+        "suggested_models": [
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
     },
     "zai": {
         "name": "Z.AI",
@@ -65,15 +92,15 @@ PROVIDER_DEFS = {
     },
 }
 
-# Бесплатные модели (через OpenRouter)
+# Бесплатные модели (через OpenRouter) — требуют OPENROUTER_API_KEY
 FREE_MODELS = [
+    {"id": "gemini-2.5-flash-free", "name": "Gemini 2.5 Flash", "model": "google/gemini-2.5-flash-preview:free", "provider": "openrouter"},
     {"id": "gemini-2-flash-free", "name": "Gemini 2.0 Flash", "model": "google/gemini-2.0-flash-exp:free", "provider": "openrouter"},
     {"id": "llama-4-maverick-free", "name": "Llama 4 Maverick", "model": "meta-llama/llama-4-maverick:free", "provider": "openrouter"},
-    {"id": "qwen-2.5-72b-free", "name": "Qwen 2.5 72B", "model": "qwen/qwen-2.5-72b-instruct:free", "provider": "openrouter"},
     {"id": "deepseek-v3-free", "name": "DeepSeek V3", "model": "deepseek/deepseek-chat-v3-0324:free", "provider": "openrouter"},
+    {"id": "qwen-2.5-72b-free", "name": "Qwen 2.5 72B", "model": "qwen/qwen-2.5-72b-instruct:free", "provider": "openrouter"},
     {"id": "mistral-large-free", "name": "Mistral Large", "model": "mistralai/mistral-large-2411:free", "provider": "openrouter"},
     {"id": "phi-4-free", "name": "Phi-4", "model": "microsoft/phi-4:free", "provider": "openrouter"},
-    {"id": "gemini-2.5-flash-free", "name": "Gemini 2.5 Flash", "model": "google/gemini-2.5-flash-preview:free", "provider": "openrouter"},
     {"id": "llama-3.3-70b-free", "name": "Llama 3.3 70B", "model": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"},
 ]
 
@@ -117,6 +144,7 @@ ENV_KEY_MAP = {
     "GEMINI_API_KEY": "gemini",
     "GOOGLE_API_KEY": "gemini",
     "MINIMAX_API_KEY": "minimax",
+    "DEEPSEEK_API_KEY": "deepseek",
 }
 
 

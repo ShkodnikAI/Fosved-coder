@@ -1799,6 +1799,39 @@ pre:hover .copy-btn { opacity: 1; }
     transform: rotate(45deg);
 }
 
+/* Typing indicator */
+.typing-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+.typing-indicator .typing-dots {
+    display: flex;
+    gap: 4px;
+}
+.typing-indicator .typing-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0.3;
+    animation: typingBounce 1.4s ease-in-out infinite;
+}
+.typing-indicator .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typingBounce {
+    0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-4px); }
+}
+.typing-indicator .typing-model-name {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
 /* Touch targets — bigger tap area on mobile */
 @media (hover: none) and (pointer: coarse) {
     .btn-add, .btn-small, .btn-send { min-height: 40px; }

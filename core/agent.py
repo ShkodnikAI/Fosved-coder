@@ -162,7 +162,7 @@ async def _route_with_priority(prompt: str, priority_models: list[str]) -> str |
 
 
 async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None):
-    """Main entry point: get history, add repo_map context, stream response with fallback."""
+    """Main entry point: get history, add repo_map context, stream response with smart fallback."""
     history = await get_history(project_id)
 
     # Project context (description + base_prompt)
@@ -204,96 +204,68 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     await save_message(project_id, "user", prompt)
 
-    # If model_id is explicitly passed from the UI, use it directly (highest priority)
-    if model_id:
-        # Verify model has a valid config
-        model_config = keys_manager.get_model_config(model_id)
-        if model_config and model_config.get("api_key"):
-            ai_response = await stream_llm_response(
-                prompt, history, websocket,
-                model=model_id, system_prompt=system_prompt
-            )
-            if ai_response:
-                await save_message(project_id, "ai", ai_response)
-                return
-        # If model has no key, try priority models as fallback
-        elif model_config and not model_config.get("api_key"):
-            await websocket.send_json({
-                "type": "info",
-                "content": f"Нет API ключа для модели. Переключаюсь на приоритетные..."
-            })
+    # Build list of models to try, in priority order
+    models_to_try = []
 
-    # Get priority models for this project
+    # 1. Explicit model from UI (highest priority)
+    if model_id:
+        models_to_try.append(model_id)
+
+    # 2. Priority models from project settings
     project = await get_project(project_id) if project_id else None
     priority_models = _get_priority_models(project)
+    for pm in priority_models:
+        if pm not in models_to_try:
+            models_to_try.append(pm)
 
-    if priority_models:
-        # Smart routing: pick the best model from priority list
-        chosen_model = await _route_with_priority(prompt, priority_models)
-        if not chosen_model:
-            chosen_model = priority_models[0]
+    # 3. Any other valid/available models as fallback
+    all_models = keys_manager.get_all_models()
+    for m in all_models:
+        if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
+            if m.get("api_key") or m["type"] in ("local", "free", "custom"):
+                models_to_try.append(m["id"])
 
-        # Stream with fallback: try each priority model in order
-        max_retries = len(priority_models)  # one attempt per model
-        ai_response = None
-        tried_models = []
+    if not models_to_try:
+        await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ в настройках (🔑)."})
+        return
 
-        for attempt in range(max_retries):
-            model_to_try = priority_models[attempt]
-            tried_models.append(model_to_try)
+    # Try each model with fallback
+    ai_response = None
+    tried_count = 0
 
-            # On first attempt, use the router-chosen model
-            if attempt == 0:
-                model_to_try = chosen_model
-                if model_to_try not in tried_models:
-                    tried_models.insert(0, model_to_try)
+    for i, model_to_try in enumerate(models_to_try):
+        # Verify model has a config with key
+        model_config = keys_manager.get_model_config(model_to_try)
+        if not model_config:
+            continue
+        if not model_config.get("api_key") and model_to_try not in [m["id"] for m in all_models if m["type"] == "local"]:
+            # For free models, check if OpenRouter key exists
+            is_free = any(fm["id"] == model_to_try for fm in keys_manager.FREE_MODELS)
+            if not is_free or not model_config.get("api_key"):
+                continue
 
-            if attempt > 0:
-                model_name = model_to_try
-                all_models = keys_manager.get_all_models()
-                m_info = next((m for m in all_models if m["id"] == model_to_try), None)
-                if m_info:
-                    model_name = m_info["name"]
-                await websocket.send_json({
-                    "type": "info",
-                    "content": f"Переключаюсь на {model_name}..."
-                })
+        tried_count += 1
 
-            ai_response = await stream_llm_response(
-                prompt, history, websocket,
-                model=model_to_try, system_prompt=system_prompt
-            )
-            if ai_response is not None:
-                break
-        else:
-            ai_response = None
+        # Send typing indicator
+        await websocket.send_json({"type": "typing", "model": model_to_try})
 
-    else:
-        # No priority models set — use single model from UI or config
-        model = model_id or None
-        if project and project.get("selected_models"):
-            try:
-                models = json.loads(project["selected_models"])
-                if models:
-                    model = models[0]
-            except (json.JSONDecodeError, TypeError):
-                pass
+        # Notify user about fallback
+        if i > 0:
+            m_info = next((m for m in all_models if m["id"] == model_to_try), None)
+            model_name = m_info["name"] if m_info else model_to_try
+            await websocket.send_json({
+                "type": "info",
+                "content": f"Переключаюсь на {model_name}..."
+            })
 
-        # Fallback retries
-        max_retries = CONFIG["system"].get("max_iterations", 3)
-        ai_response = None
-        for attempt in range(max_retries):
-            ai_response = await stream_llm_response(
-                prompt, history, websocket,
-                model=model, system_prompt=system_prompt
-            )
-            if ai_response is not None:
-                break
-            if attempt < max_retries - 1:
-                await websocket.send_json({
-                    "type": "info",
-                    "content": f"Попытка {attempt + 2}/{max_retries}..."
-                })
+        ai_response = await stream_llm_response(
+            prompt, history, websocket,
+            model=model_to_try, system_prompt=system_prompt
+        )
+        if ai_response is not None:
+            break
 
     if ai_response:
         await save_message(project_id, "ai", ai_response)
+    elif tried_count == 0:
+        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом. Добавьте ключ через 🔑 или Environment Variables."})
