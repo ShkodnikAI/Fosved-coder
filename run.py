@@ -111,6 +111,10 @@ async def websocket_chat(websocket: WebSocket):
                 model_id = payload.get("model")
                 priority = payload.get("priority_models", [])
                 mode = payload.get("mode", current_mode)
+                # Sync project_id from client (critical: keeps project context)
+                client_project_id = payload.get("project_id")
+                if client_project_id is not None:
+                    current_project_id = client_project_id
             except (json.JSONDecodeError, TypeError):
                 prompt = data
                 model_id = None

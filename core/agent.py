@@ -6,18 +6,19 @@ from core.context_compressor import ContextCompressor
 
 litellm.suppress_debug_info = True
 
-SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для разработки.
-Ты помогаешь писать код, анализировать проекты и решать задачи.
+SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для разработки проекта.
+Ты помогаешь писать код, анализировать проект и решать задачи.
+
+{project_context}
 
 {repo_map}
 
 {ideas_context}
 
-{project_context}
-
 {compressed_context}
 
 Правила:
+- Ты работаешь над конкретным проектом. Если указано название проекта и описание — используй эту информацию в ответах.
 - Отвечай на том языке, на котором задан вопрос
 - Для кода используй Markdown code blocks с указанием языка
 - Если задача требует выполнения команд — укажи какие команды выполнить
@@ -176,15 +177,20 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     """Main entry point: get history, add repo_map context, stream response with smart fallback."""
     history = await get_history(project_id)
 
-    # Project context (description + base_prompt)
+    # Project context (name, description, template, base_prompt)
     project_context_text = ""
     if project_id:
         project = await get_project(project_id)
         if project:
+            project_context_text += f"ПРОЕКТ: {project.get('name', 'Без названия')}\n"
             if project.get("description"):
-                project_context_text += f"О ПРОЕКТЕ: {project['description']}\n"
+                project_context_text += f"ОПИСАНИЕ: {project['description']}\n"
+            if project.get("template"):
+                project_context_text += f"ШАБЛОН: {project['template']}\n"
             if project.get("base_prompt"):
-                project_context_text += f"ИНСТРУКЦИИ: {project['base_prompt']}\n"
+                project_context_text += f"ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ: {project['base_prompt']}\n"
+            if project.get("path"):
+                project_context_text += f"ПУТЬ К ПРОЕКТУ: {project['path']}\n"
 
     # Auto-compression: LLM-based with regex fallback + DB cleanup
     compressed_context_text = ""

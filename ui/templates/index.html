@@ -847,7 +847,7 @@
 
         setWaitingAI(true);
 
-        let payload = { type: "chat", prompt: text, model: activeModelId, mode: workMode };
+        let payload = { type: "chat", prompt: text, model: activeModelId, mode: workMode, project_id: currentProjectId };
         if (priorityModels.length) {
             payload.priority_models = priorityModels;
         }
