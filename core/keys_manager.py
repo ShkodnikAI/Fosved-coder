@@ -21,6 +21,7 @@ PROVIDER_DEFS = {
         "litellm_prefix": "anthropic",
         "api_base": "https://api.anthropic.com",
         "suggested_models": [
+            "claude-opus-4-7-20250514",
             "claude-opus-4-20250514",
             "claude-sonnet-4-20250514",
             "claude-3.5-sonnet",
@@ -738,10 +739,16 @@ class KeysManager:
         for fm in FREE_MODELS:
             if fm["id"] == model_id:
                 provider_config = self.providers.get(fm["provider"], {})
-                return {
-                    "model": fm["model"],
+                # Litellm нужен prefix "openrouter/" для маршрутизации
+                model_str = fm["model"]
+                if not model_str.startswith("openrouter/"):
+                    model_str = f"openrouter/{model_str}"
+                result = {
+                    "model": model_str,
                     "api_key": provider_config.get("api_key", ""),
+                    "api_base": provider_config.get("api_base", "https://openrouter.ai/api/v1"),
                 }
+                return result
 
         # Кастомные модели
         for cm in self.custom_models:

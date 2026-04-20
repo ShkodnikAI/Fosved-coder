@@ -28,6 +28,75 @@ router = APIRouter(prefix="/api/v1")
 
 
 # ═══════════════════════════════════════════════════════════════
+# SYSTEM HEALTH & STATUS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/health")
+async def health_check():
+    """Проверка состояния системы: БД, API ключи, провайдеры."""
+    from core.memory import IS_POSTGRES, check_db_connection, DB_URL, engine
+    from sqlalchemy import text
+    import time
+
+    status = {"status": "ok", "version": "2.0"}
+
+    # Check database
+    try:
+        start = time.time()
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        db_latency = round((time.time() - start) * 1000)
+        status["database"] = {
+            "type": "PostgreSQL" if IS_POSTGRES else "SQLite",
+            "status": "connected",
+            "latency_ms": db_latency,
+        }
+    except Exception as e:
+        status["database"] = {"type": "PostgreSQL" if IS_POSTGRES else "SQLite", "status": "error", "error": str(e)[:200]}
+        status["status"] = "degraded"
+
+    # Check API keys
+    provider_status = keys_manager.get_provider_status()
+    active_providers = sum(1 for p in provider_status.values() if p.get("status") in ("valid", "available"))
+    total_providers = len(provider_status)
+    status["providers"] = {
+        "active": active_providers,
+        "total": total_providers,
+        "details": {k: v.get("status", "?") for k, v in provider_status.items()},
+    }
+
+    # GitHub
+    gh = keys_manager.get_github_status()
+    status["github"] = gh
+
+    return status
+
+
+@router.get("/status")
+async def system_status():
+    """Детальная информация о системе: БД URL (без пароля), модели, память."""
+    import os
+    from core.memory import IS_POSTGRES, DB_URL
+
+    safe_url = DB_URL
+    if "://" in safe_url:
+        parts = safe_url.split("://", 1)
+        auth_part = parts[1].split("@", 1)
+        if len(auth_part) == 2 and ":" in auth_part[0]:
+            user = auth_part[0].split(":")[0]
+            safe_url = f"{parts[0]}://{user}:****@{auth_part[1]}"
+
+    models = keys_manager.get_all_models()
+    return {
+        "version": "2.0",
+        "database": {"type": "PostgreSQL" if IS_POSTGRES else "SQLite", "url": safe_url},
+        "models": {"total": len(models), "free": sum(1 for m in models if m.get("is_free")), "paid": sum(1 for m in models if not m.get("is_free"))},
+        "providers": list(keys_manager.providers.keys()),
+        "environment": {"PORT": os.environ.get("PORT", "8000"), "RENDER": bool(os.environ.get("RENDER"))},
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # Pydantic Schemas
 # ═══════════════════════════════════════════════════════════════
 
@@ -123,6 +192,24 @@ class DiscoverLocalModelsRequest(BaseModel):
 # KEYS & MODELS
 # ═══════════════════════════════════════════════════════════════
 
+@router.get("/")
+async def api_root():
+    """Корень API — список доступных endpoints."""
+    return {
+        "name": "Fosved Coder API",
+        "version": "2.0",
+        "docs": "/api/v1/health",
+        "endpoints": {
+            "system": ["GET /api/v1/health", "GET /api/v1/status"],
+            "keys": ["GET /api/v1/keys/providers", "POST /api/v1/keys/add", "DELETE /api/v1/keys/{provider_id}", "GET /api/v1/keys/github", "POST /api/v1/keys/github"],
+            "models": ["GET /api/v1/models", "POST /api/v1/models/test-openrouter", "GET /api/v1/models/local", "GET /api/v1/models/custom"],
+            "projects": ["GET /api/v1/projects", "POST /api/v1/projects", "DELETE /api/v1/projects/{id}", "PUT /api/v1/projects/settings", "PUT /api/v1/projects/rename", "POST /api/v1/projects/regenerate-key", "GET /api/v1/projects/by-key/{key}"],
+            "files": ["GET /api/v1/projects/{id}/tree", "GET /api/v1/projects/{id}/read-file", "POST /api/v1/projects/{id}/save-file", "POST /api/v1/projects/{id}/search-files"],
+            "git": ["POST /api/v1/projects/{id}/git"],
+            "context": ["GET /api/v1/projects/{id}/context", "POST /api/v1/projects/{id}/context/compress", "POST /api/v1/projects/{id}/context/milestone"],
+        }
+    }
+
 @router.post("/keys/add")
 async def add_key(req: AddKeyRequest):
     """Валидация и добавление API-ключа провайдера."""
@@ -188,6 +275,37 @@ async def revalidate_provider(provider_id: str):
     keys_manager.providers[provider_id]["status"] = result["status"]
     keys_manager._save_keys()
     return result
+
+
+@router.post("/models/test-openrouter")
+async def test_openrouter_key():
+    """Быстрый тест OpenRouter ключа — отправляем запрос к бесплатной модели."""
+    import litellm
+    config = keys_manager.providers.get("openrouter")
+    if not config or not config.get("api_key"):
+        return {"success": False, "error": "Ключ OpenRouter не настроен. Добавьте OPENROUTER_API_KEY в Environment Variables."}
+    try:
+        response = await litellm.acompletion(
+            model="openrouter/qwen/qwen-2.5-72b-instruct:free",
+            messages=[{"role": "user", "content": "Ответь одним словом: работает"}],
+            api_key=config["api_key"],
+            api_base=config.get("api_base", "https://openrouter.ai/api/v1"),
+            max_tokens=10,
+            temperature=0,
+            timeout=20,
+        )
+        answer = response.choices[0].message.content if response.choices else "пустой ответ"
+        return {"success": True, "response": answer, "message": f"OpenRouter работает! Ответ: {answer}"}
+    except Exception as e:
+        err = str(e)
+        if "401" in err:
+            return {"success": False, "error": "Ключ OpenRouter НЕВЕРНЫЙ (401). Проверьте OPENROUTER_API_KEY."}
+        elif "429" in err:
+            return {"success": False, "error": "Лимит исчерпан или нет средств (429)."}
+        elif "404" in err:
+            return {"success": False, "error": f"Модель не найдена (404): {err[:200]}"}
+        else:
+            return {"success": False, "error": f"Ошибка: {err[:200]}"}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -316,6 +434,65 @@ async def update_project_settings(req: UpdateProjectSettingsRequest):
             project.github_token = req.github_token
             project.local_path = req.local_path
             return {"success": True}
+
+
+class RenameProjectRequest(BaseModel):
+    project_id: int
+    new_name: str
+
+
+@router.put("/projects/rename")
+async def rename_project(req: RenameProjectRequest):
+    """Переименовать проект."""
+    from core.memory import async_session, Project, select
+    new_name = req.new_name.strip()
+    if not new_name:
+        raise HTTPException(400, "Название не может быть пустым")
+    async with async_session() as session:
+        async with session.begin():
+            # Check uniqueness
+            existing = await session.execute(select(Project).where(Project.name == new_name))
+            if existing.scalar_one_or_none():
+                raise HTTPException(400, "Проект с таким названием уже существует")
+            # Find and update
+            result = await session.execute(select(Project).where(Project.id == req.project_id))
+            project = result.scalar_one_or_none()
+            if not project:
+                raise HTTPException(404, "Проект не найден")
+            project.name = new_name
+            return {"success": True, "new_name": new_name}
+
+
+class RegenerateKeyRequest(BaseModel):
+    project_id: int
+
+
+@router.post("/projects/regenerate-key")
+async def regenerate_project_key(req: RegenerateKeyRequest):
+    """Перегенерировать UUID ключ проекта."""
+    import uuid as _uuid
+    from core.memory import async_session, Project, select
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(select(Project).where(Project.id == req.project_id))
+            project = result.scalar_one_or_none()
+            if not project:
+                raise HTTPException(404, "Проект не найден")
+            new_key = str(_uuid.uuid4())
+            project.uuid_key = new_key
+            return {"success": True, "uuid_key": new_key}
+
+
+@router.get("/projects/by-key/{key}")
+async def get_project_by_key(key: str):
+    """Получить проект по UUID ключу."""
+    from core.memory import async_session, Project, select
+    async with async_session() as session:
+        result = await session.execute(select(Project).where(Project.uuid_key == key))
+        p = result.scalar_one_or_none()
+        if not p:
+            raise HTTPException(404, "Проект не найден")
+        return {"id": p.id, "name": p.name, "description": p.description, "progress": p.progress}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1123,25 +1300,69 @@ class MilestoneRequest(BaseModel):
 
 @router.get("/projects/{project_id}/context")
 async def get_context_info(project_id: int):
-    from core.context_compressor import ContextCompressor
-    compressor = ContextCompressor()
-    stats = await compressor.get_stats(project_id)
-    snapshots = await compressor.get_snapshots(project_id)
-    return {"stats": stats, "snapshots": snapshots}
+    from core.memory import get_history, get_message_count, get_context_snapshots
+    history = await get_history(project_id)
+    snapshots = await get_context_snapshots(project_id)
+    return {
+        "stats": {
+            "messages_count": len(history),
+            "compress_threshold": 30,
+            "needs_compress": len(history) > 30,
+            "snapshots_count": len(snapshots),
+        },
+        "snapshots": snapshots,
+    }
 
 @router.post("/projects/{project_id}/context/compress")
 async def compress_context(project_id: int):
+    """Ручное сжатие контекста через API. LLM-based с regex fallback + DB cleanup."""
     from core.context_compressor import ContextCompressor
+    from core.memory import get_history
     compressor = ContextCompressor()
-    result = await compressor.compress(project_id)
-    return result
+    history = await get_history(project_id)
+    if not compressor.should_compress(history):
+        return {"success": False, "message": f"Сжатие не требуется ({len(history)} <= 30)"}
+    # Try LLM compression
+    comp_model = ContextCompressor.get_compression_model_config()
+    summary, remaining, was_llm = await compressor.compress_and_cleanup(
+        history, project_id, model_config=comp_model
+    )
+    method = "LLM" if was_llm else "regex"
+    return {
+        "success": bool(summary),
+        "message": f"Сжато ({method}): {len(history) - len(remaining)} сообщений архивировано" if summary else "Сжатие не удалось",
+        "method": method,
+        "summary": summary,
+        "messages_removed": len(history) - len(remaining) if summary else 0,
+        "messages_kept": len(remaining),
+    }
 
 @router.post("/projects/{project_id}/context/milestone")
 async def create_milestone(req: MilestoneRequest):
+    """Создать milestone (точку сохранения контекста). Не удаляет сообщения — только сохраняет snapshot."""
+    from core.memory import get_history, save_context_snapshot
     from core.context_compressor import ContextCompressor
+    history = await get_history(req.project_id)
     compressor = ContextCompressor()
-    result = await compressor.create_milestone(req.project_id, req.title)
-    return result
+    # LLM-based summary for milestone
+    comp_model = ContextCompressor.get_compression_model_config()
+    summary, _, was_llm = await compressor.compress(
+        history, project_id=req.project_id, use_llm=bool(comp_model), model_config=comp_model
+    ) if history else ("", history, False)
+    method = "LLM" if was_llm else "regex"
+    await save_context_snapshot(
+        project_id=req.project_id,
+        thread_id=None,
+        snapshot_type="milestone",
+        title=req.title,
+        summary=summary or f"Текущий контекст: {len(history)} сообщений",
+        key_decisions="",
+        file_changes="",
+        errors_fixed="",
+        message_count_before=len(history),
+        message_count_after=len(history),
+    )
+    return {"success": True, "message": f"Мilestone '{req.title}' сохранён", "summary": summary}
 
 @router.get("/projects/{project_id}/context/snapshots")
 async def list_snapshots(project_id: int):

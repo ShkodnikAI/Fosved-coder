@@ -26,24 +26,41 @@ pending_approvals: dict = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Init DB
+    from core.memory import IS_POSTGRES, DB_URL
+    # Sanitize URL for banner
+    safe_url = DB_URL
+    if "://" in safe_url:
+        parts = safe_url.split("://", 1)
+        auth_part = parts[1].split("@", 1)
+        if len(auth_part) == 2 and ":" in auth_part[0]:
+            user = auth_part[0].split(":")[0]
+            safe_url = f"{parts[0]}://{user}:****@{auth_part[1]}"
+
+    print(f"\n  {'=' * 44}")
+    print(f"  Fosved Coder v2.0 — Запуск")
+    print(f"  БД: {'PostgreSQL (постоянная)' if IS_POSTGRES else 'SQLite (локальная)'}")
+    if IS_POSTGRES:
+        print(f"  URL: {safe_url}")
+    print(f"  {'=' * 44}\n")
     await init_db()
     # Validate all API keys on startup
-    print("  ⏳ Проверка API-ключей...")
+    print("  Проверка API-ключей...")
     results = await keys_manager.startup_validation()
     for pid, info in results.items():
         if pid == "local" and isinstance(info, dict):
             # info — dict of {model_id: {status, name}}
             count = len(info)
-            print(f"    ● local: {count} локальных моделей")
+            print(f"    local: {count} локальных моделей")
             continue
-        status_icon = {"valid": "✓", "rate_limited": "⚠", "invalid": "✗", "available": "●"}.get(info.get("status", "?"), "?")
+        status_icon = {"valid": "+", "rate_limited": "!", "invalid": "x", "available": "*"}.get(info.get("status", "?"), "?")
         model_count = len(info.get("models", []))
-        print(f"    {status_icon} {pid}: {info.get('status', '?')} ({model_count} моделей)")
+        print(f"    [{status_icon}] {pid}: {info.get('status', '?')} ({model_count} моделей)")
     gh = keys_manager.get_github_status()
     if gh["has_token"]:
-        icon = "✓" if gh["enabled"] else "○"
-        print(f"    {icon} GitHub: {'активен (' + gh['user'] + ')' if gh['enabled'] else 'отключён'}")
-    print("  ✓ Ключи проверены\n")
+        icon = "+" if gh["enabled"] else "o"
+        print(f"    [{icon}] GitHub: {'активен (' + gh['user'] + ')' if gh['enabled'] else 'отключён'}")
+    print("  Ключи проверены\n")
+    print(f"  Готово! Откройте приложение в браузере.\n")
     yield
 
 
@@ -75,6 +92,7 @@ async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
     current_project_id = None
     repo_map = None
+    current_mode = "manual"  # "manual" or "auto"
 
     try:
         while True:
@@ -82,7 +100,7 @@ async def websocket_chat(websocket: WebSocket):
 
             # Handle slash commands
             if data.startswith("/"):
-                await handle_command(data, current_project_id, websocket)
+                await handle_command(data, current_project_id, websocket, model_id)
                 continue
 
             # Parse JSON payload (chat message with model/priority info)
@@ -92,6 +110,7 @@ async def websocket_chat(websocket: WebSocket):
                 prompt = payload.get("prompt", data)
                 model_id = payload.get("model")
                 priority = payload.get("priority_models", [])
+                mode = payload.get("mode", current_mode)
             except (json.JSONDecodeError, TypeError):
                 prompt = data
                 model_id = None
@@ -101,6 +120,13 @@ async def websocket_chat(websocket: WebSocket):
             # Handle heartbeat ping
             if payload.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
+                continue
+
+            # Handle mode change
+            if payload.get("type") == "mode_change":
+                new_mode = payload.get("mode", "manual")
+                current_mode = new_mode
+                await websocket.send_json({"type": "system", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}"})
                 continue
 
             # Handle refactor requests
@@ -145,14 +171,20 @@ async def websocket_chat(websocket: WebSocket):
                             project["path"], current_project_id
                         )
 
-            # Route and execute AI response (pass model_id from UI)
-            await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id)
+            # Route based on mode
+            if mode == "auto":
+                # Automatic mode — AI codes autonomously
+                from core.auto_agent import run_auto_mode
+                await run_auto_mode(prompt, current_project_id, repo_map, websocket, model_id=model_id)
+            else:
+                # Manual mode — regular chat (default)
+                await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id)
 
     except WebSocketDisconnect:
         pass
 
 
-async def handle_command(cmd: str, project_id, websocket):
+async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
     """Handle slash commands from the UI"""
     parts = cmd.strip().split(" ", 1)
     command = parts[0]
@@ -207,7 +239,15 @@ async def handle_command(cmd: str, project_id, websocket):
             if project:
                 project_path = project["path"]
         result = await executor.execute("git pull", cwd=project_path)
-        await websocket.send_json({"type": "command_result", "content": result.get("stdout") or result.get("stderr", "Готово")})
+        exit_code = result.get("exit_code", -1)
+        if exit_code == 0:
+            stdout = result.get("stdout", "").strip()
+            # Извлечь полезную инфу: "Already up to date" или "Updating X..Y"
+            lines = [l.strip() for l in stdout.split("\n") if l.strip() and not l.startswith("From ")]
+            summary = lines[0] if lines else "Already up to date"
+            await websocket.send_json({"type": "system", "content": f"📥 Pull OK: {summary}"})
+        else:
+            await websocket.send_json({"type": "error", "content": f"📥 Pull failed: {result.get('stderr', 'unknown error')[:200]}"})
         await websocket.send_json({"type": "done"})
 
     elif command == "/git_push":
@@ -217,12 +257,69 @@ async def handle_command(cmd: str, project_id, websocket):
             if project:
                 project_path = project["path"]
         result = await executor.execute("git push", cwd=project_path)
-        await websocket.send_json({"type": "command_result", "content": result.get("stdout") or result.get("stderr", "Готово")})
+        exit_code = result.get("exit_code", -1)
+        if exit_code == 0:
+            stdout = result.get("stdout", "").strip()
+            if "Everything up-to-date" in stdout:
+                await websocket.send_json({"type": "system", "content": "📤 Push: уже актуально"})
+            else:
+                # Извлечь что запушилось
+                lines = [l for l in stdout.split("\n") if l.strip()]
+                summary = lines[-1] if lines else "OK"
+                await websocket.send_json({"type": "system", "content": f"📤 Push OK: {summary}"})
+        else:
+            await websocket.send_json({"type": "error", "content": f"📤 Push failed: {result.get('stderr', 'unknown error')[:200]}"})
+        await websocket.send_json({"type": "done"})
+
+    elif command == "/quick_push":
+        # Тихий push: auto commit + push без лишнего вывода
+        project_path = None
+        if project_id:
+            project = await get_project(project_id)
+            if project:
+                project_path = project["path"]
+        if not project_path:
+            await websocket.send_json({"type": "system", "content": "Выберите проект для Quick Push"})
+            await websocket.send_json({"type": "done"})
+            return
+
+        msg = args.strip() or "sync"
+        # git add -A
+        await executor.execute("git add -A", cwd=project_path)
+        # git commit (с --allow-empty чтобы не падал)
+        commit_result = await executor.execute(f'git commit -m "{msg}" --allow-empty', cwd=project_path)
+        commit_out = (commit_result.get("stdout", "") + commit_result.get("stderr", "")).strip()
+        if "nothing to commit" in commit_out.lower():
+            await websocket.send_json({"type": "system", "content": "📤 Quick Push: нет изменений для коммита"})
+        else:
+            # push
+            push_result = await executor.execute("git push", cwd=project_path)
+            push_exit = push_result.get("exit_code", -1)
+            if push_exit == 0:
+                await websocket.send_json({"type": "system", "content": f"📤 Quick Push OK: {msg}"})
+            else:
+                await websocket.send_json({"type": "system", "content": f"📤 Committed, push failed: {(push_result.get('stderr', ''))[:100]}"})
         await websocket.send_json({"type": "done"})
 
     elif command == "/clear":
         await clear_history(project_id)
         await websocket.send_json({"type": "system", "content": "История чата очищена."})
+
+    elif command == "/test":
+        # Тестирование и проверка кода проекта
+        project_path = None
+        if project_id:
+            project = await get_project(project_id)
+            if project:
+                project_path = project["path"]
+        if not project_path:
+            await websocket.send_json({"type": "system", "content": "Выберите проект для проверки"})
+            await websocket.send_json({"type": "done"})
+            return
+        from core.code_tester import run_full_check
+        # Determine if user wants to skip tests (--no-tests flag)
+        skip_tests = "--no-tests" in args or "--skip-tests" in args
+        await run_full_check(project_path, websocket, model_id=model_id, run_tests_flag=not skip_tests)
 
     elif command == "/ideas":
         if not args.strip():
@@ -250,8 +347,10 @@ async def handle_command(cmd: str, project_id, websocket):
             "/terminal <cmd> — выполнить shell-команду\n"
             "/approve <id> — подтвердить критическую команду\n"
             "/reject <id> — отклонить критическую команду\n"
-            "/git_pull — git pull в текущем проекте\n"
-            "/git_push — git push в текущем проекте\n"
+            "/git_pull — git pull (тихий)\n"
+            "/git_push — git push (тихий)\n"
+            "/quick_push [msg] — commit + push одним действием\n"
+            "/test [--no-tests] — проверить код проекта (синтаксис, линт, тесты)\n"
             "/ideas <github_url> — проанализировать репозиторий\n"
             "/repo_map — показать структуру проекта\n"
             "/clear — очистить историю чата\n"
@@ -287,8 +386,8 @@ async def websocket_executor(websocket: WebSocket):
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8000))
-    print("  ╔══════════════════════════════════════╗")
-    print("  ║   Fosved Coder v2.0 — Starting...    ║")
-    print(f"  ║   http://0.0.0.0:{port}               ║")
-    print("  ╚══════════════════════════════════════╝")
+    print("  +========================================+")
+    print("  |   Fosved Coder v2.0                  |")
+    print(f"  |   http://0.0.0.0:{port:<21}|")
+    print("  +========================================+")
     uvicorn.run("run:app", host="0.0.0.0", port=port, reload=False)

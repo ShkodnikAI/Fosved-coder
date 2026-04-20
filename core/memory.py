@@ -1,27 +1,99 @@
 import os
-from sqlalchemy import Text, select, delete, func
+import uuid
+from sqlalchemy import Text, select, delete, func, String, Boolean
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from datetime import datetime
+from datetime import datetime, timezone
 import yaml
 
 def load_config():
     if os.path.exists("config.yaml"):
         with open("config.yaml", "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
-    # Default config for Railway (where config.yaml is gitignored)
+    # Default config for cloud deployments
     return {
         "llm": {"default_model": "openrouter/anthropic/claude-3.5-sonnet", "router_model": "openrouter/google/gemini-2.0-flash-exp:free", "api_base": "https://openrouter.ai/api/v1", "api_key": "", "temperature": 0.2, "max_tokens": 4096},
-        "system": {"db_url": "sqlite+aiosqlite:////app/data/fosved_coder.db", "projects_dir": "/app/data/projects", "ideas_cache_dir": "/app/data/.cache/ideas", "archives_dir": "/app/data/archives", "max_iterations": 3, "max_context_files": 20, "max_idea_files": 10, "max_file_size_kb": 50},
+        "system": {"db_url": "", "projects_dir": "/app/data/projects", "ideas_cache_dir": "/app/data/.cache/ideas", "archives_dir": "/app/data/archives", "max_iterations": 3, "max_context_files": 20, "max_idea_files": 10, "max_file_size_kb": 50},
         "security": {"allowed_commands": ["git", "python", "pip", "npm", "node", "cat", "ls", "dir", "echo", "mkdir", "cd"], "blocked_patterns": ["rm -rf /", "DROP DATABASE", "FORMAT C:"]},
     }
 
 CONFIG = load_config()
 
-# Railway: use SQLite by default (Railway auto-sets DATABASE_URL, ignore it)
-DB_URL = CONFIG["system"]["db_url"]
+# ═══════════════════════════════════════════════════════════════
+# DATABASE CONNECTION — PostgreSQL priority, SQLite fallback
+# ═══════════════════════════════════════════════════════════════
+def _resolve_db_url() -> tuple[str, bool]:
+    """
+    Resolve database URL with priority:
+    1. DATABASE_URL env var (Supabase, Neon, Render Postgres, etc.)
+    2. config.yaml db_url
+    3. Fallback to SQLite (local development only)
 
-engine = create_async_engine(DB_URL, echo=False)
+    Returns: (db_url, is_postgres)
+    """
+    def _make_asyncpg_url(raw_url: str) -> str:
+        """Convert any postgres:// or postgresql:// URL to asyncpg format."""
+        # Handle postgres:// (short form used by some providers)
+        url = raw_url.strip()
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+        # Now url starts with postgresql://
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if "+asyncpg" not in url:
+            url = "postgresql+asyncpg://" + url.split("://", 1)[1]
+        # Ensure SSL mode is set for cloud providers (Neon, Supabase, Render)
+        if "sslmode" not in url.lower():
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}sslmode=require"
+        return url
+
+    # 1. Environment variable (highest priority — for cloud deployments)
+    env_url = os.environ.get("DATABASE_URL", "")
+    if env_url:
+        if "postgres" in env_url:
+            return _make_asyncpg_url(env_url), True
+        elif "sqlite" in env_url:
+            return env_url, False
+
+    # 2. Config file
+    config_url = CONFIG["system"].get("db_url", "")
+    if config_url:
+        if "postgres" in config_url:
+            return _make_asyncpg_url(config_url), True
+        elif "sqlite" in config_url:
+            return config_url, False
+
+    # 3. Fallback: SQLite (local development)
+    print("  [db] DATABASE_URL не задан — используется SQLite (локальный режим)")
+    return "sqlite+aiosqlite:///data/fosved_coder.db", False
+
+DB_URL, IS_POSTGRES = _resolve_db_url()
+
+# Engine settings based on DB type
+if IS_POSTGRES:
+    # Sanitize URL for logging (hide password)
+    safe_url = DB_URL
+    if "://" in safe_url:
+        parts = safe_url.split("://", 1)
+        auth_part = parts[1].split("@", 1)
+        if len(auth_part) == 2 and ":" in auth_part[0]:
+            user = auth_part[0].split(":")[0]
+            safe_url = f"{parts[0]}://{user}:****@{auth_part[1]}"
+    engine = create_async_engine(
+        DB_URL,
+        echo=False,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=300,
+        pool_pre_ping=True,  # Auto-detect stale connections
+    )
+    print(f"  [db] PostgreSQL подключен: {safe_url}")
+else:
+    engine = create_async_engine(DB_URL, echo=False)
+    print(f"  [db] SQLite: {DB_URL}")
+
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 class Base(DeclarativeBase):
@@ -39,6 +111,7 @@ class Project(Base):
     github_repo: Mapped[str] = mapped_column(Text, default="")  # GitHub repository URL
     github_token: Mapped[str] = mapped_column(Text, default="")  # Individual GitHub token
     local_path: Mapped[str] = mapped_column(Text, default="")  # Custom local storage path
+    uuid_key: Mapped[str] = mapped_column(String(36), unique=True, index=True, default="")  # Unique project key
     progress: Mapped[int] = mapped_column(default=0)  # 0-100 percent
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
@@ -116,12 +189,67 @@ class ProjectArchive(Base):
 # INIT
 # ═══════════════════════════════════════════════════════════════
 
+async def check_db_connection(max_retries: int = 5, delay: float = 3.0) -> bool:
+    """Проверить подключение к БД с повторными попытками. Возвращает True если OK."""
+    import asyncio
+    from sqlalchemy import text
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(text("SELECT 1" if IS_POSTGRES else "SELECT 1"))
+                result.scalar()
+            return True
+        except Exception as e:
+            if attempt < max_retries:
+                print(f"  [db] Попытка {attempt}/{max_retries} не удалась: {e}. Повтор через {delay}с...")
+                await asyncio.sleep(delay)
+            else:
+                print(f"  [db] ОШИБКА: Не удалось подключиться к БД после {max_retries} попыток: {e}")
+                return False
+    return False
+
+
 async def init_db():
+    """Initialize database tables and directories."""
+    db_type = 'PostgreSQL' if IS_POSTGRES else 'SQLite'
+    print(f"  [db] Инициализация БД ({db_type})...")
+
+    # Verify connection first (with retries for cloud Postgres)
+    connected = await check_db_connection(max_retries=5, delay=3.0)
+    if not connected:
+        if IS_POSTGRES:
+            print("  [db] КРИТИЧЕСКАЯ ОШИБКА: PostgreSQL недоступен. Проверьте DATABASE_URL.")
+        # For SQLite, try to continue anyway (might be a permission issue)
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await migrate_db()
-    os.makedirs(CONFIG["system"]["projects_dir"], exist_ok=True)
-    os.makedirs(CONFIG["system"]["ideas_cache_dir"], exist_ok=True)
+
+    # Report table count
+    try:
+        from sqlalchemy import text
+        async with engine.connect() as conn:
+            if IS_POSTGRES:
+                result = await conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'"
+                ))
+                count = result.scalar()
+            else:
+                result = await conn.execute(text(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+                ))
+                count = result.scalar()
+            print(f"  [db] Таблиц создано: {count}")
+    except Exception as e:
+        print(f"  [db] Предупреждение: не удалось подсчитать таблицы: {e}")
+
+    # Создаём директории только для SQLite (на облаке может не быть доступа к /app/data)
+    if not IS_POSTGRES:
+        try:
+            os.makedirs(CONFIG["system"]["projects_dir"], exist_ok=True)
+            os.makedirs(CONFIG["system"]["ideas_cache_dir"], exist_ok=True)
+        except Exception as e:
+            print(f"  [db] Предупреждение: не удалось создать директории: {e}")
 
 # ═══════════════════════════════════════════════════════════════
 # PROJECTS CRUD
@@ -137,12 +265,15 @@ async def create_project(name: str, path: str, description: str = "", base_promp
             )
             if existing.scalar_one_or_none():
                 return None
-            project = Project(name=name, path=path, description=description, base_prompt=base_prompt, ideas=ideas, github_repo=github_repo, github_token=github_token, local_path=local_path)
+            project = Project(name=name, path=path, description=description, base_prompt=base_prompt, ideas=ideas, github_repo=github_repo, github_token=github_token, local_path=local_path, uuid_key=str(uuid.uuid4()))
             session.add(project)
             await session.flush()
             await session.refresh(project)
-            os.makedirs(path, exist_ok=True)
-            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "github_repo": project.github_repo, "github_token": project.github_token, "local_path": project.local_path, "progress": project.progress, "created_at": str(project.created_at)}
+            try:
+                os.makedirs(path, exist_ok=True)
+            except Exception:
+                pass  # На облаке директория может быть read-only
+            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "github_repo": project.github_repo, "github_token": project.github_token, "local_path": project.local_path, "uuid_key": project.uuid_key, "progress": project.progress, "created_at": str(project.created_at)}
 
 async def get_all_projects() -> list[dict]:
     """Get all projects as list of dicts."""
@@ -151,7 +282,7 @@ async def get_all_projects() -> list[dict]:
             select(Project).order_by(Project.created_at.desc())
         )
         return [
-            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "progress": p.progress, "created_at": str(p.created_at)}
+            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "created_at": str(p.created_at)}
             for p in result.scalars().all()
         ]
 
@@ -163,43 +294,55 @@ async def get_project(project_id: int) -> dict | None:
         )
         p = result.scalar_one_or_none()
         if p:
-            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "progress": p.progress, "created_at": str(p.created_at)}
+            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "created_at": str(p.created_at)}
         return None
 
 async def migrate_db():
     """Add new columns if they don't exist (for upgrades)."""
-    db_url = DB_URL
-    if "sqlite" in db_url:
-        import sqlite3
-        db_file = db_url.split(":///")[-1] if ":///" in db_url else "fosved_coder.db"
-        conn = sqlite3.connect(db_file)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(projects)")
-        existing = {row[1] for row in cursor.fetchall()}
-        new_columns = [
-            ("github_repo", "TEXT", "''"),
-            ("github_token", "TEXT", "''"),
-            ("local_path", "TEXT", "''"),
-        ]
-        for col_name, col_type, col_default in new_columns:
-            if col_name not in existing:
-                cursor.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_type} DEFAULT {col_default}")
-        conn.commit()
-        conn.close()
-    elif "postgres" in db_url:
-        from sqlalchemy import text, inspect
+    if IS_POSTGRES:
+        from sqlalchemy import text
         async with engine.begin() as conn:
-            insp = inspect(conn)
-            existing = await conn.run_sync(lambda sync_conn: insp.get_columns("projects"))
-            existing_names = {col["name"] for col in existing}
             new_columns = {
                 "github_repo": "TEXT DEFAULT ''",
                 "github_token": "TEXT DEFAULT ''",
                 "local_path": "TEXT DEFAULT ''",
+                "uuid_key": "VARCHAR(36) DEFAULT ''",
             }
             for col_name, col_def in new_columns.items():
-                if col_name not in existing_names:
+                try:
                     await conn.execute(text(f"ALTER TABLE projects ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
+                except Exception:
+                    pass  # Column may already exist
+            # Generate UUID for existing projects that don't have one
+            await conn.execute(text(
+                "UPDATE projects SET uuid_key = gen_random_uuid()::text WHERE uuid_key = '' OR uuid_key IS NULL"
+            ))
+    else:
+        import sqlite3
+        db_file = DB_URL.split(":///")[-1] if ":///" in DB_URL else "fosved_coder.db"
+        try:
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(projects)")
+            existing = {row[1] for row in cursor.fetchall()}
+            new_columns = [
+                ("github_repo", "TEXT", "''"),
+                ("github_token", "TEXT", "''"),
+                ("local_path", "TEXT", "''"),
+                ("uuid_key", "VARCHAR(36)", "''"),
+            ]
+            for col_name, col_type, col_default in new_columns:
+                if col_name not in existing:
+                    cursor.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_type} DEFAULT {col_default}")
+            # Generate UUID for existing SQLite projects
+            cursor.execute("SELECT id FROM projects WHERE uuid_key = '' OR uuid_key IS NULL")
+            rows = cursor.fetchall()
+            for row in rows:
+                cursor.execute(f"UPDATE projects SET uuid_key = '{uuid.uuid4()}' WHERE id = {row[0]}")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
 async def update_project_progress(project_id: int, progress: int) -> bool:
     """Update project progress (0-100)."""

@@ -47,7 +47,7 @@ class CommandExecutor:
         except Exception:
             pass
 
-    async def execute(self, cmd: str, cwd: str | None = None, need_approval: bool = True) -> dict:
+    async def execute(self, cmd: str, cwd: str | None = None, need_approval: bool = True, timeout: int = None) -> dict:
         """Execute a shell command and return the result"""
 
         if not cmd or not cmd.strip():
@@ -93,14 +93,14 @@ class CommandExecutor:
 
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=self.COMMAND_TIMEOUT
+                    process.communicate(), timeout=timeout or self.COMMAND_TIMEOUT
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 return {
                     "exit_code": -1,
                     "stdout": "",
-                    "stderr": f"Команда превысила лимит времени ({self.COMMAND_TIMEOUT} сек)",
+                    "stderr": f"Команда превысила лимит времени ({timeout or self.COMMAND_TIMEOUT} сек)",
                     "success": False,
                     "cmd": cmd,
                 }

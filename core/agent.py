@@ -44,6 +44,17 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
         model = model_config["model"]  # full litellm model name
         api_key = model_config["api_key"]
         api_base = model_config.get("api_base", "")
+    else:
+        # Fallback: check if this is a free model (model_id without prefix)
+        print(f"  [agent] get_model_config вернул None для '{model}' — пробуем fallback")
+        for fm in keys_manager.FREE_MODELS:
+            if fm["id"] == model:
+                or_config = keys_manager.providers.get("openrouter", {})
+                api_key = or_config.get("api_key", "")
+                model = f"openrouter/{fm['model']}"
+                api_base = or_config.get("api_base", "https://openrouter.ai/api/v1")
+                print(f"  [agent] fallback: найдена free модель, model={model}, has_key={bool(api_key)}")
+                break
 
     # Debug logging
     has_key = bool(api_key)
@@ -175,21 +186,33 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             if project.get("base_prompt"):
                 project_context_text += f"ИНСТРУКЦИИ: {project['base_prompt']}\n"
 
-    # Auto-compression check
+    # Auto-compression: LLM-based with regex fallback + DB cleanup
     compressed_context_text = ""
-    if project_id:
+    compressor = ContextCompressor()
+    if project_id and compressor.should_compress(history):
         try:
-            compressor = ContextCompressor()
-            if await compressor.should_compress(project_id):
-                compress_result = await compressor.compress(project_id)
-                if compress_result.get("compressed"):
-                    compressed_context_text = f"[Контекст сжат: {compress_result['messages_removed']} сообщений удалено, {compress_result['messages_kept']} оставлено]"
-                    await websocket.send_json({
-                        "type": "info",
-                        "content": f"Автосжатие: {compress_result['messages_removed']} старых сообщений архивировано"
-                    })
-        except Exception:
-            pass
+            # Find a model for LLM compression (prefer free)
+            comp_model = ContextCompressor.get_compression_model_config()
+            await websocket.send_json({
+                "type": "info",
+                "content": "Автосжатие контекста..."
+            })
+            # compress_and_cleanup: LLM summarize + delete old from DB
+            compressed_summary, remaining, was_llm = await compressor.compress_and_cleanup(
+                history, project_id, model_config=comp_model
+            )
+            if compressed_summary:
+                compressed_context_text = compressed_summary
+                method = "LLM" if was_llm else "regex"
+                removed = len(history) - len(remaining)
+                await websocket.send_json({
+                    "type": "info",
+                    "content": f"Автосжатие ({method}): {removed} сообщений сжато, {len(remaining)} активны"
+                })
+                # Use compressed history for LLM context
+                history = remaining
+        except Exception as e:
+            print(f"  [agent] compression error: {e}")
 
     repo_map_text = ""
     if repo_map:
@@ -199,8 +222,12 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         repo_map=repo_map_text,
         ideas_context="",
         project_context=project_context_text,
-        compressed_context=compressed_context_text,
+        compressed_context="",
     )
+
+    # Inject compressed context into system prompt
+    if compressed_context_text:
+        system_prompt = compressor.build_compressed_system_prompt(system_prompt, compressed_context_text)
 
     await save_message(project_id, "user", prompt)
 
@@ -232,19 +259,23 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     # Try each model with fallback
     ai_response = None
     tried_count = 0
+    last_error = ""
 
     for i, model_to_try in enumerate(models_to_try):
         # Verify model has a config with key
         model_config = keys_manager.get_model_config(model_to_try)
         if not model_config:
+            print(f"  [agent] fallback #{i}: {model_to_try} — нет конфига, пропускаем")
             continue
-        if not model_config.get("api_key") and model_to_try not in [m["id"] for m in all_models if m["type"] == "local"]:
-            # For free models, check if OpenRouter key exists
-            is_free = any(fm["id"] == model_to_try for fm in keys_manager.FREE_MODELS)
-            if not is_free or not model_config.get("api_key"):
-                continue
+        # Skip models without API key (except local models)
+        has_key = bool(model_config.get("api_key"))
+        is_local = model_to_try in [m["id"] for m in all_models if m["type"] == "local"]
+        if not has_key and not is_local:
+            print(f"  [agent] fallback #{i}: {model_to_try} — нет API ключа, пропускаем")
+            continue
 
         tried_count += 1
+        print(f"  [agent] fallback #{i}: пробую модель {model_to_try}")
 
         # Send typing indicator
         await websocket.send_json({"type": "typing", "model": model_to_try})
@@ -255,7 +286,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             model_name = m_info["name"] if m_info else model_to_try
             await websocket.send_json({
                 "type": "info",
-                "content": f"Переключаюсь на {model_name}..."
+                "content": f"Переключаюсь на {model_name} (попытка {i+1})..."
             })
 
         ai_response = await stream_llm_response(
@@ -263,9 +294,15 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             model=model_to_try, system_prompt=system_prompt
         )
         if ai_response is not None:
+            print(f"  [agent] fallback #{i}: {model_to_try} — успешно")
             break
+        else:
+            print(f"  [agent] fallback #{i}: {model_to_try} — не удалось")
 
     if ai_response:
         await save_message(project_id, "ai", ai_response)
     elif tried_count == 0:
-        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом. Добавьте ключ через 🔑 или Environment Variables."})
+        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом. Добавьте ключ через кнопку \U0001f511 или через Environment Variables на сервере."})
+    else:
+        # Все модели не ответили — информируем пользователя
+        await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили. Проверьте API ключи и подключение к интернету."})

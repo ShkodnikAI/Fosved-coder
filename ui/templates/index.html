@@ -11,6 +11,15 @@
 </head>
 <body>
 
+    <!-- ═══════════ LOADING SCREEN ═══════════ -->
+    <div id="loading-screen" style="position:fixed;inset:0;z-index:99999;background:#8B1A1A;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;transition:opacity 0.5s ease;">
+        <div style="font-size:28px;font-weight:700;color:#fff;font-family:'Segoe UI',system-ui,sans-serif;letter-spacing:1px;">FOSVED CODER</div>
+        <div style="font-size:14px;color:rgba(255,255,255,0.7);font-family:'Segoe UI',system-ui,sans-serif;" id="loading-text">Загрузка...</div>
+        <div style="width:180px;height:3px;background:rgba(255,255,255,0.15);border-radius:2px;overflow:hidden;">
+            <div id="loading-bar" style="width:0%;height:100%;background:rgba(255,255,255,0.8);border-radius:2px;transition:width 0.4s ease;"></div>
+        </div>
+    </div>
+
     <!-- ═══════════ TOAST CONTAINER ═══════════ -->
     <div id="toast-container"></div>
 
@@ -44,6 +53,16 @@
                 <div class="project-list" id="project-list">
                     <div class="project-empty">Нет проектов</div>
                 </div>
+            </div>
+
+            <!-- MODE TOGGLE (Manual / Automatic) -->
+            <div class="mode-toggle-bar" id="mode-toggle-bar">
+                <div class="mode-toggle-track" id="mode-toggle-track" onclick="toggleWorkMode()">
+                    <div class="mode-toggle-thumb" id="mode-toggle-thumb"></div>
+                    <div class="mode-toggle-label" id="mode-toggle-label-manual">Ручной</div>
+                    <div class="mode-toggle-label" id="mode-toggle-label-auto">Авто</div>
+                </div>
+                <div class="mode-status-dot" id="mode-status-dot"></div>
             </div>
 
             <!-- AI Models (gets most of the space) -->
@@ -83,6 +102,7 @@
                 <button class="btn-add" onclick="scanLocalModels('ollama')" title="Ollama" data-hint="Найти локальные модели Ollama на этом устройстве" style="flex:1; font-size:11px; padding:4px 6px;">🔍 Ollama</button>
                 <button class="btn-add" onclick="scanLocalModels('lmstudio')" title="LM Studio" data-hint="Найти локальные модели LM Studio на этом устройстве" style="flex:1; font-size:11px; padding:4px 6px;">🔍 LM</button>
                 <button class="btn-add" onclick="showKeysModal()" data-hint="Управление API ключами — добавляйте и проверяйте ключи для Claude, OpenAI, Gemini, Grok, OpenRouter" style="flex:1; font-size:11px; padding:4px 6px;">🔑</button>
+                <button class="btn-add" onclick="testOpenRouter()" data-hint="Быстрый тест OpenRouter ключа — отправляем запрос к бесплатной модели" style="flex:1; font-size:11px; padding:4px 6px;">🧪</button>
                 <button class="btn-add" onclick="showStats()" data-hint="Статистика использования моделей и роутинга" style="flex:1; font-size:11px; padding:4px 6px;">📊</button>
             </div>
             <!-- Color Legend -->
@@ -213,6 +233,28 @@
         </div>
     </div>
 
+    <!-- ═══════════ AUTO LOG PANEL (right side) ═══════════ -->
+    <div class="slide-panel slide-panel-right" id="panel-auto-log" style="width:380px;">
+        <div class="slide-panel-header" style="background:linear-gradient(135deg, rgba(78,201,176,0.15), rgba(200,169,126,0.15));">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="slide-panel-title">📋 Лог выполнения</span>
+                <span id="auto-log-badge" style="display:none;background:var(--green);color:#000;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;">0</span>
+                <span id="auto-log-status" style="font-size:11px;color:var(--text-secondary);"></span>
+            </div>
+            <div style="display:flex;gap:6px;">
+                <button class="btn-small btn-outline" onclick="clearAutoLog()" title="Очистить лог">🗑</button>
+                <button class="btn-small btn-outline" onclick="toggleAutoLogPanel()" title="Свернуть">✕</button>
+            </div>
+        </div>
+        <div class="slide-panel-body" style="padding:0;">
+            <!-- Progress bar -->
+            <div id="auto-log-progress-bar" style="display:none;height:3px;background:var(--bg-primary);overflow:hidden;flex-shrink:0;">
+                <div id="auto-log-progress-fill" style="height:100%;background:var(--green);width:0%;transition:width 0.3s ease;border-radius:2px;"></div>
+            </div>
+            <div id="auto-log-entries" style="flex:1;overflow-y:auto;padding:8px 0;display:flex;flex-direction:column;gap:1px;font-family:'Cascadia Code',Consolas,monospace;font-size:12px;"></div>
+        </div>
+    </div>
+
     <!-- ═══════════ ARCHIVE PANEL (modal) ═══════════ -->
     <div class="modal" id="archive-modal" onclick="if(event.target===this)closeArchiveModal()">
         <div class="modal-content" style="width:720px;max-width:95vw;" onclick="event.stopPropagation()">
@@ -289,9 +331,12 @@
                     </select>
                     <div id="template-desc" style="font-size:12px;color:var(--text-secondary);margin-top:6px;display:none;padding:8px;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;line-height:1.4;"></div>
                 </div>
-                <div class="form-group">
-                    <label>Название проекта *</label>
-                    <input type="text" id="proj-name" placeholder="Например: WisdomOfDay">
+                <div class="form-group" id="proj-name-group">
+                    <label>Название проекта * <span id="proj-name-edit-hint" style="display:none;font-size:11px;color:var(--amber);font-weight:normal;margin-left:8px;">Нажмите чтобы переименовать</span></label>
+                    <div style="display:flex;gap:6px;">
+                        <input type="text" id="proj-name" placeholder="Например: WisdomOfDay" style="flex:1;">
+                        <button class="btn-small btn-outline" id="proj-rename-btn" onclick="renameProjectFromModal()" style="display:none;white-space:nowrap;padding:8px 12px;">Переименовать</button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Краткое описание</label>
@@ -332,6 +377,16 @@
                         <div style="color:var(--text-secondary);font-size:12px;">Модели можно настроить после создания проекта через ⚡</div>
                     </div>
                 </div>
+                <!-- Project UUID Key (only shown in edit mode) -->
+                <div class="form-group" id="proj-uuid-group" style="display:none;">
+                    <label>Ключ проекта (UUID)</label>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <code id="proj-uuid-display" style="flex:1;padding:8px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--amber);letter-spacing:0.5px;user-select:all;word-break:break-all;"></code>
+                        <button class="btn-small" onclick="copyProjectKey()" title="Копировать ключ" style="white-space:nowrap;padding:8px 10px;">📋</button>
+                        <button class="btn-small btn-outline" onclick="regenerateProjectKey()" title="Сгенерировать новый ключ" style="white-space:nowrap;padding:8px 10px;">🔄</button>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">Используется для идентификации проекта при интеграции с внешними сервисами</div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-small btn-outline" onclick="closeProjectModal()" style="padding:10px 20px;">Отмена</button>
@@ -368,6 +423,7 @@
     let currentFileViewPath = null;
     let openPanels = new Set();
     let editingProjectId = null;  // null = creating new, number = editing existing
+    let workMode = "manual";  // "manual" or "auto"
 
     const templateDescriptions = {
         "fastapi": "Современный Python фреймворк для высокопроизводительных API. Автоматическая генерация OpenAPI/Swagger документации, встроенная поддержка async/await, валидация данных через Pydantic. Идеален для REST API, микросервисов и бэкендов.",
@@ -415,13 +471,29 @@
     let wsMessageQueue = [];
     let wsIsConnected = false;
 
+    function hideLoadingScreen() {
+        const el = document.getElementById('loading-screen');
+        if (!el) return;
+        el.style.opacity = '0';
+        setTimeout(() => { el.style.display = 'none'; }, 500);
+    }
+
+    function updateLoadingBar(pct, text) {
+        const bar = document.getElementById('loading-bar');
+        const txt = document.getElementById('loading-text');
+        if (bar) bar.style.width = pct + '%';
+        if (txt && text) txt.textContent = text;
+    }
+
     function wsConnect() {
+        updateLoadingBar(20, 'Подключение к серверу...');
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         ws = new WebSocket(protocol + "//" + window.location.host + "/ws");
 
         ws.onopen = () => {
             wsReconnectAttempts = 0;
             wsIsConnected = true;
+            updateLoadingBar(50, 'Загрузка моделей...');
             chatBox.innerHTML = "";
             addMessage("system", "Fosved Coder готов. Выберите модель и начните работу.");
             loadModels();
@@ -446,6 +518,7 @@
             if (data.type === "chunk") {
                 // Remove typing indicator on first chunk
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
+                setWaitingAI(false);
                 if (!currentAiDiv) {
                     currentAiDiv = document.createElement("div");
                     currentAiDiv.className = "msg ai";
@@ -457,9 +530,11 @@
                 chatBox.scrollTop = chatBox.scrollHeight;
             } else if (data.type === "done") {
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
+                setWaitingAI(false);
                 currentAiDiv = null; currentAiText = "";
             } else if (data.type === "error") {
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
+                setWaitingAI(false);
                 addMessage("error", data.content);
                 showToast(data.content, "error");
                 currentAiDiv = null; currentAiText = "";
@@ -467,6 +542,7 @@
                 addMessage("system", data.content);
             } else if (data.type === "typing") {
                 // Show typing indicator with model name
+                setWaitingAI(true);
                 if (currentTypingDiv) currentTypingDiv.remove();
                 currentTypingDiv = document.createElement("div");
                 currentTypingDiv.className = "msg ai typing-indicator";
@@ -478,8 +554,17 @@
                 chatBox.scrollTop = chatBox.scrollHeight;
             } else if (data.type === "command_result") {
                 addMessage("terminal", data.content);
+            } else if (data.type === "auto_step") {
+                addMessage("system", data.content || "Авто-шаг выполнен");
+            } else if (data.type === "auto_done") {
+                addMessage("system", data.content || "Автоматическое выполнение завершено");
+            } else if (data.type === "auto_error") {
+                addMessage("error", data.content);
+                showToast(data.content, "error");
             } else if (data.type === "idea_result") {
                 addMessage("idea", data.content);
+            } else if (data.type === "auto_log") {
+                handleAutoLog(data);
             } else {
                 addMessage(data.type || "system", data.content || "");
             }
@@ -515,6 +600,15 @@
     // Override ws.send and ws.send usage
     wsConnect();
 
+    // Safety: hide loading screen after 15 seconds
+    setTimeout(() => {
+        const el = document.getElementById('loading-screen');
+        if (el && el.style.display !== 'none') {
+            updateLoadingBar(100, 'Готово');
+            hideLoadingScreen();
+        }
+    }, 15000);
+
     // ═══════════════════════════════════════════════════════
     // Messages
     // ═══════════════════════════════════════════════════════
@@ -544,6 +638,37 @@
     // ═══════════════════════════════════════════════════════
     // Input
     // ═══════════════════════════════════════════════════════
+    let isWaitingAI = false;
+    let waitTimer = null;
+
+    function setWaitingAI(state) {
+        isWaitingAI = state;
+        const input = document.getElementById('user-input');
+        const progress = document.getElementById('header-progress');
+        const fill = document.getElementById('header-progress-fill');
+        if (state) {
+            input.classList.add('input-waiting');
+            progress.style.display = 'flex';
+            fill.style.width = '0%';
+            document.getElementById('header-progress-text').textContent = '...';
+            // Анимация полосы: заполняется до 90% за 30 сек
+            let w = 0;
+            clearInterval(waitTimer);
+            waitTimer = setInterval(() => {
+                w = Math.min(w + 1, 90);
+                fill.style.width = w + '%';
+                document.getElementById('header-progress-text').textContent = w + '%';
+                if (w >= 90) clearInterval(waitTimer);
+            }, 333);
+        } else {
+            input.classList.remove('input-waiting');
+            clearInterval(waitTimer);
+            fill.style.width = '100%';
+            document.getElementById('header-progress-text').textContent = 'OK';
+            setTimeout(() => { progress.style.display = 'none'; }, 800);
+        }
+    }
+
     function sendMessage() {
         const input = document.getElementById("user-input");
         const text = input.value.trim();
@@ -557,7 +682,9 @@
         let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
         addMessage("user", displayText);
 
-        let payload = { type: "chat", prompt: text, model: activeModelId };
+        setWaitingAI(true);
+
+        let payload = { type: "chat", prompt: text, model: activeModelId, mode: workMode };
         if (priorityModels.length) {
             payload.priority_models = priorityModels;
         }
@@ -611,6 +738,44 @@
     }
 
     // ═══════════════════════════════════════════════════════
+    // WORK MODE TOGGLE (Manual / Automatic)
+    // ═══════════════════════════════════════════════════════
+    function toggleWorkMode() {
+        workMode = workMode === "manual" ? "auto" : "manual";
+        updateModeUI();
+        showToast(workMode === "auto" ? "Автоматический режим включён — ИИ кодит сам" : "Ручной режим — вы контролируете каждый шаг", "info");
+        // Notify server about mode change
+        wsSend({ type: "mode_change", mode: workMode });
+    }
+
+    function updateModeUI() {
+        const track = document.getElementById("mode-toggle-track");
+        const thumb = document.getElementById("mode-toggle-thumb");
+        const labelManual = document.getElementById("mode-toggle-label-manual");
+        const labelAuto = document.getElementById("mode-toggle-label-auto");
+        const dot = document.getElementById("mode-status-dot");
+
+        if (workMode === "auto") {
+            track.classList.add("mode-auto");
+            thumb.style.transform = "translateX(48px)";
+            labelManual.style.color = "var(--text-secondary)";
+            labelAuto.style.color = "#fff";
+            dot.style.background = "var(--green)";
+            dot.title = "Автоматический режим активен";
+        } else {
+            track.classList.remove("mode-auto");
+            thumb.style.transform = "translateX(2px)";
+            labelManual.style.color = "#fff";
+            labelAuto.style.color = "var(--text-secondary)";
+            dot.style.background = "var(--accent)";
+            dot.title = "Ручной режим";
+        }
+    }
+
+    // Initialize mode UI on load
+    setTimeout(updateModeUI, 100);
+
+    // ═══════════════════════════════════════════════════════
     // MODELS & PRIORITY
     // ═══════════════════════════════════════════════════════
     let priorityModels = [];
@@ -622,7 +787,13 @@
             allModels = data.models || [];
             renderModels();
             renderPriorityBar();
-        } catch(e) { console.error("Failed to load models:", e); }
+            updateLoadingBar(80, 'Модели загружены. Загрузка проектов...');
+            hideLoadingScreen();
+        } catch(e) {
+            console.error("Failed to load models:", e);
+            updateLoadingBar(80, 'Ошибка загрузки моделей');
+            hideLoadingScreen();
+        }
     }
 
     // Helper: get 2-letter avatar initials for a model
@@ -640,9 +811,12 @@
 
     // Helper: get status badge HTML
     function getStatusBadge(m) {
+        if (m._canSelect) return '<span class="model-status-badge badge-ok">OK</span>';
         if (m.status === 'valid') return '<span class="model-status-badge badge-ok">OK</span>';
         if (m.status === 'rate_limited') return '<span class="model-status-badge badge-warn">LIMIT</span>';
         if (m.status === 'invalid') return '<span class="model-status-badge badge-error">ERR</span>';
+        if (m.status === 'available') return '<span class="model-status-badge badge-ok">OK</span>';
+        if (m.status === 'no_key') return '<span class="model-status-badge badge-none">NO KEY</span>';
         return '<span class="model-status-badge badge-none">—</span>';
     }
 
@@ -667,7 +841,7 @@
         // Card classes
         let cardCls = 'model-card';
         if (isActive) cardCls += ' card-active';
-        else if (m.status === 'valid') cardCls += ' card-valid';
+        else if (m.status === 'valid' || m._canSelect) cardCls += ' card-valid';
         else if (m.status === 'rate_limited') cardCls += ' card-warning';
         else if (m.status === 'invalid') cardCls += ' card-error';
 
@@ -733,11 +907,15 @@
         // ═══ 3. БЕСПЛАТНЫЕ (через OpenRouter :free) ═══
         if (freeModels.length) {
             html += '<div class="model-section-label" style="color:var(--blue);">БЕСПЛАТНЫЕ (OPENROUTER)</div>';
-            const hasORKey = allModels.some(m => m.type === 'paid' && m.provider === 'openrouter' && (m.status === 'valid' || m.status === 'rate_limited'));
+            const hasORKey = allModels.some(m => m.provider === 'openrouter' && (m.status === 'valid' || m.status === 'rate_limited'));
             if (!hasORKey) {
-                html += '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0 6px 4px;">Нужен ключ OpenRouter — нажмите 🔑 ниже</div>';
+                html += '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0 6px 4px;">Нужен ключ OpenRouter — нажмите кнопку ключей на панели ниже</div>';
             }
-            freeModels.forEach(m => { html += buildModelCard(m, 'free'); });
+            freeModels.forEach(m => {
+                // Если есть OR ключ — показываем как доступные
+                if (hasORKey) m._canSelect = true;
+                html += buildModelCard(m, 'free');
+            });
         }
 
         // ═══ 4. ЛОКАЛЬНЫЕ И КАСТОМНЫЕ ═══
@@ -829,11 +1007,30 @@
         await loadModels();
     }
 
+    async function testOpenRouter() {
+        showToast('Тестируем OpenRouter...', 'info');
+        try {
+            const resp = await fetch('/api/v1/models/test-openrouter', { method: 'POST' });
+            const data = await resp.json();
+            if (data.success) {
+                showToast(data.message, 'success');
+                // Перезагрузим модели чтобы обновить статусы
+                await loadModels();
+            } else {
+                showToast(data.error || 'Тест не пройден', 'error');
+            }
+        } catch (e) {
+            showToast('Ошибка теста: ' + e, 'error');
+        }
+    }
+
     // ═══════════════════════════════════════════════════════
     // PRIORITY MODELS MODAL
     // ═══════════════════════════════════════════════════════
     function showPriorityModal() {
-        const available = allModels.filter(m => m.type === 'paid' || (m.type === 'free' && m.status === 'available'));
+        const available = allModels.filter(m => 
+            (m.status === 'valid' || m.status === 'rate_limited' || m.status === 'available' || m._canSelect)
+        );
         if (!available.length) { openGenericModal("Приоритетные модели", '<div class="key-error">Нет доступных моделей. Настройте API ключи.</div>'); return; }
 
         const slotLabels = ['Основная', 'Резервная', 'Фоллбэк'];
@@ -941,8 +1138,19 @@
         if (editingProjectId) {
             // Режим редактирования
             title.textContent = "Редактировать проект";
-            submitBtn.textContent = "Сохранить";
+            submitBtn.textContent = "Сохранить изменения";
             submitBtn.onclick = saveProject;
+            // Скрыть секцию шаблона
+            document.getElementById("proj-template").closest('.form-group').style.display = "none";
+            // Показать кнопку переименования и подсказку
+            document.getElementById("proj-rename-btn").style.display = "";
+            document.getElementById("proj-name-edit-hint").style.display = "";
+            // Название редактируемое (для переименования)
+            document.getElementById("proj-name").readOnly = false;
+            document.getElementById("proj-name").style.opacity = "1";
+            document.getElementById("proj-name").title = "";
+            // Показать UUID ключ
+            document.getElementById("proj-uuid-group").style.display = "";
             const p = allProjects.find(x => x.id === editingProjectId);
             if (p) {
                 document.getElementById("proj-name").value = p.name || "";
@@ -952,12 +1160,22 @@
                 document.getElementById("proj-github-repo").value = p.github_repo || "";
                 document.getElementById("proj-github-token").value = p.github_token || "";
                 document.getElementById("proj-local-path").value = p.local_path || p.path || "";
+                document.getElementById("proj-uuid-display").textContent = p.uuid_key || "Не назначен";
             }
         } else {
             // Режим создания
             title.textContent = "Создать новый проект";
             submitBtn.textContent = "Создать проект";
             submitBtn.onclick = createProject;
+            document.getElementById("proj-template").disabled = false;
+            document.getElementById("proj-template").style.opacity = "1";
+            document.getElementById("proj-template").closest('.form-group').style.display = "";
+            document.getElementById("proj-rename-btn").style.display = "none";
+            document.getElementById("proj-name-edit-hint").style.display = "none";
+            document.getElementById("proj-name").readOnly = false;
+            document.getElementById("proj-name").style.opacity = "1";
+            document.getElementById("proj-name").title = "";
+            document.getElementById("proj-uuid-group").style.display = "none";
         }
 
         modal.classList.add("active");
@@ -1065,6 +1283,68 @@
         } catch(e) { showToast("Ошибка сохранения", "error"); }
     }
 
+    async function renameProjectFromModal() {
+        if (!editingProjectId) return;
+        const newName = document.getElementById("proj-name").value.trim();
+        if (!newName) { showToast("Введите название проекта", "error"); return; }
+        const p = allProjects.find(x => x.id === editingProjectId);
+        if (p && p.name === newName) { showToast("Название не изменилось", "info"); return; }
+
+        try {
+            const resp = await fetch('/api/v1/projects/rename', {
+                method: 'PUT',
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ project_id: editingProjectId, new_name: newName })
+            });
+            if (resp.ok) {
+                await loadProjects();
+                // Обновить заголовок если это текущий проект
+                if (currentProjectId === editingProjectId) {
+                    document.getElementById("current-project-name").textContent = newName;
+                }
+                showToast(`Проект переименован в "${newName}"`, "success");
+            } else {
+                const err = await resp.json();
+                showToast(`Ошибка: ${err.detail}`, "error");
+            }
+        } catch(e) { showToast("Ошибка переименования", "error"); }
+    }
+
+    function copyProjectKey() {
+        const keyEl = document.getElementById("proj-uuid-display");
+        const key = keyEl.textContent;
+        if (!key || key === "Не назначен") { showToast("Ключ не назначен", "error"); return; }
+        navigator.clipboard.writeText(key).then(() => {
+            showToast("Ключ скопирован: " + key.substring(0, 12) + "...", "success");
+        }).catch(() => {
+            // Fallback
+            keyEl.select();
+            document.execCommand("copy");
+            showToast("Ключ скопирован", "success");
+        });
+    }
+
+    async function regenerateProjectKey() {
+        if (!editingProjectId) return;
+        if (!confirm("Сгенерировать новый UUID ключ? Старый ключ перестанет работать.")) return;
+        try {
+            const resp = await fetch('/api/v1/projects/regenerate-key', {
+                method: 'POST',
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ project_id: editingProjectId })
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                document.getElementById("proj-uuid-display").textContent = data.uuid_key;
+                await loadProjects();
+                showToast("Новый ключ сгенерирован", "success");
+            } else {
+                const err = await resp.json();
+                showToast(`Ошибка: ${err.detail}`, "error");
+            }
+        } catch(e) { showToast("Ошибка генерации ключа", "error"); }
+    }
+
     async function loadProjects() {
         try {
             const resp = await fetch("/api/v1/projects");
@@ -1076,7 +1356,9 @@
                 const div = document.createElement("div");
                 div.className = "project-item"; div.dataset.id = p.id;
                 const progressHtml = p.progress > 0 ? `<div class="project-progress"><div class="project-progress-fill" style="width:${p.progress}%"></div><span class="project-progress-text">${p.progress}%</span></div>` : '';
-                div.innerHTML = `<div class="project-info"><span class="project-name">📁 ${escapeHtml(p.name)}</span>${progressHtml}</div><div style="display:flex;gap:4px;"><button class="btn-delete" onclick="event.stopPropagation();openProjectModal(${p.id})" title="Редактировать" style="opacity:1;font-size:12px;">✏</button><button class="btn-delete" onclick="event.stopPropagation();archiveProjectModal(${p.id},'${escapeHtml(p.name)}')" title="Архивировать" style="opacity:1;font-size:12px;">🗃</button><button class="btn-delete" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">✕</button></div>`;
+                const keyShort = p.uuid_key ? p.uuid_key.substring(0, 8) : '';
+                const keyHtml = keyShort ? `<span class="project-uuid" title="${p.uuid_key}">${keyShort}</span>` : '';
+                div.innerHTML = `<div class="project-info"><span class="project-name">📁 ${escapeHtml(p.name)}</span>${keyHtml}${progressHtml}</div><div class="project-actions"><button class="btn-project-action btn-edit" onclick="event.stopPropagation();openProjectModal(${p.id})" title="Редактировать проект">✏️</button><button class="btn-project-action btn-archive" onclick="event.stopPropagation();archiveProjectModal(${p.id},'${escapeHtml(p.name)}')" title="Архивировать">🗃️</button><button class="btn-project-action btn-delete-project" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить проект">✕</button></div>`;
                 div.onclick = () => selectProject(p.id, div);
                 list.appendChild(div);
             });
@@ -1106,7 +1388,10 @@
                         const models = JSON.parse(p.selected_models);
                         if (Array.isArray(models) && models.length) {
                             priorityModels = models.slice(0, 3);
-                            activeModelId = priorityModels[0];
+                            // Не перезаписываем activeModelId, если пользователь уже выбрал модель
+                            if (!activeModelId || !allModels.find(x => x.id === activeModelId)) {
+                                activeModelId = priorityModels[0];
+                            }
                             renderModels();
                             renderPriorityBar();
                         } else { priorityModels = []; renderModels(); renderPriorityBar(); }
@@ -1155,14 +1440,18 @@
 
         if (p) {
             // Кнопки только для активного проекта
+            buttons.push({ label: '✏️ Редактировать', action: `openProjectModal(${p.id})` });
             buttons.push({ label: '🖥 Сервер', action: "insertCommand('/terminal ')" });
             buttons.push({ label: '🌐 Сайт', action: "openProjectSite()" });
-            buttons.push({ label: '📥 Pull', action: "insertCommand('/git_pull')" });
-            buttons.push({ label: '📤 Push', action: "insertCommand('/git_push')" });
+            buttons.push({ label: '📥 Pull', action: "wsSend('/git_pull')" });
+            buttons.push({ label: '📤 Push', action: "wsSend('/git_push')" });
+            buttons.push({ label: '🚀 Sync', action: "wsSend('/quick_push sync')" });
             buttons.push({ label: '🔍 Search', action: "togglePanel('search')" });
             buttons.push({ label: '🔀 Git', action: "togglePanel('git')" });
             buttons.push({ label: '📦 Packages', action: "togglePanel('packages')" });
             buttons.push({ label: '📁 Files', action: "togglePanel('files')" });
+            buttons.push({ label: '🧪 Test', action: "wsSend('/test')" });
+            buttons.push({ label: '📋 Лог', action: "toggleAutoLogPanel()" });
 
             // GitHub проекта (если указан свой репо)
             if (p.github_repo) {
@@ -1594,6 +1883,161 @@
         if (!panel) return;
         panel.classList.remove("active");
         openPanels.delete(name);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 📋 AUTO LOG PANEL
+    // ═══════════════════════════════════════════════════════
+    let autoLogCount = 0;
+    let autoLogPanelVisible = false;
+    let autoLogTotalSteps = 0;
+    let autoLogDone = false;
+
+    const AUTO_LOG_ICONS = {
+        info:    { icon: '◉', color: 'var(--blue)' },
+        success: { icon: '✔', color: 'var(--green)' },
+        warning: { icon: '⚠', color: 'var(--amber)' },
+        error:   { icon: '✖', color: 'var(--red)' },
+        command: { icon: '▸', color: 'var(--text-secondary)' },
+        file:    { icon: '∎', color: '#569cd6' },
+        done:    { icon: '■', color: 'var(--green)' },
+    };
+
+    function handleAutoLog(data) {
+        const level = data.level || 'info';
+        const content = data.content || '';
+        const time = data.time || '';
+        const step = data.step;
+        const total = data.total;
+
+        // Handle "done" signal — mark completion
+        if (level === 'done') {
+            autoLogDone = true;
+            updateAutoLogProgress();
+            const statusEl = document.getElementById('auto-log-status');
+            if (statusEl) statusEl.textContent = 'Завершено';
+            return;
+        }
+
+        // Auto-open panel on first log entry
+        if (!autoLogPanelVisible) {
+            openAutoLogPanel();
+        }
+
+        // Track total steps for progress
+        if (total && total > 0 && autoLogTotalSteps === 0) {
+            autoLogTotalSteps = total;
+        }
+
+        // Create log entry element
+        const entry = document.createElement('div');
+        entry.className = 'auto-log-entry auto-log-' + level;
+
+        const iconData = AUTO_LOG_ICONS[level] || AUTO_LOG_ICONS.info;
+
+        let stepBadge = '';
+        if (step !== undefined && total !== undefined) {
+            stepBadge = '<span class="auto-log-step">' + step + '/' + total + '</span>';
+        }
+
+        entry.innerHTML =
+            '<span class="auto-log-icon" style="color:' + iconData.color + '">' + iconData.icon + '</span>' +
+            '<span class="auto-log-time">' + escapeHtml(time) + '</span>' +
+            stepBadge +
+            '<span class="auto-log-text">' + escapeHtml(content) + '</span>';
+
+        const container = document.getElementById('auto-log-entries');
+        if (container) {
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        autoLogCount++;
+        updateAutoLogBadge();
+
+        // Update progress bar if we have step info
+        if (step !== undefined && total !== undefined) {
+            updateAutoLogProgress(step, total);
+        }
+
+        // Update status text
+        const statusEl = document.getElementById('auto-log-status');
+        if (statusEl && level !== 'done') {
+            if (level === 'error') {
+                statusEl.textContent = 'Ошибка';
+                statusEl.style.color = 'var(--red)';
+            } else if (level === 'success' && step !== undefined) {
+                statusEl.textContent = 'Шаг ' + step + '/' + total;
+                statusEl.style.color = 'var(--green)';
+            } else {
+                statusEl.textContent = 'Выполнение...';
+                statusEl.style.color = 'var(--text-secondary)';
+            }
+        }
+    }
+
+    function openAutoLogPanel() {
+        const panel = document.getElementById('panel-auto-log');
+        if (!panel) return;
+        panel.classList.add('active');
+        openPanels.add('auto-log');
+        autoLogPanelVisible = true;
+    }
+
+    function toggleAutoLogPanel() {
+        const panel = document.getElementById('panel-auto-log');
+        if (!panel) return;
+        if (panel.classList.contains('active')) {
+            panel.classList.remove('active');
+            openPanels.delete('auto-log');
+            autoLogPanelVisible = false;
+        } else {
+            panel.classList.add('active');
+            openPanels.add('auto-log');
+            autoLogPanelVisible = true;
+        }
+    }
+
+    function clearAutoLog() {
+        const container = document.getElementById('auto-log-entries');
+        if (container) container.innerHTML = '';
+        autoLogCount = 0;
+        autoLogTotalSteps = 0;
+        autoLogDone = false;
+        updateAutoLogBadge();
+        updateAutoLogProgress();
+        const statusEl = document.getElementById('auto-log-status');
+        if (statusEl) { statusEl.textContent = ''; statusEl.style.color = 'var(--text-secondary)'; }
+    }
+
+    function updateAutoLogBadge() {
+        const badge = document.getElementById('auto-log-badge');
+        if (!badge) return;
+        if (autoLogCount > 0) {
+            badge.style.display = 'inline';
+            badge.textContent = autoLogCount;
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    function updateAutoLogProgress(step, total) {
+        const bar = document.getElementById('auto-log-progress-bar');
+        const fill = document.getElementById('auto-log-progress-fill');
+        if (!bar || !fill) return;
+        if (step !== undefined && total !== undefined) {
+            bar.style.display = 'block';
+            const pct = Math.round((step / total) * 100);
+            fill.style.width = pct + '%';
+            if (pct >= 100) {
+                fill.style.background = 'var(--green)';
+            }
+        } else if (autoLogDone) {
+            fill.style.width = '100%';
+            fill.style.background = 'var(--green)';
+        } else {
+            bar.style.display = 'none';
+        }
     }
 
     // ═══════════════════════════════════════════════════════
