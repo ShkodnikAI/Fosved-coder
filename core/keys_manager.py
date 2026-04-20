@@ -27,7 +27,6 @@ PROVIDER_DEFS = {
             "claude-opus-4-7",
             "claude-opus-4-5-20251101",
             "claude-sonnet-4-6",
-            "claude-sonnet-4-20250514",
             "claude-haiku-4-5-20241022",
         ],
     },
