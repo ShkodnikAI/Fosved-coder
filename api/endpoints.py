@@ -121,6 +121,7 @@ class CreateProjectRequest(BaseModel):
     github_repo: str = ""
     github_token: str = ""
     local_path: str = ""
+    template: str = ""
 
 class UpdateProgressRequest(BaseModel):
     project_id: int
@@ -394,7 +395,7 @@ async def create_project_endpoint(req: CreateProjectRequest):
     from core.memory import CONFIG
     projects_dir = CONFIG["system"]["projects_dir"]
     project_path = f"{projects_dir}/{req.name.replace(' ', '_').lower()}"
-    result = await create_project(req.name, project_path, description=req.description, base_prompt=req.base_prompt, ideas=req.ideas, github_repo=req.github_repo, github_token=req.github_token, local_path=req.local_path)
+    result = await create_project(req.name, project_path, description=req.description, base_prompt=req.base_prompt, ideas=req.ideas, github_repo=req.github_repo, github_token=req.github_token, local_path=req.local_path, template=req.template)
     if not result:
         raise HTTPException(400, "Проект с таким именем уже существует")
     return result
@@ -1375,3 +1376,158 @@ async def delete_snapshot_endpoint(project_id: int, snapshot_id: int):
     if await delete_context_snapshot(snapshot_id):
         return {"success": True}
     raise HTTPException(404, "Снепшот не найден")
+
+
+# ═══════════════════════════════════════════════════════════════
+# APK BUILDER
+# ═══════════════════════════════════════════════════════════════
+
+class APKConfigRequest(BaseModel):
+    project_id: int
+    app_name: str = ""
+    package_id: str = ""
+    app_version: str = "1.0.0"
+    app_color: str = "#8B1A1A"
+    build_type: str = "debug"  # "debug" or "release"
+    android_min_sdk: int = 24
+    android_target_sdk: int = 34
+
+
+@router.get("/projects/{project_id}/apk/strategy")
+async def get_apk_strategy(project_id: int):
+    """Get APK build strategy info for the project's template."""
+    from core.apk_builder import APKBuildConfig
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    template = project.get("template", "")
+    config = APKBuildConfig()
+    strategy = config.get_strategy(template)
+    if not strategy:
+        return {"supported": False, "template": template, "message": f"Шаблон '{template}' не поддерживает сборку APK"}
+    return {
+        "supported": True,
+        "template": template,
+        "strategy": strategy,
+        "available_strategies": list(APKBuildConfig.TEMPLATE_STRATEGIES.keys()),
+    }
+
+
+@router.post("/projects/{project_id}/apk/check-env")
+async def check_apk_environment(project_id: int):
+    """Check if build tools are installed for the project's template."""
+    from core.apk_builder import APKBuilder
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    template = project.get("template", "")
+    builder = APKBuilder()
+    result = await builder.check_environment(template)
+    return result
+
+
+@router.post("/projects/{project_id}/apk/init")
+async def init_apk_platform(project_id: int):
+    """Initialize Android platform for the project (first-time setup)."""
+    from core.apk_builder import APKBuilder, APKBuildConfig
+    from core.executor import CommandExecutor
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    template = project.get("template", "")
+    project_path = project.get("path", "")
+    if not project_path:
+        return {"success": False, "error": "У проекта не указан локальный путь"}
+
+    # Load saved config or use defaults
+    apk_data = json.loads(project.get("apk_config", "{}")) if project.get("apk_config") else {}
+    config = APKBuildConfig(apk_data)
+    builder = APKBuilder(CommandExecutor())
+    return await builder.init_platform(project_path, template, config)
+
+
+@router.post("/projects/{project_id}/apk/build")
+async def build_apk(req: APKConfigRequest):
+    """Build APK for the project."""
+    from core.apk_builder import APKBuilder, APKBuildConfig
+    from core.executor import CommandExecutor
+    project = await get_project(req.project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    template = project.get("template", "")
+    project_path = project.get("path", "")
+    if not project_path:
+        return {"success": False, "error": "У проекта не указан локальный путь"}
+
+    # Merge saved config with request data
+    apk_data = json.loads(project.get("apk_config", "{}")) if project.get("apk_config") else {}
+    apk_data.update({
+        "app_name": req.app_name or apk_data.get("app_name", project.get("name", "MyApp")),
+        "package_id": req.package_id or apk_data.get("package_id", "com.example.app"),
+        "app_version": req.app_version,
+        "app_color": req.app_color,
+        "build_type": req.build_type,
+        "android_min_sdk": req.android_min_sdk,
+        "android_target_sdk": req.android_target_sdk,
+    })
+    config = APKBuildConfig(apk_data)
+
+    # Validate
+    errors = config.validate(template)
+    if errors:
+        return {"success": False, "error": "; ".join(errors)}
+
+    # Save config to project
+    from core.memory import async_session, Project, select
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(select(Project).where(Project.id == req.project_id))
+            project_obj = result.scalar_one_or_none()
+            if project_obj:
+                project_obj.apk_config = json.dumps(apk_data, ensure_ascii=False)
+
+    builder = APKBuilder(CommandExecutor())
+    return await builder.build(project_path, template, config)
+
+
+@router.get("/projects/{project_id}/apk/config")
+async def get_apk_config(project_id: int):
+    """Get saved APK build config for the project."""
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    apk_data = json.loads(project.get("apk_config", "{}")) if project.get("apk_config") else {}
+    from core.apk_builder import APKBuildConfig
+    config = APKBuildConfig(apk_data)
+    return config.to_dict()
+
+
+@router.put("/projects/{project_id}/apk/config")
+async def save_apk_config(project_id: int, req: APKConfigRequest):
+    """Save APK build config for the project."""
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    apk_data = json.loads(project.get("apk_config", "{}")) if project.get("apk_config") else {}
+    apk_data.update({
+        "app_name": req.app_name,
+        "package_id": req.package_id,
+        "app_version": req.app_version,
+        "app_color": req.app_color,
+        "build_type": req.build_type,
+        "android_min_sdk": req.android_min_sdk,
+        "android_target_sdk": req.android_target_sdk,
+    })
+    await update_project_field_persist(project_id, "apk_config", json.dumps(apk_data, ensure_ascii=False))
+    return {"success": True, "message": "Конфигурация APK сохранена"}
+
+
+async def update_project_field_persist(project_id: int, field: str, value: str):
+    """Generic: update a single project field in DB."""
+    from core.memory import async_session, Project, select
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(select(Project).where(Project.id == project_id))
+            project_obj = result.scalar_one_or_none()
+            if project_obj:
+                setattr(project_obj, field, value)

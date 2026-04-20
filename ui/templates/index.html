@@ -269,6 +269,78 @@
         </div>
     </div>
 
+    <!-- ═══════════ APK BUILD MODAL ═══════════ -->
+    <div class="modal" id="apk-modal" onclick="if(event.target===this)closeAPKModal()">
+        <div class="modal-content" style="width:580px;max-width:95vw;" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2 style="margin-bottom:0">📱 Сборка APK</h2>
+                <button class="btn-add" onclick="closeAPKModal()" style="background:var(--bg-tertiary);font-size:16px;">✕</button>
+            </div>
+            <div class="modal-scroll">
+                <!-- Strategy info -->
+                <div id="apk-strategy-info" style="padding:10px 12px;background:var(--bg-tertiary);border-radius:6px;margin-bottom:14px;font-size:12px;color:var(--text-secondary);display:none;">
+                    <b>Движок:</b> <span id="apk-strategy-name"></span><br>
+                    <span id="apk-strategy-desc"></span>
+                </div>
+                <!-- Not supported -->
+                <div id="apk-not-supported" style="display:none;padding:20px;text-align:center;color:var(--text-secondary);">
+                    Шаблон этого проекта не поддерживает сборку APK.<br>
+                    <small>Поддерживаемые: React, Next.js, Expo, FastAPI, Flask, Python CLI</small>
+                </div>
+                <!-- Form -->
+                <div id="apk-form" style="display:none;">
+                    <div class="form-group">
+                        <label>Название приложения *</label>
+                        <input type="text" id="apk-app-name" placeholder="MyApp" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                    </div>
+                    <div class="form-group">
+                        <label>Package ID *</label>
+                        <input type="text" id="apk-package-id" placeholder="com.mycompany.myapp" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                        <small style="color:var(--text-secondary);font-size:11px;">Формат: com.компания.приложение (только латиница)</small>
+                    </div>
+                    <div style="display:flex;gap:12px;">
+                        <div class="form-group" style="flex:1;">
+                            <label>Версия</label>
+                            <input type="text" id="apk-version" value="1.0.0" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label>Тип сборки</label>
+                            <select id="apk-build-type" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                                <option value="debug">Debug (тестовая)</option>
+                                <option value="release">Release (рабочая)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Цвет темы (splash screen)</label>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input type="color" id="apk-color" value="#8B1A1A" style="width:40px;height:32px;border:1px solid var(--border);border-radius:4px;cursor:pointer;padding:0;">
+                            <span id="apk-color-hex" style="font-size:12px;color:var(--text-secondary);font-family:monospace;">#8B1A1A</span>
+                        </div>
+                    </div>
+                    <!-- Tools check -->
+                    <div class="form-group">
+                        <label>Окружение</label>
+                        <div id="apk-env-check" style="font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;">
+                            Нажмите "Проверить" чтобы проверить установленные инструменты
+                        </div>
+                        <button class="btn-small btn-outline" onclick="checkAPKEnv()" style="margin-top:6px;padding:6px 14px;">🔍 Проверить инструменты</button>
+                    </div>
+                    <!-- Actions -->
+                    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                        <button class="btn-small btn-outline" onclick="initAPKPlatform()" style="padding:8px 14px;white-space:nowrap;">⚡ Инициализировать Android</button>
+                        <button class="btn-small" onclick="buildAPK()" style="padding:8px 20px;white-space:nowrap;background:var(--green);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">🚀 Собрать APK</button>
+                    </div>
+                    <!-- Build log -->
+                    <div id="apk-build-log" style="display:none;margin-top:14px;">
+                        <label style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;display:block;">Лог сборки:</label>
+                        <pre id="apk-log-output" style="font-size:11px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:10px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:var(--text-secondary);font-family:monospace;"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══════════ ARCHIVE PROJECT MODAL ═══════════ -->
     <div class="modal" id="archive-project-modal" onclick="if(event.target===this)closeArchiveProjectModal()">
         <div class="modal-content" style="width:500px;max-width:95vw;" onclick="event.stopPropagation()">
@@ -1528,6 +1600,7 @@
             buttons.push({ label: '📦 Packages', action: "togglePanel('packages')" });
             buttons.push({ label: '📁 Files', action: "togglePanel('files')" });
             buttons.push({ label: '🧪 Test', action: "wsSend('/test')" });
+            buttons.push({ label: '📱 APK', action: "openAPKModal()" });
             buttons.push({ label: '📋 Лог', action: "toggleAutoLogPanel()" });
 
             // GitHub проекта (если указан свой репо)
@@ -2708,6 +2781,183 @@
     // REFACTOR MODAL
     // ═══════════════════════════════════════════════════════
     function openRefactorModal() { document.getElementById("refactor-modal").classList.add("active"); }
+
+    // ═══════════════════════════════════════════════════════
+    // APK BUILD MODAL
+    // ═══════════════════════════════════════════════════════
+    let apkStrategy = null;
+
+    function openAPKModal() {
+        const p = currentProjectId ? allProjects.find(x => x.id === currentProjectId) : null;
+        if (!p) { showToast("Выберите проект", "error"); return; }
+
+        document.getElementById("apk-modal").classList.add("active");
+        document.getElementById("apk-build-log").style.display = "none";
+        document.getElementById("apk-log-output").textContent = "";
+        document.getElementById("apk-env-check").innerHTML = "Нажмите \"Проверить\" чтобы проверить установленные инструменты";
+
+        // Load saved config
+        fetch(`/api/v1/projects/${currentProjectId}/apk/config`)
+            .then(r => r.json())
+            .then(config => {
+                document.getElementById("apk-app-name").value = config.app_name || p.name || "";
+                document.getElementById("apk-package-id").value = config.package_id || "";
+                document.getElementById("apk-version").value = config.app_version || "1.0.0";
+                document.getElementById("apk-build-type").value = config.build_type || "debug";
+                if (config.app_color) {
+                    document.getElementById("apk-color").value = config.app_color;
+                    document.getElementById("apk-color-hex").textContent = config.app_color;
+                }
+            })
+            .catch(() => {
+                document.getElementById("apk-app-name").value = p.name || "";
+                document.getElementById("apk-package-id").value = "com.fosved." + (p.name || "app").toLowerCase().replace(/[^a-z0-9]/g, "");
+            });
+
+        // Load strategy
+        fetch(`/api/v1/projects/${currentProjectId}/apk/strategy`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.supported) {
+                    apkStrategy = data.strategy;
+                    document.getElementById("apk-strategy-info").style.display = "block";
+                    document.getElementById("apk-strategy-name").textContent = data.strategy.name;
+                    document.getElementById("apk-strategy-desc").textContent = data.strategy.description;
+                    document.getElementById("apk-form").style.display = "block";
+                    document.getElementById("apk-not-supported").style.display = "none";
+                } else {
+                    document.getElementById("apk-strategy-info").style.display = "none";
+                    document.getElementById("apk-form").style.display = "none";
+                    document.getElementById("apk-not-supported").style.display = "block";
+                    apkStrategy = null;
+                }
+            })
+            .catch(e => {
+                document.getElementById("apk-strategy-info").style.display = "none";
+                document.getElementById("apk-form").style.display = "none";
+                document.getElementById("apk-not-supported").style.display = "block";
+            });
+    }
+
+    function closeAPKModal() {
+        document.getElementById("apk-modal").classList.remove("active");
+    }
+
+    // Color picker sync
+    document.getElementById("apk-color").addEventListener("input", function() {
+        document.getElementById("apk-color-hex").textContent = this.value;
+    });
+
+    function showAPKLog(lines) {
+        const logDiv = document.getElementById("apk-build-log");
+        const output = document.getElementById("apk-log-output");
+        logDiv.style.display = "block";
+        output.textContent = lines.map(l => l.output || l).join("\n");
+        output.scrollTop = output.scrollHeight;
+    }
+
+    async function checkAPKEnv() {
+        if (!currentProjectId) return;
+        const envDiv = document.getElementById("apk-env-check");
+        envDiv.innerHTML = "⏳ Проверяем инструменты...";
+        try {
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/apk/check-env`, {method: "POST"});
+            const data = await resp.json();
+            let html = data.all_ready
+                ? '<span style="color:var(--green);">✅ Всё готово к сборке</span><br>'
+                : '<span style="color:var(--amber);">⚠️ Некоторые инструменты не найдены</span><br>';
+            for (const [name, info] of Object.entries(data.tools || {})) {
+                const icon = info.installed ? '✅' : '❌';
+                const ver = info.version ? ` (${info.version.trim().split('\n')[0]})` : '';
+                html += `${icon} ${info.label}${ver}<br>`;
+            }
+            envDiv.innerHTML = html;
+        } catch(e) {
+            envDiv.innerHTML = `<span style="color:var(--red);">Ошибка проверки: ${escapeHtml(String(e))}</span>`;
+        }
+    }
+
+    async function initAPKPlatform() {
+        if (!currentProjectId) return;
+        const logDiv = document.getElementById("apk-build-log");
+        const output = document.getElementById("apk-log-output");
+        logDiv.style.display = "block";
+        output.textContent = "⏳ Инициализация Android платформы...\n";
+        try {
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/apk/init`, {method: "POST"});
+            const data = await resp.json();
+            if (data.step_results) {
+                data.step_results.forEach(r => {
+                    const icon = r.success ? '✅' : '❌';
+                    output.textContent += `${icon} [${r.step}/${r.total}] ${r.cmd}\n`;
+                    if (r.output && !r.success) output.textContent += `   ${r.output.slice(-200)}\n`;
+                });
+            }
+            output.textContent += data.success ? `\n✅ ${data.message}` : `\n❌ ${data.error}`;
+            output.scrollTop = output.scrollHeight;
+            if (data.success) showToast("Android платформа инициализирована!", "success");
+            else showToast("Ошибка инициализации", "error");
+        } catch(e) {
+            output.textContent += `\n❌ Ошибка: ${escapeHtml(String(e))}`;
+            showToast("Ошибка инициализации", "error");
+        }
+    }
+
+    async function buildAPK() {
+        if (!currentProjectId) return;
+        const appName = document.getElementById("apk-app-name").value.trim();
+        const packageId = document.getElementById("apk-package-id").value.trim();
+        if (!appName || !packageId) { showToast("Заполните название и Package ID", "error"); return; }
+
+        const logDiv = document.getElementById("apk-build-log");
+        const output = document.getElementById("apk-log-output");
+        logDiv.style.display = "block";
+        output.textContent = "⏳ Запуск сборки APK...\nЭто может занять несколько минут.\n";
+
+        const body = {
+            project_id: currentProjectId,
+            app_name: appName,
+            package_id: packageId,
+            app_version: document.getElementById("apk-version").value.trim(),
+            app_color: document.getElementById("apk-color").value,
+            build_type: document.getElementById("apk-build-type").value,
+            android_min_sdk: 24,
+            android_target_sdk: 34,
+        };
+
+        try {
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/apk/build`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+
+            if (data.build_log) {
+                data.build_log.forEach(r => {
+                    const icon = r.success ? '✅' : '❌';
+                    output.textContent += `${icon} [${r.step}] ${r.cmd}\n`;
+                    if (r.output) output.textContent += r.output.slice(-300) + "\n";
+                });
+            }
+
+            if (data.success) {
+                output.textContent += `\n${"═".repeat(40)}\n`;
+                output.textContent += `✅ ${data.message}\n`;
+                output.textContent += `📦 APK: ${data.apk_path || "не найден"}\n`;
+                output.textContent += `🏷 Версия: ${data.app_name} v${body.app_version}\n`;
+                output.textContent += `⚙️ ${data.strategy}\n`;
+                showToast("APK успешно собран! 🎉", "success");
+            } else {
+                output.textContent += `\n❌ ${data.error}\n`;
+                showToast("Ошибка сборки APK", "error");
+            }
+            output.scrollTop = output.scrollHeight;
+        } catch(e) {
+            output.textContent += `\n❌ Ошибка: ${escapeHtml(String(e))}\n`;
+            showToast("Ошибка сборки APK", "error");
+        }
+    }
     function closeRefactorModal() { document.getElementById("refactor-modal").classList.remove("active"); }
     function sendRefactor() {
         const code = document.getElementById("refactor-code").value.trim();

@@ -113,6 +113,8 @@ class Project(Base):
     local_path: Mapped[str] = mapped_column(Text, default="")  # Custom local storage path
     uuid_key: Mapped[str] = mapped_column(String(36), unique=True, index=True, default="")  # Unique project key
     progress: Mapped[int] = mapped_column(default=0)  # 0-100 percent
+    template: Mapped[str] = mapped_column(default="")  # Project template: fastapi, react, nextjs, etc.
+    apk_config: Mapped[str] = mapped_column(Text, default="")  # JSON config for APK building
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 class Idea(Base):
@@ -255,7 +257,7 @@ async def init_db():
 # PROJECTS CRUD
 # ═══════════════════════════════════════════════════════════════
 
-async def create_project(name: str, path: str, description: str = "", base_prompt: str = "", ideas: str = "", github_repo: str = "", github_token: str = "", local_path: str = "") -> dict:
+async def create_project(name: str, path: str, description: str = "", base_prompt: str = "", ideas: str = "", github_repo: str = "", github_token: str = "", local_path: str = "", template: str = "") -> dict:
     """Create a new project. Returns dict representation."""
     import json
     async with async_session() as session:
@@ -265,7 +267,7 @@ async def create_project(name: str, path: str, description: str = "", base_promp
             )
             if existing.scalar_one_or_none():
                 return None
-            project = Project(name=name, path=path, description=description, base_prompt=base_prompt, ideas=ideas, github_repo=github_repo, github_token=github_token, local_path=local_path, uuid_key=str(uuid.uuid4()))
+            project = Project(name=name, path=path, description=description, base_prompt=base_prompt, ideas=ideas, github_repo=github_repo, github_token=github_token, local_path=local_path, uuid_key=str(uuid.uuid4()), template=template)
             session.add(project)
             await session.flush()
             await session.refresh(project)
