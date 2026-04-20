@@ -6,6 +6,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from datetime import datetime, timezone
 import yaml
 
+from core.action_logger import get_logger
+logger = get_logger()
+
 def load_config():
     if os.path.exists("config.yaml"):
         with open("config.yaml", "r", encoding="utf-8") as f:
@@ -207,6 +210,11 @@ async def check_db_connection(max_retries: int = 5, delay: float = 3.0) -> bool:
                 await asyncio.sleep(delay)
             else:
                 print(f"  [db] ОШИБКА: Не удалось подключиться к БД после {max_retries} попыток: {e}")
+                try:
+                    logger.log("db_connection_failed", level="error", source="db",
+                               details={"attempts": max_retries}, error=str(e))
+                except Exception:
+                    pass
                 return False
     return False
 
@@ -216,11 +224,22 @@ async def init_db():
     db_type = 'PostgreSQL' if IS_POSTGRES else 'SQLite'
     print(f"  [db] Инициализация БД ({db_type})...")
 
+    try:
+        logger.log("db_init_start", level="info", source="db",
+                   details={"db_type": db_type, "is_postgres": IS_POSTGRES})
+    except Exception:
+        pass
+
     # Verify connection first (with retries for cloud Postgres)
     connected = await check_db_connection(max_retries=5, delay=3.0)
     if not connected:
         if IS_POSTGRES:
             print("  [db] КРИТИЧЕСКАЯ ОШИБКА: PostgreSQL недоступен. Проверьте DATABASE_URL.")
+            try:
+                logger.log("db_connection_failed", level="error", source="db",
+                           details={"db_type": db_type}, error="PostgreSQL unavailable after retries")
+            except Exception:
+                pass
         # For SQLite, try to continue anyway (might be a permission issue)
 
     async with engine.begin() as conn:
@@ -242,8 +261,17 @@ async def init_db():
                 ))
                 count = result.scalar()
             print(f"  [db] Таблиц создано: {count}")
+            try:
+                logger.log("db_init_complete", level="success", source="db",
+                           details={"tables": count, "db_type": db_type})
+            except Exception:
+                pass
     except Exception as e:
         print(f"  [db] Предупреждение: не удалось подсчитать таблицы: {e}")
+        try:
+            logger.log("db_table_count_error", level="warning", source="db", error=str(e))
+        except Exception:
+            pass
 
     # Создаём директории только для SQLite (на облаке может не быть доступа к /app/data)
     if not IS_POSTGRES:

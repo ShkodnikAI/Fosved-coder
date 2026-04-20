@@ -21,7 +21,9 @@ from datetime import datetime, timezone
 from core.agent import stream_llm_response, _get_priority_models
 from core.memory import get_project, get_history, save_message, CONFIG
 from core.executor import CommandExecutor
+from core.action_logger import get_logger
 
+logger = get_logger()
 executor = CommandExecutor()
 
 
@@ -137,6 +139,12 @@ async def generate_plan(prompt: str, project_id, repo_map: str | None, websocket
 
     if not response:
         await send_auto_log(websocket, "LLM не вернул ответ для генерации плана", "warning")
+        try:
+            logger.log("plan_generation_failed", level="warning", source="auto_agent",
+                       details={"project_id": project_id, "model": model_id},
+                       error="LLM returned empty response")
+        except Exception:
+            pass
         return None
 
     # Parse JSON plan from response
@@ -156,6 +164,11 @@ async def generate_plan(prompt: str, project_id, repo_map: str | None, websocket
     except json.JSONDecodeError:
         await send_auto_log(websocket, "Ошибка парсинга JSON плана от LLM", "error")
         print(f"  [auto] Failed to parse plan JSON, treating as regular response")
+        try:
+            logger.log("plan_parse_error", level="error", source="auto_agent",
+                       details={"project_id": project_id}, error="Failed to parse plan JSON")
+        except Exception:
+            pass
 
     return None
 
@@ -184,6 +197,11 @@ async def execute_step(step: dict, project_path: str | None, websocket, step_num
             lines = content.count('\n') + 1
             await websocket.send_json({"type": "auto_step", "content": f"  Создан: {file_path}"})
             await send_auto_log(websocket, f"Создан файл: {file_path} ({lines} строк)", "file", step_num, total_steps)
+            try:
+                logger.log(f"file_created: {file_path}", level="info", source="auto_agent",
+                           details={"lines": lines, "step": step_num, "total": total_steps})
+            except Exception:
+                pass
             return True
 
         elif action == "edit_file":
@@ -201,6 +219,11 @@ async def execute_step(step: dict, project_path: str | None, websocket, step_num
             lines = content.count('\n') + 1
             await websocket.send_json({"type": "auto_step", "content": f"  Изменён: {file_path}"})
             await send_auto_log(websocket, f"Изменён файл: {file_path} ({lines} строк)", "file", step_num, total_steps)
+            try:
+                logger.log(f"file_edited: {file_path}", level="info", source="auto_agent",
+                           details={"lines": lines, "step": step_num, "total": total_steps})
+            except Exception:
+                pass
             return True
 
         elif action == "run_command":
@@ -223,6 +246,14 @@ async def execute_step(step: dict, project_path: str | None, websocket, step_num
                 await send_auto_log(websocket, f"Команда выполнена (exit 0)", "success", step_num, total_steps)
             else:
                 await send_auto_log(websocket, f"Команда завершилась с кодом {exit_code}", "warning", step_num, total_steps)
+            try:
+                logger.log(f"step_run_command: {command[:120]}",
+                           level="success" if exit_code == 0 else "warning",
+                           source="auto_agent",
+                           details={"exit_code": exit_code, "step": step_num, "total": total_steps},
+                           error=output[:200] if exit_code != 0 else None)
+            except Exception:
+                pass
             return exit_code == 0
 
         elif action == "install_package":
@@ -263,6 +294,12 @@ async def execute_step(step: dict, project_path: str | None, websocket, step_num
     except Exception as e:
         await websocket.send_json({"type": "auto_error", "content": f"Ошибка при выполнении шага: {str(e)}"})
         await send_auto_log(websocket, f"Ошибка: {str(e)}", "error", step_num, total_steps)
+        try:
+            logger.log("step_error", level="error", source="auto_agent",
+                       details={"action": action, "step": step_num, "total": total_steps},
+                       error=str(e))
+        except Exception:
+            pass
         return False
 
 
@@ -305,6 +342,11 @@ async def run_auto_mode(prompt: str, project_id, repo_map: str | None, websocket
     await websocket.send_json({"type": "system", "content": "[АВТО] Режим автоматического выполнения включён"})
     await send_auto_log(websocket, "Автоматический режим запущен", "info")
     await send_auto_log(websocket, f"Задача: {prompt[:120]}{'...' if len(prompt) > 120 else ''}", "info")
+    try:
+        logger.log("auto_mode_start", level="info", source="auto_agent",
+                   details={"project_id": project_id, "model": model_id, "prompt": prompt[:200]})
+    except Exception:
+        pass
     if project_path:
         await send_auto_log(websocket, f"Проект: {project_path}", "info")
     if model_id:
@@ -398,3 +440,10 @@ async def run_auto_mode(prompt: str, project_id, repo_map: str | None, websocket
 
     # Signal log panel that auto mode is done
     await send_auto_log(websocket, "---", "done")
+    try:
+        logger.log("auto_mode_end", level="success" if failed == 0 else "warning",
+                   source="auto_agent",
+                   details={"project_id": project_id, "completed": completed,
+                            "failed": failed, "total": total})
+    except Exception:
+        pass

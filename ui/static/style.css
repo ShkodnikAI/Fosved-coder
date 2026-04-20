@@ -135,6 +135,97 @@ header {
 }
 .btn-add:hover { background: var(--accent-hover); }
 
+/* ─── DEBUG TEST BUTTON (большая красная кнопка) ─── */
+.btn-debug-test {
+    position: relative;
+    background: linear-gradient(135deg, #8B0000, #DC143C);
+    color: #fff;
+    border: 3px solid #FF4444;
+    padding: 8px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    box-shadow: 0 4px 16px rgba(220, 20, 60, 0.5), inset 0 1px 0 rgba(255,255,255,0.2), 0 0 30px rgba(220, 20, 60, 0.15);
+    min-width: 120px;
+    justify-content: center;
+    height: 44px;
+    z-index: 10;
+}
+.btn-debug-test:hover {
+    background: linear-gradient(135deg, #A00000, #FF1744);
+    box-shadow: 0 6px 28px rgba(244, 71, 71, 0.6), inset 0 1px 0 rgba(255,255,255,0.25), 0 0 40px rgba(244, 71, 71, 0.2);
+    transform: translateY(-2px) scale(1.03);
+}
+.btn-debug-test:active {
+    transform: translateY(0) scale(0.98);
+}
+.btn-debug-test.debug-active {
+    background: linear-gradient(135deg, #FF1744, #FF5252);
+    color: #fff;
+    border-color: #FF8A80;
+    animation: debug-pulse 1.2s ease-in-out infinite;
+    box-shadow: 0 0 30px rgba(255, 23, 68, 0.6), 0 0 60px rgba(255, 23, 68, 0.2);
+    height: 44px;
+}
+.btn-debug-test.debug-active:hover {
+    background: linear-gradient(135deg, #D50000, #FF1744);
+}
+
+.debug-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #FFCDD2;
+    opacity: 0.7;
+    flex-shrink: 0;
+    box-shadow: 0 0 4px rgba(255,0,0,0.3);
+}
+.debug-dot.debug-recording {
+    opacity: 1;
+    background: #fff;
+    animation: debug-blink 0.6s ease-in-out infinite;
+}
+
+.debug-timer {
+    display: none;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.9;
+    letter-spacing: 0;
+}
+
+@keyframes debug-pulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(255, 23, 68, 0.4); }
+    50% { box-shadow: 0 0 28px rgba(255, 23, 68, 0.7); }
+}
+@keyframes debug-blink {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px #fff; }
+    50% { opacity: 0.2; box-shadow: 0 0 2px #fff; }
+}
+
+/* Debug spinner */
+.debug-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--red);
+    border-radius: 50%;
+    animation: debug-spin 0.8s linear infinite;
+    margin: 0 auto;
+}
+@keyframes debug-spin {
+    to { transform: rotate(360deg); }
+}
+
 /* ─── MODE TOGGLE (Manual / Automatic) ─── */
 .mode-toggle-bar {
     display: flex;

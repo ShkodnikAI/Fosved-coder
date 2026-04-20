@@ -7,6 +7,9 @@ import json
 import litellm
 from datetime import datetime
 
+from core.action_logger import get_logger
+logger = get_logger()
+
 from core.memory import CONFIG, save_context_snapshot, delete_old_messages
 
 
@@ -42,25 +45,52 @@ class ContextCompressor:
         if not self.should_compress(messages):
             return "", messages, False
 
+        old_count = len(messages)
         old_messages = messages[:-self.KEEP_RECENT_MESSAGES]
         recent_messages = messages[-self.KEEP_RECENT_MESSAGES:]
+
+        try:
+            logger.log("compress_start", level="info", source="compressor",
+                       details={"project_id": project_id, "messages_before": old_count,
+                                "messages_to_compress": len(old_messages), "use_llm": use_llm})
+        except Exception:
+            pass
 
         if use_llm and model_config:
             try:
                 summary = await self._compress_with_llm(old_messages, model_config)
                 if summary:
                     print(f"  [compressor] LLM сжатие выполнено: {len(old_messages)} → {len(summary)} символов")
+                    try:
+                        logger.log("compress_llm_success", level="success", source="compressor",
+                                   details={"project_id": project_id,
+                                            "messages_before": old_count, "messages_after": len(recent_messages),
+                                            "summary_chars": len(summary), "method": "llm"})
+                    except Exception:
+                        pass
                     # Persist snapshot in DB
                     if project_id:
                         await self._save_snapshot(project_id, summary, len(messages), len(recent_messages), "auto_llm")
                     return summary, recent_messages, True
             except Exception as e:
                 print(f"  [compressor] LLM сжатие не удалось: {e} — fallback на regex")
+                try:
+                    logger.log("compress_llm_failed", level="warning", source="compressor",
+                               details={"project_id": project_id}, error=str(e))
+                except Exception:
+                    pass
 
         # Fallback: regex compression
         summary = self._compress_with_regex(old_messages)
         if project_id and summary:
             await self._save_snapshot(project_id, summary, len(messages), len(recent_messages), "auto_regex")
+        try:
+            logger.log("compress_regex_done", level="info", source="compressor",
+                       details={"project_id": project_id, "method": "regex",
+                                "messages_before": old_count, "messages_after": len(recent_messages),
+                                "summary_chars": len(summary) if summary else 0})
+        except Exception:
+            pass
         return summary, recent_messages, False
 
     async def compress_and_cleanup(self, messages: list[dict], project_id: int,
@@ -240,7 +270,11 @@ class ContextCompressor:
         # 2. Try any model with a valid key (pick the first available)
         all_models = keys_manager.get_all_models()
         for m in all_models:
-            if m.get("status") in ("valid", "rate_limited", "available") and m.get("api_key"):
+            if m.get("status") in ("valid", "rate_limited", "available"):
+                model_type = m.get("type", "")
+                # Пропускаем модели без ключа (free но без openrouter ключа, local без сервера)
+                if model_type in ("local",) and not m.get("base_url"):
+                    continue
                 config = keys_manager.get_model_config(m["id"])
                 if config and config.get("api_key"):
                     return config

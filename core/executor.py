@@ -4,6 +4,9 @@ import sys
 import os
 from datetime import datetime
 
+from core.action_logger import get_logger
+logger = get_logger()
+
 
 class CommandExecutor:
     """Executes shell commands with safety checks and real-time output streaming"""
@@ -59,12 +62,25 @@ class CommandExecutor:
                 "cmd": cmd,
             }
 
+        # Log command start
+        try:
+            logger.log(f"exec_start: {cmd[:200]}", level="info", source="executor",
+                       details={"cwd": cwd, "timeout": timeout or self.COMMAND_TIMEOUT})
+        except Exception:
+            pass
+
         # Check for critical commands
         is_critical, pattern = self._is_critical(cmd)
 
         if is_critical and need_approval:
             request_id = f"req_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
             self._play_alert()
+
+            try:
+                logger.log(f"exec_blocked: {cmd[:200]}", level="warning", source="executor",
+                           details={"pattern": pattern, "request_id": request_id})
+            except Exception:
+                pass
 
             return {
                 "exit_code": -1,
@@ -97,6 +113,12 @@ class CommandExecutor:
                 )
             except asyncio.TimeoutError:
                 process.kill()
+                try:
+                    logger.log(f"exec_timeout: {cmd[:200]}", level="error", source="executor",
+                               details={"timeout": timeout or self.COMMAND_TIMEOUT, "cwd": cwd},
+                               error="Command timed out")
+                except Exception:
+                    pass
                 return {
                     "exit_code": -1,
                     "stdout": "",
@@ -108,6 +130,19 @@ class CommandExecutor:
             stdout_str = stdout.decode("utf-8", errors="replace")[: self.MAX_OUTPUT_LENGTH]
             stderr_str = stderr.decode("utf-8", errors="replace")[: self.MAX_OUTPUT_LENGTH]
 
+            # Log command result
+            try:
+                output_preview = (stdout_str + stderr_str)[:300].replace("\n", " ")
+                logger.command_exec(cmd, exit_code=process.returncode, cwd=cwd,
+                                    error=stderr_str if process.returncode != 0 else None)
+                logger.log(f"exec_result: {cmd[:120]}",
+                           level="success" if process.returncode == 0 else "error",
+                           source="executor",
+                           details={"exit_code": process.returncode, "cwd": cwd,
+                                    "output_preview": output_preview})
+            except Exception:
+                pass
+
             return {
                 "exit_code": process.returncode,
                 "stdout": stdout_str,
@@ -117,6 +152,11 @@ class CommandExecutor:
             }
 
         except Exception as e:
+            try:
+                logger.log(f"exec_error: {cmd[:200]}", level="error", source="executor",
+                           details={"cwd": cwd}, error=str(e))
+            except Exception:
+                pass
             return {
                 "exit_code": -1,
                 "stdout": "",

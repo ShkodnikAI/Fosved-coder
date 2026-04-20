@@ -2,18 +2,22 @@
 Fosved Coder — Action Logger
 Тотальное логирование всех действий пользователя, API-вызовов, ошибок и AI-ответов.
 Логи хранятся в памяти + в JSON-файле на диске.
+Поддерживает debug_mode — усиленное логирование по кнопке ТЕСТ.
 """
 import os
 import json
 import time
 import threading
+import traceback
 from datetime import datetime
 from collections import deque
 
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "logs")
 LOG_FILE = os.path.join(LOG_DIR, "actions.jsonl")
+DEBUG_LOG_FILE = os.path.join(LOG_DIR, "debug_session.jsonl")
 MAX_MEMORY_ENTRIES = 2000   # максимум записей в памяти
 MAX_FILE_SIZE_MB = 50       # максимальный размер файла логов
+MAX_DEBUG_ENTRIES = 5000    # максимум записей в debug-сессии
 
 
 class ActionLogger:
@@ -38,6 +42,12 @@ class ActionLogger:
         self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._ensure_log_dir()
         self._open_log_file()
+        # ── Debug Mode (кнопка ТЕСТ) ──
+        self._debug_mode = False
+        self._debug_start_ts = None
+        self._debug_entries: list = []  # отдельный буфер для debug-сессии
+        self._debug_file = None
+        self._debug_client_logs: list = []  # логи с клиента (JS errors, fetch fails)
 
     def _ensure_log_dir(self):
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -108,10 +118,10 @@ class ActionLogger:
     def ws_message(self, direction: str, payload, project_id=None):
         """Логировать WebSocket сообщение.
         direction: "in" (от клиента) или "out" (к клиенту)
+        В debug-режиме логирует полные тела сообщений.
         """
         details = {}
         if isinstance(payload, dict):
-            # Не логируем полные тела больших сообщений
             msg_type = payload.get("type", payload.get("prompt", "")[:80] if isinstance(payload.get("prompt"), str) else "")
             details["type"] = str(msg_type)[:100]
             if payload.get("model"):
@@ -120,6 +130,10 @@ class ActionLogger:
                 details["mode"] = str(payload["mode"])[:20]
             if payload.get("project_id"):
                 details["project_id"] = payload["project_id"]
+            # В debug-режиме: полное тело (ограничено 2000 символов)
+            if self._debug_mode:
+                full_payload = json.dumps(payload, ensure_ascii=False)[:2000]
+                details["full_payload"] = full_payload
             # Для системных команд
             if isinstance(payload, str) and payload.startswith("/"):
                 details["type"] = payload[:80]
@@ -181,6 +195,149 @@ class ActionLogger:
             project_id=project_id,
             details=details,
         )
+
+    # ═══════════════════════════════════════════════════════
+    # DEBUG MODE (кнопка ТЕСТ — тотальное логирование)
+    # ═══════════════════════════════════════════════════════
+
+    @property
+    def debug_mode(self) -> bool:
+        return self._debug_mode
+
+    def start_debug_session(self) -> dict:
+        """Включить debug-режим. Возвращает информацию о сессии."""
+        self._debug_mode = True
+        self._debug_start_ts = datetime.now().isoformat(timespec="milliseconds")
+        self._debug_entries = []
+        self._debug_client_logs = []
+        # Открыть отдельный файл для debug-сессии
+        try:
+            self._debug_file = open(DEBUG_LOG_FILE, "w", encoding="utf-8")
+        except Exception:
+            self._debug_file = None
+        self.log("DEBUG_SESSION_STARTED", level="warning", source="debug",
+                 details={"debug_start": self._debug_start_ts})
+        return {"started": True, "timestamp": self._debug_start_ts}
+
+    def stop_debug_session(self) -> dict:
+        """Выключить debug-режим. Возвращает собранный лог."""
+        self._debug_mode = False
+        self.log("DEBUG_SESSION_STOPPED", level="warning", source="debug",
+                 details={"duration_sec": self._debug_duration_seconds(),
+                          "entries_collected": len(self._debug_entries),
+                          "client_errors": len(self._debug_client_logs)})
+        # Закрыть debug-файл
+        if self._debug_file:
+            try:
+                self._debug_file.close()
+            except Exception:
+                pass
+            self._debug_file = None
+        result = {
+            "stopped": True,
+            "start_ts": self._debug_start_ts,
+            "end_ts": datetime.now().isoformat(timespec="milliseconds"),
+            "duration_sec": self._debug_duration_seconds(),
+            "server_entries": len(self._debug_entries),
+            "client_logs": len(self._debug_client_logs),
+            "entries": self._debug_entries,
+            "client_errors": self._debug_client_logs,
+        }
+        # Сохраняем référence перед очисткой
+        entries_snapshot = self._debug_entries[:]
+        client_snapshot = self._debug_client_logs[:]
+        self._debug_entries = []
+        self._debug_client_logs = []
+        self._debug_start_ts = None
+        result["entries"] = entries_snapshot
+        result["client_errors"] = client_snapshot
+        return result
+
+    def _debug_duration_seconds(self) -> float:
+        """Длительность debug-сессии в секундах."""
+        if not self._debug_start_ts:
+            return 0
+        try:
+            start = datetime.fromisoformat(self._debug_start_ts)
+            return round((datetime.now() - start).total_seconds(), 1)
+        except Exception:
+            return 0
+
+    def add_client_log(self, client_log: dict):
+        """Добавить лог с клиента (JS error, fetch fail, и т.д.)."""
+        if not self._debug_mode:
+            return
+        entry = {
+            "ts": datetime.now().isoformat(timespec="milliseconds"),
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "source": "client",
+            **client_log,
+        }
+        self._debug_client_logs.append(entry)
+
+    def log(self, action: str, level: str = "info", source: str = "",
+            project_id: int = None, details: dict = None, error: str = None,
+            stack_trace: str = None):
+        """Записать событие в лог.
+
+        Args:
+            action: описание действия (например: "ws_chat_message", "api_apk_build", "error_model_timeout")
+            level: info | success | warning | error | debug
+            source: источник — "ws", "api", "agent", "auto_agent", "executor", "system"
+            project_id: ID текущего проекта (если есть)
+            details: доп. данные (dict)
+            error: текст ошибки (если есть)
+            stack_trace: стек-трейс (если есть, только в debug-режиме)
+        """
+        entry = {
+            "ts": datetime.now().isoformat(timespec="milliseconds"),
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "session": self._session_id,
+            "action": action,
+            "level": level,
+            "source": source,
+            "project_id": project_id,
+            "details": details or {},
+        }
+        if error:
+            entry["error"] = str(error)[:500]
+        if stack_trace and self._debug_mode:
+            entry["stack_trace"] = str(stack_trace)[:2000]
+
+        # В память
+        self._entries.append(entry)
+
+        # В debug-буфер (если активен)
+        if self._debug_mode:
+            self._debug_entries.append(entry)
+            # В debug-файл
+            if self._debug_file:
+                try:
+                    self._debug_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    self._debug_file.flush()
+                except Exception:
+                    pass
+
+        # В обычный файл (всегда)
+        if self._file:
+            try:
+                self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                self._file.flush()
+            except Exception:
+                pass
+
+        # Проверить размер файла
+        self._rotate_if_needed()
+
+    def get_debug_status(self) -> dict:
+        """Статус текущей debug-сессии."""
+        return {
+            "active": self._debug_mode,
+            "start_ts": self._debug_start_ts,
+            "duration_sec": self._debug_duration_seconds(),
+            "server_entries": len(self._debug_entries),
+            "client_errors": len(self._debug_client_logs),
+        }
 
     # ── Чтение логов ──
 

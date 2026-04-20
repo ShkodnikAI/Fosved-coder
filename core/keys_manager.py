@@ -9,6 +9,9 @@ import aiohttp
 import litellm
 from typing import Optional
 
+from core.action_logger import get_logger
+logger = get_logger()
+
 litellm.suppress_debug_info = True
 
 # ═══════════════════════════════════════════════════════════════
@@ -135,6 +138,7 @@ LOCAL_PROVIDERS = {
 }
 
 KEYS_FILE = os.environ.get("KEYS_FILE_PATH", "keys.yaml")
+LEGACY_KEYS_FILE = "data/keys.json"
 
 # Mapping: env var name -> provider_id
 ENV_KEY_MAP = {
@@ -173,6 +177,7 @@ class KeysManager:
     # ─── Storage ─────────────────────────────────────────────
 
     def _load_keys(self):
+        loaded = False
         if os.path.exists(KEYS_FILE):
             try:
                 with open(KEYS_FILE, "r", encoding="utf-8") as f:
@@ -184,13 +189,96 @@ class KeysManager:
                 self.github_token = github.get("token", "")
                 self.github_enabled = github.get("enabled", False)
                 self.github_user = github.get("user", "")
+                loaded = True
             except Exception:
                 self.providers = {}
                 self.local_models = []
                 self.custom_models = []
 
+        # Fallback: migrer legacy data/keys.json если keys.yaml пустой или отсутствует
+        if not loaded or not self.providers:
+            self._try_load_legacy_json()
+
         # Load API keys from environment variables (Render, Railway, etc.)
         self._load_env_keys()
+
+    def _try_load_legacy_json(self):
+        """Загрузить и мигрировать старый data/keys.json (legacy формат)."""
+        if not os.path.exists(LEGACY_KEYS_FILE):
+            return
+
+        try:
+            import json
+            with open(LEGACY_KEYS_FILE, "r", encoding="utf-8") as f:
+                legacy = json.load(f)
+
+            legacy_providers = legacy.get("providers", {})
+            if not legacy_providers:
+                return
+
+            # Маппинг legacy провайдеров → PROVIDER_DEFS
+            # "custom" обычно содержал OpenRouter ключ
+            legacy_key_patterns = {
+                "claude": "claude",
+                "openai": "openai",
+                "grok": "grok",
+                "gemini": "gemini",
+                "deepseek": "deepseek",
+                "minimax": "minimax",
+                "openrouter": "openrouter",
+            }
+
+            migrated = 0
+            for prov_id, prov_data in legacy_providers.items():
+                api_key = prov_data.get("api_key", "")
+                if not api_key:
+                    continue
+
+                # Определяем реальный провайдер по формату ключа
+                real_provider = prov_id
+                if prov_id == "custom" or prov_id not in PROVIDER_DEFS:
+                    # Ключ начинается с sk-or-v1 → это OpenRouter
+                    if api_key.startswith("sk-or-v1"):
+                        real_provider = "openrouter"
+                    elif api_key.startswith("sk-ant-"):
+                        real_provider = "claude"
+                    elif api_key.startswith("sk-proj-") or api_key.startswith("sk-"):
+                        real_provider = "openai"
+                    elif api_key.startswith("xai-"):
+                        real_provider = "grok"
+                    else:
+                        # Не можем определить — пропускаем
+                        continue
+
+                provider_def = PROVIDER_DEFS.get(real_provider)
+                if not provider_def:
+                    continue
+
+                # Не перезаписываем если уже есть в keys.yaml
+                if real_provider in self.providers and self.providers[real_provider].get("api_key"):
+                    continue
+
+                self.providers[real_provider] = {
+                    "api_key": api_key,
+                    "api_base": provider_def["api_base"],
+                    "litellm_prefix": provider_def["litellm_prefix"],
+                    "models": prov_data.get("models") or provider_def["suggested_models"],
+                    "status": "valid",  # Будет перевалидирован при startup_validation
+                }
+                migrated += 1
+
+            # GitHub токен
+            gh_token = legacy.get("github_token", "")
+            if gh_token and not self.github_token:
+                self.github_token = gh_token
+                self.github_enabled = True
+
+            if migrated > 0:
+                print(f"  [keys] Мигрировано {migrated} провайдеров из {LEGACY_KEYS_FILE}")
+                self._save_keys()  # Сохраняем в keys.yaml
+
+        except Exception as e:
+            print(f"  [keys] Ошибка загрузки legacy keys: {e}")
 
     def _load_env_keys(self):
         """Populate providers from environment variables (highest priority — source of truth on cloud)."""
@@ -242,6 +330,11 @@ class KeysManager:
                 yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
         except Exception as e:
             print(f"  [keys_manager] Warning: could not save keys to {KEYS_FILE}: {e}")
+            try:
+                logger.log("keys_save_error", level="error", source="keys_manager",
+                           details={"file": KEYS_FILE}, error=str(e))
+            except Exception:
+                pass
 
     # ─── Validation ──────────────────────────────────────────
 
@@ -277,11 +370,21 @@ class KeysManager:
                 kwargs["api_base"] = use_base
             response = await litellm.acompletion(**kwargs)
             if response and response.choices:
+                try:
+                    logger.log(f"key_validated", level="success", source="keys_manager",
+                               details={"provider": provider_id, "model": test_model})
+                except Exception:
+                    pass
                 return {"status": "valid", "error": ""}
             return {"status": "invalid", "error": "Пустой ответ от API"}
 
         except Exception as e:
             error_str = str(e).lower()
+            try:
+                logger.log(f"key_validation_error", level="warning", source="keys_manager",
+                           details={"provider": provider_id, "model": test_model}, error=str(e)[:200])
+            except Exception:
+                pass
             if "401" in error_str or "unauthorized" in error_str or "authentication" in error_str:
                 return {"status": "invalid", "error": "Неверный API ключ"}
             elif "429" in error_str or "rate" in error_str or "quota" in error_str:
@@ -357,6 +460,13 @@ class KeysManager:
         }
         self._save_keys()
 
+        try:
+            logger.log(f"key_added", level="info", source="keys_manager",
+                       details={"provider": provider_id, "status": validation["status"],
+                                "models": len(models or provider["suggested_models"])})
+        except Exception:
+            pass
+
         return {
             "success": True,
             "status": validation["status"],
@@ -370,6 +480,11 @@ class KeysManager:
         if provider_id in self.providers:
             del self.providers[provider_id]
             self._save_keys()
+            try:
+                logger.log(f"key_removed", level="info", source="keys_manager",
+                           details={"provider": provider_id})
+            except Exception:
+                pass
             return True
         return False
 
@@ -702,11 +817,36 @@ class KeysManager:
         Получить конфиг для litellm по ID модели.
         Returns: {model, api_key, api_base} или None
         
+        Поддерживает форматы:
+          - provider__model_name (напр. claude__claude-sonnet-4-20250514)
+          - bare model_name (напр. claude-sonnet-4-20250514) — ищет по всем провайдерам
+          - free model ID (напр. gemini-2.5-flash-free)
+          - local/custom model ID
+        
         api_base включается ТОЛЬКО для кастомных/нестандартных провайдеров.
-        Для стандартных (claude, openai, gemini, grok, minimax) litellm
-        строит URL сам — передача api_base ломает маршрутизацию.
         """
-        # Платные модели
+        # 0. Bare model name fallback: если model_id не содержит "__" и не matches local/free/custom
+        if "__" not in model_id and not model_id.startswith("local_") and not model_id.startswith("custom_"):
+            # Проверяем — это может быть голое имя модели из config.yaml
+            for provider_id, config in self.providers.items():
+                if config.get("status") in ("valid", "rate_limited"):
+                    for model_name in config.get("models", []):
+                        if model_name == model_id:
+                            # Найдено! Возвращаем конфиг
+                            prefix = config.get("litellm_prefix", provider_id)
+                            provider_def = PROVIDER_DEFS.get(provider_id, {})
+                            result = {
+                                "model": f"{prefix}/{model_name}",
+                                "api_key": config.get("api_key", ""),
+                            }
+                            is_custom = provider_def.get("is_custom", False)
+                            default_base = provider_def.get("api_base", "")
+                            current_base = config.get("api_base", "")
+                            if is_custom or (current_base and current_base != default_base):
+                                result["api_base"] = current_base
+                            return result
+
+        # 1. Платные модели (format: provider__model_name)
         for provider_id, config in self.providers.items():
             for model_name in config.get("models", []):
                 if f"{provider_id}__{model_name}" == model_id:

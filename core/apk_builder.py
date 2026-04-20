@@ -12,6 +12,9 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from core.action_logger import get_logger
+logger = get_logger()
+
 
 class APKBuildConfig:
     """Настройки сборки APK для проекта. Сохраняются в JSON."""
@@ -338,8 +341,17 @@ class APKBuilder:
                     "prompt_used": prompt,
                 }
         except asyncio.TimeoutError:
+            try:
+                logger.log("icon_generation_timeout", level="warning", source="apk_builder",
+                           error="Icon generation timed out (120s)")
+            except Exception:
+                pass
             return {"success": False, "error": "Таймаут генерации иконки (120s)", "prompt_used": prompt}
         except Exception as e:
+            try:
+                logger.log("icon_generation_error", level="error", source="apk_builder", error=str(e))
+            except Exception:
+                pass
             return {"success": False, "error": str(e), "prompt_used": prompt}
 
     # ─────────────────────────────────────────────
@@ -397,6 +409,13 @@ class APKBuilder:
         if not os.path.isdir(project_path):
             return {"success": False, "error": f"Путь проекта не найден: {project_path}"}
 
+        try:
+            logger.log("apk_build_start", level="info", source="apk_builder",
+                       details={"template": template, "project_path": project_path,
+                                "strategy": strategy["name"], "build_type": config.data["build_type"]})
+        except Exception:
+            pass
+
         build_log = []
 
         # ── Step 1: Generate icon ──
@@ -445,6 +464,12 @@ class APKBuilder:
                 "output": result.get("stdout", "") + result.get("stderr", ""),
             })
             if not result["success"]:
+                try:
+                    logger.log(f"apk_build_step_failed", level="error", source="apk_builder",
+                               details={"step": i, "cmd": cmd[:200]},
+                               error=result.get("stderr", "")[:300])
+                except Exception:
+                    pass
                 return {
                     "success": False,
                     "error": f"Build не удался на шаге {i}: {cmd}",
@@ -468,6 +493,13 @@ class APKBuilder:
             except Exception as e:
                 print(f"  [apk] Не удалось переименовать APK: {e}")
                 final_apk_path = apk_path
+
+        try:
+            logger.log("apk_build_success", level="success", source="apk_builder",
+                       details={"apk_path": final_apk_path, "template": template,
+                                "strategy": strategy["name"], "steps": len(build_commands)})
+        except Exception:
+            pass
 
         return {
             "success": True,

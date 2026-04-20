@@ -176,6 +176,10 @@ async def websocket_chat(websocket: WebSocket):
                     if priority:
                         from core.memory import update_project_models
                         await update_project_models(current_project_id, priority)
+                        try:
+                            logger.log("priority_models_updated", level="debug", source="ws", project_id=current_project_id, details={"models": priority[:5]})
+                        except Exception:
+                            pass
 
                     cached_map = await get_repo_map(current_project_id)
                     if cached_map:
@@ -207,8 +211,16 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
     args = parts[1] if len(parts) > 1 else ""
 
     await websocket.send_json({"type": "system", "content": f"Выполняю: {cmd}"})
+    try:
+        logger.log(f"slash_command: {command} {args[:80]}", level="info", source="ws", project_id=project_id)
+    except Exception:
+        pass
 
     if command == "/terminal":
+        try:
+            logger.log(f"terminal_exec: {args[:120]}", level="info", source="ws", project_id=project_id, details={"cwd": None})
+        except Exception:
+            pass
         result = await executor.execute(args, cwd=None)
         if result.get("approval_required"):
             request_id = result["request_id"]
@@ -225,6 +237,10 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
                 output += f"\n\nSTDERR:\n{result['stderr']}"
             await websocket.send_json({"type": "command_result", "content": output})
         await websocket.send_json({"type": "done"})
+        try:
+            logger.log("terminal_done", level="success", source="ws", project_id=project_id, details={"exit_code": result.get("exit_code"), "approved": False})
+        except Exception:
+            pass
 
     elif command == "/approve":
         request_id = args.strip()
@@ -249,6 +265,10 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             await websocket.send_json({"type": "system", "content": "Нет ожидающих команд."})
 
     elif command == "/git_pull":
+        try:
+            logger.log("git_pull_start", level="info", source="ws", project_id=project_id)
+        except Exception:
+            pass
         project_path = None
         if project_id:
             project = await get_project(project_id)
@@ -264,9 +284,17 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             await websocket.send_json({"type": "system", "content": f"📥 Pull OK: {summary}"})
         else:
             await websocket.send_json({"type": "error", "content": f"📥 Pull failed: {result.get('stderr', 'unknown error')[:200]}"})
+            try:
+                logger.log("git_pull_failed", level="error", source="ws", project_id=project_id, error=result.get('stderr', '')[:200])
+            except Exception:
+                pass
         await websocket.send_json({"type": "done"})
 
     elif command == "/git_push":
+        try:
+            logger.log("git_push_start", level="info", source="ws", project_id=project_id)
+        except Exception:
+            pass
         project_path = None
         if project_id:
             project = await get_project(project_id)
@@ -285,9 +313,17 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
                 await websocket.send_json({"type": "system", "content": f"📤 Push OK: {summary}"})
         else:
             await websocket.send_json({"type": "error", "content": f"📤 Push failed: {result.get('stderr', 'unknown error')[:200]}"})
+            try:
+                logger.log("git_push_failed", level="error", source="ws", project_id=project_id, error=result.get('stderr', '')[:200])
+            except Exception:
+                pass
         await websocket.send_json({"type": "done"})
 
     elif command == "/quick_push":
+        try:
+            logger.log(f"quick_push_start: {args[:50]}", level="info", source="ws", project_id=project_id)
+        except Exception:
+            pass
         # Тихий push: auto commit + push без лишнего вывода
         project_path = None
         if project_id:
@@ -322,6 +358,10 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         await websocket.send_json({"type": "system", "content": "История чата очищена."})
 
     elif command == "/test":
+        try:
+            logger.log(f"code_test_start: {args[:50]}", level="info", source="ws", project_id=project_id)
+        except Exception:
+            pass
         # Тестирование и проверка кода проекта
         project_path = None
         if project_id:
@@ -338,6 +378,10 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         await run_full_check(project_path, websocket, model_id=model_id, run_tests_flag=not skip_tests)
 
     elif command == "/ideas":
+        try:
+            logger.log(f"ideas_inject: {args[:80]}", level="info", source="ws", project_id=project_id)
+        except Exception:
+            pass
         if not args.strip():
             await websocket.send_json({"type": "system", "content": "Использование: /ideas <github_url>"})
             return
@@ -375,6 +419,10 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         await websocket.send_json({"type": "system", "content": help_text})
 
     else:
+        try:
+            logger.log(f"unknown_command: {command}", level="warning", source="ws", project_id=project_id)
+        except Exception:
+            pass
         await websocket.send_json({"type": "system", "content": f"Неизвестная команда: {command}. Введите /help"})
 
 
@@ -382,6 +430,10 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
 async def websocket_executor(websocket: WebSocket):
     """Dedicated WebSocket for real-time command output streaming"""
     await websocket.accept()
+    try:
+        logger.log("executor_ws_connected", level="info", source="ws")
+    except Exception:
+        pass
     try:
         while True:
             data = await websocket.receive_json()
@@ -396,7 +448,15 @@ async def websocket_executor(websocket: WebSocket):
                 })
             await websocket.send_json({"type": "stream_done", "request_id": request_id})
     except WebSocketDisconnect:
-        pass
+        try:
+            logger.log("executor_ws_disconnected", level="info", source="ws")
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            logger.log("executor_ws_error", level="error", source="ws", error=str(e))
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

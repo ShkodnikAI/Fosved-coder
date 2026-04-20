@@ -34,6 +34,11 @@
             </div>
         </div>
         <div class="header-actions">
+            <button class="btn-debug-test" id="btn-debug-test" onclick="toggleDebugMode()" title="Нажми = логирование. Ещё раз = пуш логов на GitHub">
+                <span class="debug-dot" id="debug-dot"></span>
+                <span id="debug-btn-label">ТЕСТ</span>
+                <span class="debug-timer" id="debug-timer"></span>
+            </button>
             <button class="btn-add" onclick="showHelp()" title="Помощь" data-hint="Справка, горячие клавиши и список команд">❓</button>
             <button class="btn-add" onclick="clearChat()" title="Очистить" data-hint="Очистить историю чата текущего проекта">🗑</button>
         </div>
@@ -356,6 +361,38 @@
         </div>
     </div>
 
+    <!-- ═══════════ DEBUG ANALYSIS MODAL ═══════════ -->
+    <div class="modal" id="debug-modal" onclick="if(event.target===this)closeDebugModal()">
+        <div class="modal-content" style="width:820px;max-width:95vw;max-height:90vh;" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2 style="margin-bottom:0;">
+                    <span id="debug-modal-icon">🔬</span>
+                    <span id="debug-modal-title">Анализ отладки</span>
+                </h2>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <span id="debug-modal-badge" style="display:none;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700;"></span>
+                    <button class="btn-add" onclick="closeDebugModal()" style="background:var(--bg-tertiary);font-size:16px;">✕</button>
+                </div>
+            </div>
+            <!-- Stats bar -->
+            <div id="debug-stats-bar" style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+            </div>
+            <!-- Loading state -->
+            <div id="debug-analyzing" style="display:none;text-align:center;padding:40px 20px;">
+                <div class="debug-spinner"></div>
+                <div style="margin-top:16px;color:var(--text-secondary);font-size:14px;">AI анализирует логи сессии...</div>
+            </div>
+            <!-- Analysis content -->
+            <div id="debug-analysis-content" class="modal-scroll" style="display:none;white-space:pre-wrap;font-family:'Cascadia Code',Consolas,monospace;font-size:13px;line-height:1.6;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:16px;color:var(--text-primary);max-height:60vh;overflow-y:auto;">
+            </div>
+            <!-- Raw log toggle -->
+            <div id="debug-raw-section" style="margin-top:12px;display:none;">
+                <button class="btn-small btn-outline" onclick="toggleDebugRaw()" style="margin-bottom:8px;">Показать сырой лог</button>
+                <pre id="debug-raw-log" style="display:none;font-size:11px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:10px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:var(--text-secondary);font-family:monospace;"></pre>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══════════ ARCHIVE PROJECT MODAL ═══════════ -->
     <div class="modal" id="archive-project-modal" onclick="if(event.target===this)closeArchiveProjectModal()">
         <div class="modal-content" style="width:500px;max-width:95vw;" onclick="event.stopPropagation()">
@@ -514,6 +551,265 @@
     let openPanels = new Set();
     let editingProjectId = null;  // null = creating new, number = editing existing
     let workMode = "manual";  // "manual" or "auto"
+    let debugMode = false;  // debug-режим (кнопка ТЕСТ)
+    let debugStartTime = null;
+
+    // ═══════════════════════════════════════════════════════
+    // DEBUG MODE (красная кнопка ТЕСТ — тотальное логирование)
+    // ═══════════════════════════════════════════════════════
+
+    // Перехватываем ВСЕ ошибки JS и fetch на клиенте
+    function installDebugInterceptors() {
+        // 1. Перехват JS ошибок (window.onerror)
+        const origOnError = window.onerror;
+        window.onerror = function(msg, url, line, col, error) {
+            if (debugMode) {
+                sendClientLog({
+                    type: "js_error",
+                    message: String(msg),
+                    url: String(url || ""),
+                    line: line || null,
+                    col: col || null,
+                    stack: error ? (error.stack || "") : "",
+                });
+            }
+            if (origOnError) return origOnError(msg, url, line, col, error);
+            return false;
+        };
+
+        // 2. Перехват unhandled promise rejections
+        window.addEventListener("unhandledrejection", function(event) {
+            if (debugMode) {
+                sendClientLog({
+                    type: "js_error",
+                    message: "Unhandled Promise: " + (event.reason ? String(event.reason.message || event.reason) : "Unknown"),
+                    url: "",
+                    stack: event.reason ? (event.reason.stack || "") : "",
+                });
+            }
+        });
+
+        // 3. Перехват fetch — логируем ошибки и медленные запросы
+        const origFetch = window.fetch;
+        window.fetch = async function(...args) {
+            const startMs = Date.now();
+            const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '?');
+            const method = (args[1]?.method || 'GET').toUpperCase();
+            try {
+                const resp = await origFetch.apply(this, args);
+                const durationMs = Date.now() - startMs;
+                if (debugMode) {
+                    const entry = {
+                        type: "fetch",
+                        message: `${method} ${url} → ${resp.status}`,
+                        url: url,
+                        details: { status: resp.status, duration_ms: durationMs, method: method },
+                    };
+                    if (!resp.ok) entry.type = "fetch_error";
+                    if (durationMs > 5000) entry.type = "fetch_slow";
+                    sendClientLog(entry);
+                }
+                return resp;
+            } catch (err) {
+                const durationMs = Date.now() - startMs;
+                if (debugMode) {
+                    sendClientLog({
+                        type: "fetch_error",
+                        message: `${method} ${url} — FAILED: ${err.message}`,
+                        url: url,
+                        stack: err.stack || "",
+                        details: { duration_ms: durationMs, method: method },
+                    });
+                }
+                throw err;
+            }
+        };
+
+        // 4. Перехват console.error и console.warn
+        const origConsoleError = console.error;
+        console.error = function(...args) {
+            if (debugMode) {
+                sendClientLog({
+                    type: "console_error",
+                    message: args.map(a => typeof a === 'object' ? JSON.stringify(a)[:500] : String(a)).join(" "),
+                    stack: new Error().stack || "",
+                });
+            }
+            origConsoleError.apply(console, args);
+        };
+        const origConsoleWarn = console.warn;
+        console.warn = function(...args) {
+            if (debugMode) {
+                sendClientLog({
+                    type: "console_warn",
+                    message: args.map(a => typeof a === 'object' ? JSON.stringify(a)[:500] : String(a)).join(" "),
+                });
+            }
+            origConsoleWarn.apply(console, args);
+        };
+    }
+
+    // Отправить клиентский лог на сервер (fire-and-forget)
+    function sendClientLog(entry) {
+        try {
+            fetch('/api/v1/debug/client-log', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(entry),
+            }).catch(() => {}); // fire-and-forget
+        } catch(e) {}
+    }
+
+    let _debugTimerInterval = null;
+
+    // Переключение debug-режима
+    async function toggleDebugMode() {
+        const btn = document.getElementById('btn-debug-test');
+        const label = document.getElementById('debug-btn-label');
+        const dot = document.getElementById('debug-dot');
+        const timer = document.getElementById('debug-timer');
+
+        if (!debugMode) {
+            // ═══ ВКЛЮЧАЕМ ЛОГИРОВАНИЕ ═══
+            try {
+                const resp = await fetch('/api/v1/debug/start', { method: 'POST' });
+                const data = await resp.json();
+                if (data.started) {
+                    debugMode = true;
+                    debugStartTime = data.timestamp;
+                    btn.classList.add('debug-active');
+                    dot.classList.add('debug-recording');
+                    label.textContent = 'СТОП';
+                    showToast('🔴 ТЕСТ: логирование включено! Делайте что угодно, потом нажмите СТОП → пуш на GitHub.', 'info', 5000);
+                    // Таймер записи
+                    if (timer) {
+                        timer.style.display = 'inline';
+                        _debugTimerInterval = setInterval(() => {
+                            const elapsed = Math.floor((Date.now() - new Date(debugStartTime).getTime()) / 1000);
+                            const m = Math.floor(elapsed / 60);
+                            const s = elapsed % 60;
+                            timer.textContent = (m > 0 ? m + ':' + String(s).padStart(2, '0') : s + 's');
+                        }, 1000);
+                    }
+                }
+            } catch(e) {
+                showToast('Ошибка запуска: ' + e.message, 'error');
+            }
+        } else {
+            // ═══ СТОП → ПУШ НА GITHUB ═══
+            await stopAndPushToGitHub();
+        }
+    }
+
+    // Остановка + пуш логов на GitHub
+    async function stopAndPushToGitHub() {
+        const btn = document.getElementById('btn-debug-test');
+        const label = document.getElementById('debug-btn-label');
+        const dot = document.getElementById('debug-dot');
+        const timer = document.getElementById('debug-timer');
+
+        // Очищаем таймер
+        if (_debugTimerInterval) { clearInterval(_debugTimerInterval); _debugTimerInterval = null; }
+        if (timer) timer.style.display = 'none';
+
+        if (dot) dot.classList.remove('debug-recording');
+        btn.classList.remove('debug-active');
+        label.textContent = 'ПУШ...';
+        debugMode = false;
+
+        try {
+            // Показываем модальное окно с прогрессом
+            document.getElementById('debug-modal').classList.add('active');
+            document.getElementById('debug-analyzing').style.display = 'block';
+            document.getElementById('debug-analysis-content').style.display = 'none';
+            document.getElementById('debug-raw-section').style.display = 'none';
+            document.getElementById('debug-stats-bar').innerHTML = '';
+            document.getElementById('debug-modal-title').textContent = 'Пуш логов на GitHub';
+            document.getElementById('debug-modal-icon').textContent = '🚀';
+            document.getElementById('debug-modal-badge').style.display = 'none';
+            // Меняем текст спиннера
+            document.getElementById('debug-analyzing').innerHTML =
+                '<div class="debug-spinner"></div>' +
+                '<div style="margin-top:16px;color:var(--text-secondary);font-size:14px;">Собираю логи и пушу на GitHub...</div>';
+
+            const resp = await fetch('/api/v1/debug/push-to-github', { method: 'POST' });
+            const data = await resp.json();
+
+            document.getElementById('debug-analyzing').style.display = 'none';
+            document.getElementById('debug-analysis-content').style.display = 'block';
+
+            if (data.error) {
+                document.getElementById('debug-modal-icon').textContent = '❌';
+                document.getElementById('debug-analysis-content').textContent = 'Ошибка: ' + data.error;
+                return;
+            }
+
+            // Показываем статистику
+            const statsBar = document.getElementById('debug-stats-bar');
+            const stats = [
+                { label: 'Длительность', value: (data.duration_sec || 0) + 'с', color: 'var(--blue)' },
+                { label: 'Событий сервер', value: data.server_entries || 0, color: 'var(--accent)' },
+                { label: 'JS ошибок', value: data.client_errors || 0, color: data.client_errors > 0 ? 'var(--red)' : 'var(--green)' },
+                { label: 'Ошибок API', value: data.errors_count || 0, color: data.errors_count > 0 ? 'var(--red)' : 'var(--green)' },
+            ];
+            statsBar.innerHTML = stats.map(s =>
+                '<div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:6px 12px;text-align:center;">' +
+                '<div style="font-size:18px;font-weight:700;color:' + s.color + ';">' + s.value + '</div>' +
+                '<div style="font-size:10px;color:var(--text-secondary);">' + s.label + '</div></div>'
+            ).join('');
+
+            const badge = document.getElementById('debug-modal-badge');
+            const pushed = data.pushed;
+            if (pushed) {
+                document.getElementById('debug-modal-icon').textContent = '✅';
+                badge.textContent = 'ЗАПУШЕНО';
+                badge.style.display = 'inline';
+                badge.style.background = 'var(--green)';
+                badge.style.color = '#000';
+                const logUrl = data.github_url || '';
+                document.getElementById('debug-analysis-content').innerHTML =
+                    'Логи успешно запушены на GitHub!\n\n' +
+                    'Файл: ' + (data.log_file || 'debug_session.md') + '\n' +
+                    (logUrl ? 'Репозиторий: ' + logUrl + '\n' : '') +
+                    '\nРазбор и исправление багов — в работе.';
+                if (logUrl) {
+                    document.getElementById('debug-raw-section').style.display = 'block';
+                    document.getElementById('debug-raw-log').textContent = logUrl;
+                }
+            } else {
+                document.getElementById('debug-modal-icon').textContent = '⚠️';
+                badge.textContent = 'БЕЗ GITHUB';
+                badge.style.display = 'inline';
+                badge.style.background = 'var(--amber)';
+                badge.style.color = '#000';
+                document.getElementById('debug-analysis-content').textContent =
+                    'Логи собраны, но GitHub не подключён.\n' +
+                    'Сырой лог:\n' + (data.raw_log || '(пусто)');
+                document.getElementById('debug-raw-section').style.display = 'block';
+                document.getElementById('debug-raw-log').textContent = data.raw_log || '';
+            }
+
+        } catch(e) {
+            document.getElementById('debug-analyzing').style.display = 'none';
+            document.getElementById('debug-analysis-content').style.display = 'block';
+            document.getElementById('debug-analysis-content').textContent = 'Ошибка: ' + e.message;
+        }
+
+        // Возвращаем кнопку в исходное состояние
+        label.textContent = 'ТЕСТ';
+    }
+
+    function closeDebugModal() {
+        document.getElementById('debug-modal').classList.remove('active');
+    }
+
+    function toggleDebugRaw() {
+        const raw = document.getElementById('debug-raw-log');
+        raw.style.display = raw.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // Устанавливаем перехватчики при загрузке
+    installDebugInterceptors();
 
     // ═══════════════════════════════════════════════════════
     // Sidebar Resize Handle (drag to resize)

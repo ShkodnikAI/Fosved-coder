@@ -4,6 +4,9 @@ from core.keys_manager import keys_manager
 import json
 import litellm
 
+from core.action_logger import get_logger
+logger = get_logger()
+
 litellm.suppress_debug_info = True
 
 
@@ -55,6 +58,11 @@ class HybridRouter:
         # Step 1: Keyword matching — simple tasks → cheap model
         for kw in self.KEYWORDS_SIMPLE:
             if kw in prompt_lower:
+                try:
+                    logger.log("route_keyword_simple", level="info", source="router",
+                               details={"keyword": kw, "model": cheap_model, "method": "keyword"})
+                except Exception:
+                    pass
                 return RouterResult(
                     subtasks=[SubTask(
                         prompt=user_prompt,
@@ -67,6 +75,11 @@ class HybridRouter:
         # Step 2: Keyword matching — complex tasks → expensive model
         for kw in self.KEYWORDS_COMPLEX:
             if kw in prompt_lower:
+                try:
+                    logger.log("route_keyword_complex", level="info", source="router",
+                               details={"keyword": kw, "model": default_model, "method": "keyword"})
+                except Exception:
+                    pass
                 return RouterResult(
                     subtasks=[SubTask(
                         prompt=user_prompt,
@@ -142,6 +155,12 @@ class HybridRouter:
 
         except (json.JSONDecodeError, KeyError, Exception) as e:
             # Fallback to default model on any parsing/API error
+            try:
+                logger.log("route_ai_failed", level="warning", source="router",
+                           details={"fallback_model": default_model, "error_type": type(e).__name__},
+                           error=str(e)[:200])
+            except Exception:
+                pass
             await save_routing_stat(
                 user_prompt[:100],
                 default_model,

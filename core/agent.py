@@ -53,8 +53,10 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
         api_key = model_config["api_key"]
         api_base = model_config.get("api_base", "")
     else:
-        # Fallback: check if this is a free model (model_id without prefix)
+        # Fallback: голое имя модели или free модель
         print(f"  [agent] get_model_config вернул None для '{model}' — пробуем fallback")
+
+        # Проверяем — это free модель?
         for fm in keys_manager.FREE_MODELS:
             if fm["id"] == model:
                 or_config = keys_manager.providers.get("openrouter", {})
@@ -63,6 +65,21 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
                 api_base = or_config.get("api_base", "https://openrouter.ai/api/v1")
                 print(f"  [agent] fallback: найдена free модель, model={model}, has_key={bool(api_key)}")
                 break
+        else:
+            # Последний resort: пытаемся найти модель по голому имени во всех провайдерах
+            bare_name = model.split("/")[-1]  # убираем prefix если есть
+            for provider_id, config in keys_manager.providers.items():
+                if config.get("status") in ("valid", "rate_limited") and config.get("api_key"):
+                    for model_name in config.get("models", []):
+                        if model_name == bare_name:
+                            prefix = config.get("litellm_prefix", provider_id)
+                            model = f"{prefix}/{model_name}"
+                            api_key = config["api_key"]
+                            api_base = config.get("api_base", "")
+                            print(f"  [agent] fallback: найдена по голому имени '{bare_name}' в {provider_id}")
+                            break
+                    if api_key:
+                        break
 
     # Debug logging
     has_key = bool(api_key)
@@ -299,8 +316,13 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     all_models = keys_manager.get_all_models()
     for m in all_models:
         if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
-            if m.get("api_key") or m["type"] in ("local", "free", "custom"):
-                models_to_try.append(m["id"])
+            model_type = m.get("type", "")
+            # Пропускаем free модели без ключа и local модели без сервера
+            if model_type == "free" and m.get("status") == "no_key":
+                continue
+            if model_type == "local" and not m.get("base_url"):
+                continue
+            models_to_try.append(m["id"])
 
     if not models_to_try:
         await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ в настройках (🔑)."})

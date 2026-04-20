@@ -37,6 +37,8 @@ action_logger = get_logger()
 @router.get("/health")
 async def health_check():
     """Проверка состояния системы: БД, API ключи, провайдеры."""
+    try: action_logger.api_call("GET", "/api/v1/health")
+    except Exception: pass
     from core.memory import IS_POSTGRES, check_db_connection, DB_URL, engine
     from sqlalchemy import text
     import time
@@ -78,6 +80,8 @@ async def health_check():
 @router.get("/status")
 async def system_status():
     """Детальная информация о системе: БД URL (без пароля), модели, память."""
+    try: action_logger.api_call("GET", "/api/v1/status")
+    except Exception: pass
     import os
     from core.memory import IS_POSTGRES, DB_URL
 
@@ -199,6 +203,8 @@ class DiscoverLocalModelsRequest(BaseModel):
 @router.get("/")
 async def api_root():
     """Корень API — список доступных endpoints."""
+    try: action_logger.api_call("GET", "/api/v1/")
+    except Exception: pass
     return {
         "name": "Fosved Coder API",
         "version": "2.0",
@@ -217,6 +223,8 @@ async def api_root():
 @router.post("/keys/add")
 async def add_key(req: AddKeyRequest):
     """Валидация и добавление API-ключа провайдера."""
+    try: action_logger.log("ADD_KEY", source="api", details={"provider": req.provider})
+    except Exception: pass
     result = await keys_manager.add_key(
         provider_id=req.provider,
         api_key=req.api_key,
@@ -224,19 +232,31 @@ async def add_key(req: AddKeyRequest):
         api_base=req.api_base if req.api_base else None,
     )
     if not result["success"]:
+        try: action_logger.log("ADD_KEY", source="api", level="error", error=result["error"], details={"provider": req.provider})
+        except Exception: pass
         raise HTTPException(400, result["error"])
+    try: action_logger.log("ADD_KEY", source="api", level="success", details={"provider": req.provider})
+    except Exception: pass
     return result
 
 @router.delete("/keys/{provider_id}")
 async def remove_key(provider_id: str):
     """Удаление API-ключа провайдера."""
+    try: action_logger.log("REMOVE_KEY", source="api", details={"provider_id": provider_id})
+    except Exception: pass
     if keys_manager.remove_key(provider_id):
+        try: action_logger.log("REMOVE_KEY", source="api", level="success", details={"provider_id": provider_id})
+        except Exception: pass
         return {"success": True, "provider": provider_id}
+    try: action_logger.log("REMOVE_KEY", source="api", level="error", error=f"Provider {provider_id} not found", details={"provider_id": provider_id})
+    except Exception: pass
     raise HTTPException(404, f"Провайдер {provider_id} не найден")
 
 @router.get("/keys/providers")
 async def get_providers():
     """Список всех провайдеров с их статусом."""
+    try: action_logger.api_call("GET", "/api/v1/keys/providers")
+    except Exception: pass
     return {
         "providers": PROVIDER_DEFS,
         "configured": keys_manager.get_provider_status(),
@@ -245,33 +265,49 @@ async def get_providers():
 @router.get("/keys/github")
 async def get_github_status():
     """Статус GitHub интеграции."""
+    try: action_logger.api_call("GET", "/api/v1/keys/github")
+    except Exception: pass
     return keys_manager.get_github_status()
 
 @router.post("/keys/github")
 async def set_github_token(req: GitHubTokenRequest):
     """Установка и валидация GitHub токена."""
+    try: action_logger.log("SET_GITHUB_TOKEN", source="api", details={"enabled": req.enabled})
+    except Exception: pass
     validation = await keys_manager.validate_github_token(req.token)
     if validation["status"] != "valid":
+        try: action_logger.log("SET_GITHUB_TOKEN", source="api", level="error", error=validation["error"])
+        except Exception: pass
         raise HTTPException(400, validation["error"])
     keys_manager.set_github_token(req.token, req.enabled)
+    try: action_logger.log("SET_GITHUB_TOKEN", source="api", level="success", details={"user": validation.get("user"), "enabled": req.enabled})
+    except Exception: pass
     return {"success": True, "user": validation["user"]}
 
 @router.put("/keys/github/toggle")
 async def toggle_github(req: ToggleGitHubRequest):
     """Включение/отключение GitHub интеграции."""
+    try: action_logger.log("TOGGLE_GITHUB", source="api", details={"enabled": req.enabled})
+    except Exception: pass
     result = keys_manager.toggle_github(req.enabled)
     return result
 
 @router.get("/models")
 async def get_all_models():
     """Список всех доступных моделей (платные + локальные + бесплатные + кастомные)."""
+    try: action_logger.api_call("GET", "/api/v1/models")
+    except Exception: pass
     return {"models": keys_manager.get_all_models()}
 
 @router.post("/models/validate/{provider_id}")
 async def revalidate_provider(provider_id: str):
     """Повторная валидация ключа провайдера."""
+    try: action_logger.log("REVALIDATE_PROVIDER", source="api", details={"provider_id": provider_id})
+    except Exception: pass
     config = keys_manager.providers.get(provider_id)
     if not config:
+        try: action_logger.log("REVALIDATE_PROVIDER", source="api", level="error", error=f"Provider {provider_id} not found")
+        except Exception: pass
         raise HTTPException(404, f"Провайдер {provider_id} не настроен")
     result = await keys_manager.validate_key(
         provider_id, config["api_key"], config["models"][0] if config.get("models") else None
@@ -285,8 +321,12 @@ async def revalidate_provider(provider_id: str):
 async def test_openrouter_key():
     """Быстрый тест OpenRouter ключа — отправляем запрос к бесплатной модели."""
     import litellm
+    try: action_logger.log("TEST_OPENROUTER", source="api")
+    except Exception: pass
     config = keys_manager.providers.get("openrouter")
     if not config or not config.get("api_key"):
+        try: action_logger.log("TEST_OPENROUTER", source="api", level="error", error="OpenRouter key not configured")
+        except Exception: pass
         return {"success": False, "error": "Ключ OpenRouter не настроен. Добавьте OPENROUTER_API_KEY в Environment Variables."}
     try:
         response = await litellm.acompletion(
@@ -319,6 +359,8 @@ async def test_openrouter_key():
 @router.get("/models/local")
 async def list_local_models():
     """Список сохранённых локальных моделей."""
+    try: action_logger.api_call("GET", "/api/v1/models/local")
+    except Exception: pass
     return {
         "models": keys_manager.local_models,
         "providers": LOCAL_PROVIDERS,
@@ -327,6 +369,8 @@ async def list_local_models():
 @router.post("/models/local/discover")
 async def discover_local_models(req: DiscoverLocalModelsRequest):
     """Автообнаружение моделей на локальном сервере (Ollama, LM Studio и т.д.)."""
+    try: action_logger.log("DISCOVER_LOCAL_MODELS", source="api", details={"provider_key": req.provider_key})
+    except Exception: pass
     result = await keys_manager.discover_local_models(
         provider_key=req.provider_key,
         base_url=req.base_url if req.base_url else None,
@@ -336,6 +380,8 @@ async def discover_local_models(req: DiscoverLocalModelsRequest):
 @router.post("/models/local")
 async def add_local_model(req: AddLocalModelRequest):
     """Ручное добавление локальной модели."""
+    try: action_logger.log("ADD_LOCAL_MODEL", source="api", details={"provider_key": req.provider_key, "model_name": req.model_name})
+    except Exception: pass
     result = await keys_manager.add_local_model(
         provider_key=req.provider_key,
         model_name=req.model_name,
@@ -343,14 +389,24 @@ async def add_local_model(req: AddLocalModelRequest):
         display_name=req.display_name,
     )
     if not result["success"]:
+        try: action_logger.log("ADD_LOCAL_MODEL", source="api", level="error", error=result["error"], details={"provider_key": req.provider_key, "model_name": req.model_name})
+        except Exception: pass
         raise HTTPException(400, result["error"])
+    try: action_logger.log("ADD_LOCAL_MODEL", source="api", level="success", details={"provider_key": req.provider_key, "model_name": req.model_name})
+    except Exception: pass
     return result
 
 @router.delete("/models/local/{model_id}")
 async def remove_local_model(model_id: str):
     """Удаление локальной модели."""
+    try: action_logger.log("REMOVE_LOCAL_MODEL", source="api", details={"model_id": model_id})
+    except Exception: pass
     if keys_manager.remove_local_model(model_id):
+        try: action_logger.log("REMOVE_LOCAL_MODEL", source="api", level="success", details={"model_id": model_id})
+        except Exception: pass
         return {"success": True, "model_id": model_id}
+    try: action_logger.log("REMOVE_LOCAL_MODEL", source="api", level="error", error=f"Local model {model_id} not found")
+    except Exception: pass
     raise HTTPException(404, f"Локальная модель {model_id} не найдена")
 
 
@@ -361,11 +417,15 @@ async def remove_local_model(model_id: str):
 @router.get("/models/custom")
 async def list_custom_models():
     """Список кастомных (принудительно подключённых) моделей."""
+    try: action_logger.api_call("GET", "/api/v1/models/custom")
+    except Exception: pass
     return {"models": keys_manager.custom_models}
 
 @router.post("/models/custom")
 async def add_custom_model(req: AddCustomModelRequest):
     """Принудительное добавление модели по URL (force connect)."""
+    try: action_logger.log("ADD_CUSTOM_MODEL", source="api", details={"name": req.name, "api_base": req.api_base})
+    except Exception: pass
     result = await keys_manager.add_custom_model(
         name=req.name,
         api_base=req.api_base,
@@ -374,14 +434,24 @@ async def add_custom_model(req: AddCustomModelRequest):
         litellm_prefix=req.litellm_prefix,
     )
     if not result["success"]:
+        try: action_logger.log("ADD_CUSTOM_MODEL", source="api", level="error", error=result["error"], details={"name": req.name})
+        except Exception: pass
         raise HTTPException(400, result["error"])
+    try: action_logger.log("ADD_CUSTOM_MODEL", source="api", level="success", details={"name": req.name})
+    except Exception: pass
     return result
 
 @router.delete("/models/custom/{model_id}")
 async def remove_custom_model(model_id: str):
     """Удаление кастомной модели."""
+    try: action_logger.log("REMOVE_CUSTOM_MODEL", source="api", details={"model_id": model_id})
+    except Exception: pass
     if keys_manager.remove_custom_model(model_id):
+        try: action_logger.log("REMOVE_CUSTOM_MODEL", source="api", level="success", details={"model_id": model_id})
+        except Exception: pass
         return {"success": True, "model_id": model_id}
+    try: action_logger.log("REMOVE_CUSTOM_MODEL", source="api", level="error", error=f"Custom model {model_id} not found")
+    except Exception: pass
     raise HTTPException(404, f"Кастомная модель {model_id} не найдена")
 
 
@@ -391,40 +461,64 @@ async def remove_custom_model(model_id: str):
 
 @router.get("/projects")
 async def list_projects():
+    try: action_logger.api_call("GET", "/api/v1/projects")
+    except Exception: pass
     return await get_all_projects()
 
 @router.post("/projects")
 async def create_project_endpoint(req: CreateProjectRequest):
     from core.memory import CONFIG
+    try: action_logger.log("CREATE_PROJECT", source="api", details={"name": req.name, "template": req.template})
+    except Exception: pass
     projects_dir = CONFIG["system"]["projects_dir"]
     project_path = f"{projects_dir}/{req.name.replace(' ', '_').lower()}"
     result = await create_project(req.name, project_path, description=req.description, base_prompt=req.base_prompt, ideas=req.ideas, github_repo=req.github_repo, github_token=req.github_token, local_path=req.local_path, template=req.template)
     if not result:
+        try: action_logger.log("CREATE_PROJECT", source="api", level="error", error="Project already exists", details={"name": req.name})
+        except Exception: pass
         raise HTTPException(400, "Проект с таким именем уже существует")
+    try: action_logger.log("CREATE_PROJECT", source="api", level="success", details={"name": req.name, "project_id": result.get("id")})
+    except Exception: pass
     return result
 
 @router.delete("/projects/{project_id}")
 async def delete_project_endpoint(project_id: int):
+    try: action_logger.log("DELETE_PROJECT", source="api", project_id=project_id)
+    except Exception: pass
     if await delete_project(project_id):
+        try: action_logger.log("DELETE_PROJECT", source="api", level="success", project_id=project_id)
+        except Exception: pass
         return {"success": True}
+    try: action_logger.log("DELETE_PROJECT", source="api", level="error", error="Project not found", project_id=project_id)
+    except Exception: pass
     raise HTTPException(404, "Проект не найден")
 
 @router.put("/projects/progress")
 async def update_progress(req: UpdateProgressRequest):
+    try: action_logger.log("UPDATE_PROGRESS", source="api", project_id=req.project_id, details={"progress": req.progress})
+    except Exception: pass
     if await update_project_progress(req.project_id, req.progress):
         return {"success": True, "progress": req.progress}
+    try: action_logger.log("UPDATE_PROGRESS", source="api", level="error", error="Project not found", project_id=req.project_id)
+    except Exception: pass
     raise HTTPException(404, "Проект не найден")
 
 @router.put("/projects/models")
 async def update_models(req: UpdateModelsRequest):
+    try: action_logger.log("UPDATE_MODELS", source="api", project_id=req.project_id, details={"model_ids": req.model_ids})
+    except Exception: pass
     if await update_project_models(req.project_id, req.model_ids):
         return {"success": True, "model_ids": req.model_ids}
+    try: action_logger.log("UPDATE_MODELS", source="api", level="error", error="Project not found", project_id=req.project_id)
+    except Exception: pass
     raise HTTPException(404, "Проект не найден")
 
 @router.put("/projects/settings")
 async def update_project_settings(req: UpdateProjectSettingsRequest):
     """Update project description, prompt, ideas."""
     from core.memory import async_session, Project, select
+    try: action_logger.log("UPDATE_PROJECT_SETTINGS", source="api", project_id=req.project_id)
+    except Exception: pass
     async with async_session() as session:
         async with session.begin():
             result = await session.execute(select(Project).where(Project.id == req.project_id))
@@ -449,6 +543,8 @@ class RenameProjectRequest(BaseModel):
 async def rename_project(req: RenameProjectRequest):
     """Переименовать проект."""
     from core.memory import async_session, Project, select
+    try: action_logger.log("RENAME_PROJECT", source="api", project_id=req.project_id, details={"new_name": req.new_name})
+    except Exception: pass
     new_name = req.new_name.strip()
     if not new_name:
         raise HTTPException(400, "Название не может быть пустым")
@@ -476,6 +572,8 @@ async def regenerate_project_key(req: RegenerateKeyRequest):
     """Перегенерировать UUID ключ проекта."""
     import uuid as _uuid
     from core.memory import async_session, Project, select
+    try: action_logger.log("REGENERATE_PROJECT_KEY", source="api", project_id=req.project_id)
+    except Exception: pass
     async with async_session() as session:
         async with session.begin():
             result = await session.execute(select(Project).where(Project.id == req.project_id))
@@ -491,6 +589,8 @@ async def regenerate_project_key(req: RegenerateKeyRequest):
 async def get_project_by_key(key: str):
     """Получить проект по UUID ключу."""
     from core.memory import async_session, Project, select
+    try: action_logger.api_call("GET", f"/api/v1/projects/by-key/{key[:8]}...")
+    except Exception: pass
     async with async_session() as session:
         result = await session.execute(select(Project).where(Project.uuid_key == key))
         p = result.scalar_one_or_none()
@@ -506,6 +606,8 @@ async def get_project_by_key(key: str):
 @router.get("/projects/{project_id}/tree")
 async def get_project_tree(project_id: int):
     """Получить дерево файлов проекта (вложенная структура)."""
+    try: action_logger.api_call("GET", f"/api/v1/projects/{project_id}/tree", project_id=project_id)
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -540,6 +642,8 @@ async def get_project_tree(project_id: int):
 @router.get("/projects/{project_id}/read-file")
 async def read_file(project_id: int, path: str):
     """Прочитать содержимое файла проекта."""
+    try: action_logger.log("READ_FILE", source="api", project_id=project_id, details={"path": path})
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -561,6 +665,8 @@ async def read_file(project_id: int, path: str):
 @router.post("/projects/{project_id}/save-file")
 async def save_file(project_id: int, path: str = Body(...), content: str = Body("")):
     """Сохранить/создать файл в проекте."""
+    try: action_logger.log("SAVE_FILE", source="api", project_id=project_id, details={"path": path, "size": len(content)})
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -580,6 +686,8 @@ async def save_file(project_id: int, path: str = Body(...), content: str = Body(
 @router.post("/projects/{project_id}/search-files")
 async def search_files(req: SearchFilesRequest):
     """Поиск текста/кода по файлам проекта (grep)."""
+    try: action_logger.log("SEARCH_FILES", source="api", project_id=req.project_id, details={"query": req.query, "pattern": req.file_pattern})
+    except Exception: pass
     project = await get_project(req.project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -632,6 +740,8 @@ async def search_files(req: SearchFilesRequest):
 @router.post("/projects/{project_id}/git")
 async def git_operation(req: GitOperationRequest):
     """Git операции: commit, push, pull, log, status, diff."""
+    try: action_logger.log(f"GIT_{req.operation.upper()}", source="api", project_id=req.project_id, details={"operation": req.operation})
+    except Exception: pass
     project = await get_project(req.project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -686,8 +796,12 @@ async def git_operation(req: GitOperationRequest):
             raise HTTPException(400, f"Неизвестная операция: {req.operation}")
 
     except subprocess.TimeoutExpired:
+        try: action_logger.log(f"GIT_{req.operation.upper()}", source="api", level="error", error="Timeout", project_id=req.project_id)
+        except Exception: pass
         raise HTTPException(408, "Операция превысила таймаут")
     except Exception as e:
+        try: action_logger.log(f"GIT_{req.operation.upper()}", source="api", level="error", error=str(e), project_id=req.project_id)
+        except Exception: pass
         raise HTTPException(500, str(e))
 
 
@@ -698,6 +812,8 @@ async def git_operation(req: GitOperationRequest):
 @router.post("/projects/{project_id}/packages")
 async def run_package_command(req: RunPackageRequest):
     """Управление пакетами: pip install, npm install, и т.д."""
+    try: action_logger.log("PACKAGE_OPERATION", source="api", project_id=req.project_id, details={"command": req.command})
+    except Exception: pass
     project = await get_project(req.project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1016,6 +1132,8 @@ if __name__ == "__main__":
 @router.get("/templates")
 async def list_templates():
     """Список доступных шаблонов."""
+    try: action_logger.api_call("GET", "/api/v1/templates")
+    except Exception: pass
     return {"templates": [
         {"id": tid, "name": t["name"], "description": t["description"]}
         for tid, t in TEMPLATES.items()
@@ -1024,6 +1142,8 @@ async def list_templates():
 @router.post("/projects/create-from-template")
 async def create_from_template(req: CreateFromTemplateRequest):
     """Создать проект из шаблона."""
+    try: action_logger.log("CREATE_FROM_TEMPLATE", source="api", details={"name": req.name, "template": req.template})
+    except Exception: pass
     template = TEMPLATES.get(req.template)
     if not template:
         raise HTTPException(400, f"Шаблон '{req.template}' не найден")
@@ -1072,6 +1192,8 @@ async def create_from_template(req: CreateFromTemplateRequest):
 @router.post("/projects/archive")
 async def archive_project(req: ArchiveProjectRequest):
     """Архивировать проект: создать мастер-промпт, запаковать файлы."""
+    try: action_logger.log("ARCHIVE_PROJECT", source="api", project_id=req.project_id, details={"description": req.description})
+    except Exception: pass
     project = await get_project(req.project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1123,11 +1245,15 @@ async def archive_project(req: ArchiveProjectRequest):
 @router.get("/archives")
 async def list_archives():
     """Список всех архивов."""
+    try: action_logger.api_call("GET", "/api/v1/archives")
+    except Exception: pass
     return await get_all_archives()
 
 @router.get("/archives/{archive_id}")
 async def get_archive_detail(archive_id: int):
     """Детали архива (с мастер-промптом)."""
+    try: action_logger.log("GET_ARCHIVE_DETAIL", source="api", details={"archive_id": archive_id})
+    except Exception: pass
     archive = await get_archive(archive_id)
     if not archive:
         raise HTTPException(404, "Архив не найден")
@@ -1136,6 +1262,8 @@ async def get_archive_detail(archive_id: int):
 @router.get("/archives/{archive_id}/download")
 async def download_archive(archive_id: int):
     """Скачать ZIP архив."""
+    try: action_logger.log("DOWNLOAD_ARCHIVE", source="api", details={"archive_id": archive_id})
+    except Exception: pass
     archive = await get_archive(archive_id)
     if not archive:
         raise HTTPException(404, "Архив не найден")
@@ -1200,12 +1328,16 @@ def _generate_master_prompt(project_name: str, history: list, file_list: list) -
 
 @router.get("/ideas")
 async def list_ideas():
+    try: action_logger.api_call("GET", "/api/v1/ideas")
+    except Exception: pass
     return await get_all_ideas()
 
 @router.post("/ideas")
 async def create_idea(req: AddIdeaRequest):
     """Анализировать репозиторий и сохранить идею."""
     from core.ideas_injector import IdeasInjector
+    try: action_logger.log("CREATE_IDEA", source="api", details={"repo_url": req.repo_url})
+    except Exception: pass
     injector = IdeasInjector()
     try:
         result = await injector.process_idea(req.repo_url)
@@ -1216,6 +1348,8 @@ async def create_idea(req: AddIdeaRequest):
 
 @router.delete("/ideas/{idea_id}")
 async def delete_idea_endpoint(idea_id: int):
+    try: action_logger.log("DELETE_IDEA", source="api", details={"idea_id": idea_id})
+    except Exception: pass
     if await delete_idea(idea_id):
         return {"success": True}
     raise HTTPException(404, "Идея не найдена")
@@ -1227,6 +1361,8 @@ async def delete_idea_endpoint(idea_id: int):
 
 @router.get("/stats")
 async def get_stats():
+    try: action_logger.api_call("GET", "/api/v1/stats")
+    except Exception: pass
     projects = await get_all_projects()
     ideas = await get_all_ideas()
     archives = await get_all_archives()
@@ -1240,6 +1376,8 @@ async def get_stats():
 
 @router.get("/config")
 async def get_config():
+    try: action_logger.api_call("GET", "/api/v1/config")
+    except Exception: pass
     return {
         "llm": {
             "default_model": CONFIG["llm"].get("default_model", "not set"),
@@ -1265,17 +1403,23 @@ class RenameThreadRequest(BaseModel):
 @router.post("/threads")
 async def create_thread_endpoint(req: CreateThreadRequest):
     from core.memory import create_thread
+    try: action_logger.log("CREATE_THREAD", source="api", project_id=req.project_id, details={"title": req.title})
+    except Exception: pass
     result = await create_thread(req.project_id, req.title, req.parent_thread_id)
     return result
 
 @router.get("/projects/{project_id}/threads")
 async def list_threads(project_id: int):
     from core.memory import get_threads
+    try: action_logger.api_call("GET", f"/api/v1/projects/{project_id}/threads", project_id=project_id)
+    except Exception: pass
     return await get_threads(project_id)
 
 @router.delete("/threads/{thread_id}")
 async def delete_thread_endpoint(thread_id: int):
     from core.memory import delete_thread
+    try: action_logger.log("DELETE_THREAD", source="api", details={"thread_id": thread_id})
+    except Exception: pass
     if await delete_thread(thread_id):
         return {"success": True}
     raise HTTPException(404, "Поток не найден")
@@ -1283,12 +1427,16 @@ async def delete_thread_endpoint(thread_id: int):
 @router.get("/threads/{thread_id}/messages")
 async def get_thread_messages_endpoint(thread_id: int):
     from core.memory import get_thread_messages
+    try: action_logger.log("GET_THREAD_MESSAGES", source="api", details={"thread_id": thread_id})
+    except Exception: pass
     messages = await get_thread_messages(thread_id)
     return {"messages": messages}
 
 @router.put("/threads/{thread_id}/rename")
 async def rename_thread_endpoint(thread_id: int, req: RenameThreadRequest):
     from core.memory import rename_thread
+    try: action_logger.log("RENAME_THREAD", source="api", details={"thread_id": thread_id, "title": req.title})
+    except Exception: pass
     if await rename_thread(thread_id, req.title):
         return {"success": True, "title": req.title}
     raise HTTPException(404, "Поток не найден")
@@ -1305,6 +1453,8 @@ class MilestoneRequest(BaseModel):
 @router.get("/projects/{project_id}/context")
 async def get_context_info(project_id: int):
     from core.memory import get_history, get_message_count, get_context_snapshots
+    try: action_logger.api_call("GET", f"/api/v1/projects/{project_id}/context", project_id=project_id)
+    except Exception: pass
     history = await get_history(project_id)
     snapshots = await get_context_snapshots(project_id)
     return {
@@ -1322,6 +1472,8 @@ async def compress_context(project_id: int):
     """Ручное сжатие контекста через API. LLM-based с regex fallback + DB cleanup."""
     from core.context_compressor import ContextCompressor
     from core.memory import get_history
+    try: action_logger.log("COMPRESS_CONTEXT", source="api", project_id=project_id)
+    except Exception: pass
     compressor = ContextCompressor()
     history = await get_history(project_id)
     if not compressor.should_compress(history):
@@ -1346,6 +1498,8 @@ async def create_milestone(req: MilestoneRequest):
     """Создать milestone (точку сохранения контекста). Не удаляет сообщения — только сохраняет snapshot."""
     from core.memory import get_history, save_context_snapshot
     from core.context_compressor import ContextCompressor
+    try: action_logger.log("CREATE_MILESTONE", source="api", project_id=req.project_id, details={"title": req.title})
+    except Exception: pass
     history = await get_history(req.project_id)
     compressor = ContextCompressor()
     # LLM-based summary for milestone
@@ -1371,11 +1525,15 @@ async def create_milestone(req: MilestoneRequest):
 @router.get("/projects/{project_id}/context/snapshots")
 async def list_snapshots(project_id: int):
     from core.memory import get_context_snapshots
+    try: action_logger.api_call("GET", f"/api/v1/projects/{project_id}/context/snapshots", project_id=project_id)
+    except Exception: pass
     return await get_context_snapshots(project_id)
 
 @router.delete("/projects/{project_id}/context/snapshots/{snapshot_id}")
 async def delete_snapshot_endpoint(project_id: int, snapshot_id: int):
     from core.memory import delete_context_snapshot
+    try: action_logger.log("DELETE_SNAPSHOT", source="api", project_id=project_id, details={"snapshot_id": snapshot_id})
+    except Exception: pass
     if await delete_context_snapshot(snapshot_id):
         return {"success": True}
     raise HTTPException(404, "Снепшот не найден")
@@ -1406,6 +1564,8 @@ class APKIconRequest(BaseModel):
 async def get_apk_strategy(project_id: int):
     """Get APK build strategy info for the project's template."""
     from core.apk_builder import APKBuildConfig
+    try: action_logger.api_call("GET", f"/api/v1/projects/{project_id}/apk/strategy", project_id=project_id)
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1426,6 +1586,8 @@ async def get_apk_strategy(project_id: int):
 async def check_apk_environment(project_id: int):
     """Check if build tools are installed for the project's template."""
     from core.apk_builder import APKBuilder
+    try: action_logger.log("CHECK_APK_ENV", source="api", project_id=project_id)
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1441,6 +1603,8 @@ async def generate_apk_icon(project_id: int, req: APKIconRequest):
     import tempfile
     import base64
     from core.apk_builder import APKBuilder
+    try: action_logger.log("GENERATE_APK_ICON", source="api", project_id=project_id, details={"prompt": req.prompt[:100]})
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1482,6 +1646,8 @@ async def init_apk_platform(project_id: int):
     """Initialize Android platform for the project (first-time setup)."""
     from core.apk_builder import APKBuilder, APKBuildConfig
     from core.executor import CommandExecutor
+    try: action_logger.log("INIT_APK_PLATFORM", source="api", project_id=project_id)
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1502,6 +1668,8 @@ async def build_apk(req: APKConfigRequest):
     """Build APK for the project."""
     from core.apk_builder import APKBuilder, APKBuildConfig
     from core.executor import CommandExecutor
+    try: action_logger.log("BUILD_APK", source="api", project_id=req.project_id, details={"app_name": req.app_name, "build_type": req.build_type})
+    except Exception: pass
     project = await get_project(req.project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1546,6 +1714,8 @@ async def build_apk(req: APKConfigRequest):
 @router.get("/projects/{project_id}/apk/config")
 async def get_apk_config(project_id: int):
     """Get saved APK build config for the project."""
+    try: action_logger.api_call("GET", f"/api/v1/projects/{project_id}/apk/config", project_id=project_id)
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1558,6 +1728,8 @@ async def get_apk_config(project_id: int):
 @router.put("/projects/{project_id}/apk/config")
 async def save_apk_config(project_id: int, req: APKConfigRequest):
     """Save APK build config for the project."""
+    try: action_logger.log("SAVE_APK_CONFIG", source="api", project_id=project_id)
+    except Exception: pass
     project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
@@ -1616,3 +1788,338 @@ async def clear_logs():
 async def get_log_file(limit: int = 500):
     """Прочитать логи из файла на диске."""
     return {"entries": action_logger.read_log_file(limit=limit)}
+
+
+# ═══════════════════════════════════════════════════════════════
+# DEBUG MODE API (красная кнопка ТЕСТ)
+# ═══════════════════════════════════════════════════════════════
+
+class ClientLogEntry(BaseModel):
+    type: str = ""  # "js_error", "fetch_error", "fetch_slow", "ui_action", "console_warn"
+    message: str = ""
+    url: str = ""
+    line: int = None
+    col: int = None
+    stack: str = ""
+    details: dict = {}
+
+
+@router.post("/debug/start")
+async def debug_start():
+    """Включить debug-режим — тотальное логирование."""
+    result = action_logger.start_debug_session()
+    action_logger.log("DEBUG_START_API", level="warning", source="api")
+    return result
+
+
+@router.post("/debug/stop")
+async def debug_stop():
+    """Выключить debug-режим и вернуть собранный лог."""
+    result = action_logger.stop_debug_session()
+    return result
+
+
+@router.get("/debug/status")
+async def debug_status():
+    """Статус текущей debug-сессии."""
+    return action_logger.get_debug_status()
+
+
+@router.post("/debug/client-log")
+async def debug_client_log(entry: ClientLogEntry):
+    """Принать лог с клиента (JS errors, fetch failures, и т.д.)."""
+    action_logger.add_client_log(entry.model_dump())
+    return {"ok": True}
+
+
+@router.post("/debug/analyze")
+async def debug_analyze():
+    """Остановить debug и отправить лог на AI-анализ."""
+    import litellm
+
+    # Собрать лог
+    debug_data = action_logger.stop_debug_session()
+    server_entries = debug_data.get("entries", [])
+    client_errors = debug_data.get("client_errors", [])
+
+    if not server_entries and not client_errors:
+        return {"analysis": "Нет данных для анализа — сессия была пустой.", "bugs": []}
+
+    # Формируем сводку для AI
+    summary_lines = [
+        f"=== DEBUG SESSION REPORT ===",
+        f"Duration: {debug_data.get('duration_sec', 0)}s",
+        f"Server entries: {len(server_entries)}",
+        f"Client errors: {len(client_errors)}",
+        "",
+        "--- SERVER LOG (errors & warnings) ---",
+    ]
+
+    # Только ошибки и предупреждения с сервера
+    for e in server_entries:
+        if e.get("level") in ("error", "warning"):
+            line = f"[{e.get('time', '')}] [{e.get('source', '')}] {e.get('action', '')}"
+            if e.get("error"):
+                line += f" | ERROR: {e['error']}"
+            if e.get("details"):
+                line += f" | Details: {str(e['details'])[:300]}"
+            if e.get("stack_trace"):
+                line += f"\n  STACK: {e['stack_trace']}"
+            summary_lines.append(line)
+
+    summary_lines.append("")
+    summary_lines.append("--- CLIENT ERRORS (JS) ---")
+    for e in client_errors:
+        line = f"[{e.get('time', '')}] [{e.get('type', '')}] {e.get('message', '')}"
+        if e.get("url"):
+            line += f" at {e['url']}:{e.get('line', '?')}:{e.get('col', '?')}"
+        if e.get("stack"):
+            line += f"\n  STACK: {e['stack'][:500]}"
+        summary_lines.append(line)
+
+    summary_lines.append("")
+    summary_lines.append("--- ALL ACTIONS (timeline) ---")
+    for e in server_entries:
+        lvl_marker = {"error": "!!", "warning": "!?", "success": "OK", "info": ">>", "debug": "--"}.get(e.get("level", "info"), ">>")
+        line = f"[{e.get('time', '')}] {lvl_marker} [{e.get('source', '')}] {e.get('action', '')}"
+        if e.get("error"):
+            line += f" | ERR: {e['error'][:200]}"
+        summary_lines.append(line)
+
+    summary_text = "\n".join(summary_lines)
+
+    # Отправляем в AI для анализа
+    analysis_prompt = f"""Ты — эксперт по отладке web-приложений (FastAPI + WebSocket + vanilla JS).
+Проанализируй лог debug-сессии приложения Fosved Coder и найди все баги, ошибки и проблемные места.
+
+{summary_text}
+
+Ответь в формате:
+1. НАЙДЕННЫЕ БАГИ — список конкретных багов с описанием и建议 по исправлению
+2. ПРИЧИНЫ — вероятные причины каждого бага
+3. ИСПРАВЛЕНИЯ — конкретный код для исправления (файл и изменения)
+4. СТАТИСТИКА — краткая сводка: всего ошибок, предупреждений, действий
+
+Если багов нет — напиши "Багов не обнаружено" и дай краткую сводку сессии."""
+
+    try:
+        # Используем первую доступную модель
+        models = keys_manager.get_all_models()
+        model_id = None
+        for m in models:
+            if m.get("status") in ("valid", "available") and not m.get("is_free"):
+                model_id = m.get("id") or m.get("model_id")
+                break
+        if not model_id and models:
+            model_id = models[0].get("id") or models[0].get("model_id")
+
+        if not model_id:
+            return {
+                "analysis": "Нет доступных моделей ИИ для анализа. Лог собран и сохранён.",
+                "bugs": [],
+                "raw_log": summary_text[:5000],
+            }
+
+        response = await litellm.acompletion(
+            model=model_id,
+            messages=[
+                {"role": "system", "content": "Ты — эксперт по отладке. Отвечай на русском. Будь конкретным и кратким."},
+                {"role": "user", "content": analysis_prompt},
+            ],
+            max_tokens=4000,
+            temperature=0.1,
+            timeout=60,
+        )
+        analysis = response.choices[0].message.content if response.choices else "Не удалось получить анализ"
+
+        return {
+            "analysis": analysis,
+            "duration_sec": debug_data.get("duration_sec", 0),
+            "server_entries": len(server_entries),
+            "client_errors": len(client_errors),
+            "errors_count": sum(1 for e in server_entries if e.get("level") == "error"),
+            "warnings_count": sum(1 for e in server_entries if e.get("level") == "warning"),
+        }
+
+    except Exception as e:
+        return {
+            "analysis": f"Ошибка AI-анализа: {str(e)[:300]}. Лог собран и сохранён в файл debug_session.jsonl",
+            "bugs": [],
+            "raw_log": summary_text[:3000],
+            "error": str(e)[:300],
+        }
+
+
+@router.post("/debug/push-to-github")
+async def debug_push_to_github():
+    """
+    Остановить debug-сессию, собрать логи, сохранить в файл и git push на GitHub.
+    Возвращает {pushed, log_file, github_url, ...} или {error}.
+    """
+    from datetime import datetime
+
+    # 1. Собрать debug-лог
+    debug_data = action_logger.stop_debug_session()
+    server_entries = debug_data.get("entries", [])
+    client_errors = debug_data.get("client_errors", [])
+
+    # 2. Формируем отчёт в Markdown
+    now = datetime.now()
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    session_id = now.strftime("%Y%m%d_%H%M%S")
+    log_filename = f"debug_{session_id}.md"
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "logs")
+
+    lines = [
+        f"# Debug Session — {timestamp}",
+        "",
+        f"- **Длительность:** {debug_data.get('duration_sec', 0)} сек",
+        f"- **Событий сервера:** {len(server_entries)}",
+        f"- **JS ошибок (клиент):** {len(client_errors)}",
+        f"- **Ошибок API:** {sum(1 for e in server_entries if e.get('level') == 'error')}",
+        f"- **Предупреждений:** {sum(1 for e in server_entries if e.get('level') == 'warning')}",
+        "",
+        "---",
+        "",
+        "## Ошибки и Предупреждения",
+        "",
+    ]
+
+    errors_found = False
+    for e in server_entries:
+        if e.get("level") in ("error", "warning"):
+            errors_found = True
+            lvl = "ERROR" if e["level"] == "error" else "WARN"
+            line = f"**[{e.get('time', '')}] [{lvl}] [{e.get('source', '')}]** `{e.get('action', '')}`"
+            if e.get("error"):
+                line += f"\n  > {e['error'][:300]}"
+            if e.get("stack_trace"):
+                line += f"\n```\n{e['stack_trace'][:1000]}\n```"
+            if e.get("details"):
+                d = str(e["details"])[:300]
+                if d and d != "{}":
+                    line += f"\n  Details: {d}"
+            lines.append(line)
+            lines.append("")
+
+    if not errors_found:
+        lines.append("_Ошибок не обнаружено._")
+        lines.append("")
+
+    # JS ошибки
+    if client_errors:
+        lines.append("## JS Ошибки (клиент)")
+        lines.append("")
+        for e in client_errors:
+            line = f"**[{e.get('time', '')}] [{e.get('type', '')}]** {e.get('message', '')[:200]}"
+            if e.get("url"):
+                line += f"  — `{e['url']}`"
+            if e.get("line"):
+                line += f":{e.get('line')}:{e.get('col', '?')}"
+            if e.get("stack"):
+                line += f"\n```\n{e['stack'][:500]}\n```"
+            lines.append(line)
+            lines.append("")
+
+    # Таймлайн всех действий
+    lines.append("---")
+    lines.append("")
+    lines.append("## Полный таймлайн")
+    lines.append("")
+    for e in server_entries:
+        lvl_marker = {"error": "ERR", "warning": "WRN", "success": "OK ", "info": "INF", "debug": "DBG"}.get(e.get("level", "info"), "INF")
+        line = f"`{e.get('time', '')}` [{lvl_marker}] [{e.get('source', '')}] {e.get('action', '')}"
+        if e.get("details"):
+            d = str(e["details"])[:150]
+            if d and d != "{}":
+                line += f"  _{d}_"
+        lines.append(line)
+
+    report_text = "\n".join(lines)
+
+    # 3. Сохраняем отчёт на диск
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, log_filename)
+    try:
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(report_text)
+    except Exception as save_err:
+        return {"error": f"Не удалось сохранить лог: {save_err}", "raw_log": report_text[:5000]}
+
+    # 4. Git push на GitHub (если подключён)
+    github_url = ""
+    pushed = False
+    try:
+        gh_token = keys_manager.github_token
+        gh_enabled = keys_manager.github_enabled
+
+        if gh_token and gh_enabled:
+            # Ищем репозиторий (проект с .git или корень Fosved Coder)
+            from core.memory import get_all_projects
+            projects = await get_all_projects()
+            repo_path = None
+            for p in projects:
+                ppath = p.get("path", "")
+                if ppath and os.path.isdir(os.path.join(ppath, ".git")):
+                    repo_path = ppath
+                    break
+
+            if not repo_path:
+                fc_root = os.path.dirname(os.path.dirname(__file__))
+                if os.path.isdir(os.path.join(fc_root, ".git")):
+                    repo_path = fc_root
+
+            if repo_path:
+                # Копируем файл лога в репозиторий
+                repo_log_path = os.path.join(repo_path, log_filename)
+                shutil.copy2(log_path, repo_log_path)
+
+                # git add + commit + push через subprocess
+                import subprocess as sp
+                commit_msg = f"debug: log session {session_id} ({len(server_entries)} events)"
+
+                def run_git(args):
+                    return sp.run(
+                        ["git", "-C", repo_path] + args,
+                        capture_output=True, text=True, timeout=30
+                    )
+
+                run_git(["add", log_filename])
+                commit_result = run_git(["commit", "-m", commit_msg, "--allow-empty"])
+                commit_out = (commit_result.stdout + commit_result.stderr).strip()
+
+                if "nothing to commit" not in commit_out.lower():
+                    push_result = run_git(["push"])
+                    if push_result.returncode == 0:
+                        pushed = True
+                        # Получаем remote URL
+                        remote_result = run_git(["remote", "get-url", "origin"])
+                        remote_url = remote_result.stdout.strip()
+                        if remote_url and "@" in remote_url:
+                            github_url = remote_url.split("@")[-1].replace(".git", "")
+                            github_url = "https://" + github_url + "/blob/main/" + log_filename
+                        elif remote_url.startswith("http"):
+                            github_url = remote_url.replace(".git", "") + "/blob/main/" + log_filename
+                    else:
+                        action_logger.log("debug_push_failed", level="error", source="debug",
+                                           error=push_result.stderr[:200])
+                else:
+                    pushed = True
+            else:
+                action_logger.log("debug_push_no_repo", level="warning", source="debug")
+    except Exception as git_err:
+        action_logger.log("debug_push_error", level="error", source="debug",
+                           error=str(git_err)[:200])
+
+    return {
+        "pushed": pushed,
+        "log_file": log_filename,
+        "log_path": log_path,
+        "github_url": github_url,
+        "duration_sec": debug_data.get("duration_sec", 0),
+        "server_entries": len(server_entries),
+        "client_errors": len(client_errors),
+        "errors_count": sum(1 for e in server_entries if e.get("level") == "error"),
+        "warnings_count": sum(1 for e in server_entries if e.get("level") == "warning"),
+        "raw_log": report_text[:5000] if not pushed else None,
+    }
