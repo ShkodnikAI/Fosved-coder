@@ -1,3 +1,4 @@
+import os
 import litellm
 import json
 from core.memory import CONFIG, save_message, get_history, get_project
@@ -7,6 +8,7 @@ from core.context_compressor import ContextCompressor
 litellm.suppress_debug_info = True
 
 SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для разработки проекта.
+Ты работаешь внутри IDE пользователя и имеешь доступ к контексту текущего проекта.
 Ты помогаешь писать код, анализировать проект и решать задачи.
 
 {project_context}
@@ -18,7 +20,9 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 {compressed_context}
 
 Правила:
-- Ты работаешь над конкретным проектом. Если указано название проекта и описание — используй эту информацию в ответах.
+- Ты работаешь над конкретным проектом. Ниже указано название, описание, шаблон и путь.
+- Если указана СТРУКТУРА ПРОЕКТА — ты видишь все файлы и их сигнатуры. Используй эту информацию.
+- При запросах к файлам — ссылайся на файлы из структуры, не проси пользователя показать их.
 - Отвечай на том языке, на котором задан вопрос
 - Для кода используй Markdown code blocks с указанием языка
 - Если задача требует выполнения команд — укажи какие команды выполнить
@@ -177,7 +181,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     """Main entry point: get history, add repo_map context, stream response with smart fallback."""
     history = await get_history(project_id)
 
-    # Project context (name, description, template, base_prompt)
+    # Project context (name, description, template, base_prompt, file structure)
     project_context_text = ""
     if project_id:
         project = await get_project(project_id)
@@ -186,11 +190,40 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             if project.get("description"):
                 project_context_text += f"ОПИСАНИЕ: {project['description']}\n"
             if project.get("template"):
-                project_context_text += f"ШАБЛОН: {project['template']}\n"
+                project_context_text += f"ШАБЛОН/ТЕХНОЛОГИЯ: {project['template']}\n"
             if project.get("base_prompt"):
                 project_context_text += f"ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ: {project['base_prompt']}\n"
             if project.get("path"):
                 project_context_text += f"ПУТЬ К ПРОЕКТУ: {project['path']}\n"
+                # Add file listing as context
+                project_path = project["path"]
+                if os.path.isdir(project_path):
+                    try:
+                        file_list = []
+                        for root, dirs, files in os.walk(project_path):
+                            dirs[:] = [d for d in dirs if d not in {
+                                "venv", "__pycache__", "node_modules", ".git", ".cache",
+                                "__pypackages__", ".venv", "env", ".idea", ".vscode",
+                                "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
+                                "target", "bin", "obj", ".next", ".nuxt", ".gradle"
+                            } and not d.startswith(".")]
+                            level = root.replace(project_path, "").count(os.sep)
+                            indent = "  " * level
+                            dir_name = os.path.basename(root) or project.get("name", "project")
+                            file_list.append(f"{indent}{dir_name}/")
+                            sub_indent = "  " * (level + 1)
+                            for f in sorted(files)[:10]:
+                                if f.startswith(".") or f.endswith((".pyc", ".class")):
+                                    continue
+                                file_list.append(f"{sub_indent}{f}")
+                        if file_list:
+                            # Trim to max 80 lines to keep context small
+                            if len(file_list) > 80:
+                                file_list = file_list[:80]
+                                file_list.append("  ... (и другие файлы)")
+                            project_context_text += f"\nФАЙЛЫ ПРОЕКТА:\n" + "\n".join(file_list) + "\n"
+                    except Exception:
+                        pass
 
     # Auto-compression: LLM-based with regex fallback + DB cleanup
     compressed_context_text = ""

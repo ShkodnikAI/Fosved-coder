@@ -275,7 +275,7 @@ async def create_project(name: str, path: str, description: str = "", base_promp
                 os.makedirs(path, exist_ok=True)
             except Exception:
                 pass  # На облаке директория может быть read-only
-            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "github_repo": project.github_repo, "github_token": project.github_token, "local_path": project.local_path, "uuid_key": project.uuid_key, "progress": project.progress, "created_at": str(project.created_at)}
+            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "github_repo": project.github_repo, "github_token": project.github_token, "local_path": project.local_path, "uuid_key": project.uuid_key, "progress": project.progress, "template": project.template, "apk_config": project.apk_config, "created_at": str(project.created_at)}
 
 async def get_all_projects() -> list[dict]:
     """Get all projects as list of dicts."""
@@ -284,7 +284,7 @@ async def get_all_projects() -> list[dict]:
             select(Project).order_by(Project.created_at.desc())
         )
         return [
-            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "created_at": str(p.created_at)}
+            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "template": p.template, "apk_config": p.apk_config, "created_at": str(p.created_at)}
             for p in result.scalars().all()
         ]
 
@@ -296,7 +296,7 @@ async def get_project(project_id: int) -> dict | None:
         )
         p = result.scalar_one_or_none()
         if p:
-            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "created_at": str(p.created_at)}
+            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "template": p.template, "apk_config": p.apk_config, "created_at": str(p.created_at)}
         return None
 
 async def migrate_db():
@@ -309,6 +309,8 @@ async def migrate_db():
                 "github_token": "TEXT DEFAULT ''",
                 "local_path": "TEXT DEFAULT ''",
                 "uuid_key": "VARCHAR(36) DEFAULT ''",
+                "template": "TEXT DEFAULT 'react'",
+                "apk_config": "TEXT DEFAULT NULL",
             }
             for col_name, col_def in new_columns.items():
                 try:
@@ -332,6 +334,8 @@ async def migrate_db():
                 ("github_token", "TEXT", "''"),
                 ("local_path", "TEXT", "''"),
                 ("uuid_key", "VARCHAR(36)", "''"),
+                ("template", "TEXT", "'react'"),
+                ("apk_config", "TEXT", "NULL"),
             ]
             for col_name, col_type, col_default in new_columns:
                 if col_name not in existing:
