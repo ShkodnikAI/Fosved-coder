@@ -24,11 +24,11 @@ PROVIDER_DEFS = {
         "litellm_prefix": "anthropic",
         "api_base": "https://api.anthropic.com",
         "suggested_models": [
-            "claude-opus-4-7-20250514",
-            "claude-opus-4-20250514",
+            "claude-opus-4-7",
+            "claude-opus-4-5-20251101",
+            "claude-sonnet-4-6",
             "claude-sonnet-4-20250514",
-            "claude-3.5-sonnet",
-            "claude-3-haiku",
+            "claude-haiku-4-5-20241022",
         ],
     },
     "openai": {
@@ -50,8 +50,8 @@ PROVIDER_DEFS = {
         "litellm_prefix": "openrouter",
         "api_base": "https://openrouter.ai/api/v1",
         "suggested_models": [
-            "anthropic/claude-opus-4-20250514",
-            "anthropic/claude-sonnet-4-20250514",
+            "anthropic/claude-opus-4-7",
+            "anthropic/claude-sonnet-4-6",
             "openai/gpt-4.1",
             "google/gemini-2.5-flash-preview",
         ],

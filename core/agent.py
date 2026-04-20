@@ -110,7 +110,9 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
         }
         if api_key:
             kwargs["api_key"] = api_key
-        if api_base:
+        # Only pass api_base for custom/override URLs, not for standard providers
+        # litellm knows the correct URLs for anthropic, openai, xai, etc.
+        if api_base and not api_base.startswith("https://api.anthropic.com") and not api_base.startswith("https://api.openai.com/v1") and not api_base.startswith("https://api.x.ai/v1"):
             kwargs["api_base"] = api_base
 
         response = await litellm.acompletion(**kwargs)
