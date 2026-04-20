@@ -65,14 +65,48 @@ header {
 /* ─── MAIN LAYOUT ─── */
 .main-container { display: flex; flex: 1; overflow: hidden; }
 
+/* ─── RESIZE HANDLE (drag between sidebar and workspace) ─── */
+.resize-handle {
+    width: 5px;
+    cursor: col-resize;
+    background: var(--border);
+    flex-shrink: 0;
+    position: relative;
+    transition: background 0.15s;
+    z-index: 10;
+}
+.resize-handle:hover,
+.resize-handle.active {
+    background: var(--accent);
+}
+.resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 3px;
+    height: 30px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 0.15s;
+}
+.resize-handle:hover::after,
+.resize-handle.active::after {
+    background: rgba(255,255,255,0.4);
+}
+
 /* ─── SIDEBAR ─── */
 .sidebar {
     width: 260px;
-    min-width: 260px;
+    min-width: 200px;
+    max-width: 500px;
     background: var(--bg-secondary);
-    border-right: 1px solid var(--border);
+    border-right: none;
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
+    user-select: none;
 }
 .sidebar-section {
     padding: 15px;
@@ -1745,21 +1779,15 @@ pre:hover .copy-btn { opacity: 1; }
 
 @media (max-width: 600px) {
     .sidebar { display: none; }
+    .resize-handle { display: none; }
     .chat-box { padding: 16px 8px; }
     .input-area { padding: 12px 8px; }
     .slide-panel-right { width: 100%; max-width: 100%; }
 }
 
 /* ═══════════════════════════════════════════════════════
-   RESIZABLE SIDEBAR
+   SIDEBAR SECTIONS (flex) 
    ═══════════════════════════════════════════════════════ */
-.sidebar {
-    width: 278px; /* 260px + ~1cm (18px) */
-    min-width: 200px;
-    max-width: 500px;
-    resize: horizontal;
-    overflow: auto;
-}
 .sidebar-section {
     min-height: 0;
     flex-shrink: 0;

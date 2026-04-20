@@ -114,6 +114,9 @@
             </div>
         </div>
 
+        <!-- DRAG HANDLE (resizer between sidebar and workspace) -->
+        <div class="resize-handle" id="sidebar-resize-handle"></div>
+
         <!-- WORKSPACE -->
         <div class="workspace">
             <div class="chat-box" id="chat-box">
@@ -424,6 +427,80 @@
     let openPanels = new Set();
     let editingProjectId = null;  // null = creating new, number = editing existing
     let workMode = "manual";  // "manual" or "auto"
+
+    // ═══════════════════════════════════════════════════════
+    // Sidebar Resize Handle (drag to resize)
+    // ═══════════════════════════════════════════════════════
+    (function() {
+        const handle = document.getElementById("sidebar-resize-handle");
+        const sidebar = document.querySelector(".sidebar");
+        if (!handle || !sidebar) return;
+
+        let isDragging = false;
+        let startX = 0;
+        let startWidth = 0;
+
+        // Restore saved width
+        const savedWidth = localStorage.getItem("fosved-sidebar-width");
+        if (savedWidth) {
+            const w = parseInt(savedWidth, 10);
+            if (w >= 200 && w <= 500) sidebar.style.width = w + "px";
+        }
+
+        handle.addEventListener("mousedown", function(e) {
+            e.preventDefault();
+            isDragging = true;
+            startX = e.clientX;
+            startWidth = sidebar.offsetWidth;
+            handle.classList.add("active");
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mousemove", function(e) {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const newWidth = Math.min(Math.max(startWidth + dx, 200), 500);
+            sidebar.style.width = newWidth + "px";
+        });
+
+        document.addEventListener("mouseup", function() {
+            if (!isDragging) return;
+            isDragging = false;
+            handle.classList.remove("active");
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            localStorage.setItem("fosved-sidebar-width", sidebar.offsetWidth + "px");
+        });
+
+        // Touch support
+        handle.addEventListener("touchstart", function(e) {
+            isDragging = true;
+            startX = e.touches[0].clientX;
+            startWidth = sidebar.offsetWidth;
+            handle.classList.add("active");
+        }, {passive: true});
+
+        document.addEventListener("touchmove", function(e) {
+            if (!isDragging) return;
+            const dx = e.touches[0].clientX - startX;
+            const newWidth = Math.min(Math.max(startWidth + dx, 200), 500);
+            sidebar.style.width = newWidth + "px";
+        }, {passive: true});
+
+        document.addEventListener("touchend", function() {
+            if (!isDragging) return;
+            isDragging = false;
+            handle.classList.remove("active");
+            localStorage.setItem("fosved-sidebar-width", sidebar.offsetWidth + "px");
+        });
+
+        // Double-click to reset
+        handle.addEventListener("dblclick", function() {
+            sidebar.style.width = "260px";
+            localStorage.setItem("fosved-sidebar-width", "260px");
+        });
+    })();
 
     const templateDescriptions = {
         "fastapi": "Современный Python фреймворк для высокопроизводительных API. Автоматическая генерация OpenAPI/Swagger документации, встроенная поддержка async/await, валидация данных через Pydantic. Идеален для REST API, микросервисов и бэкендов.",
