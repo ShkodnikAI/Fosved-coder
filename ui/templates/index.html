@@ -56,7 +56,7 @@
             </div>
 
             <!-- MODE TOGGLE (Manual / Automatic) -->
-            <div class="mode-toggle-bar" id="mode-toggle-bar">
+            <div class="mode-toggle-bar" id="mode-toggle-bar" style="display:none;">
                 <div class="mode-toggle-track" id="mode-toggle-track" onclick="toggleWorkMode()">
                     <div class="mode-toggle-thumb" id="mode-toggle-thumb"></div>
                     <div class="mode-toggle-label" id="mode-toggle-label-manual">Ручной</div>
@@ -906,6 +906,7 @@
     function toggleWorkMode() {
         workMode = workMode === "manual" ? "auto" : "manual";
         updateModeUI();
+        renderBottomBar();
         showToast(workMode === "auto" ? "Автоматический режим включён — ИИ кодит сам" : "Ручной режим — вы контролируете каждый шаг", "info");
         // Notify server about mode change
         wsSend({ type: "mode_change", mode: workMode });
@@ -1604,6 +1605,13 @@
         if (p) {
             // Кнопки только для активного проекта
             buttons.push({ label: '✏️ Редактировать', action: `openProjectModal(${p.id})` });
+
+            // Mode toggle button — always visible in bottom bar
+            const modeIcon = workMode === 'auto' ? '🤖' : '✋';
+            const modeLabel = workMode === 'auto' ? 'Авто-режим' : 'Ручной режим';
+            const modeAction = 'toggleWorkMode()';
+            buttons.push({ label: `${modeIcon} ${modeLabel}`, action: modeAction, isMode: true });
+
             buttons.push({ label: '🖥 Сервер', action: "insertCommand('/terminal ')" });
             buttons.push({ label: '🌐 Сайт', action: "openProjectSite()" });
             buttons.push({ label: '📥 Pull', action: "wsSend('/git_pull')" });
@@ -1624,7 +1632,7 @@
         }
 
         bar.innerHTML = buttons.map(b =>
-            `<button onclick="${b.action}" class="bottom-bar-btn">${b.label}</button>`
+            `<button onclick="${b.action}" class="bottom-bar-btn${b.isMode ? (workMode === 'auto' ? ' bottom-bar-btn-auto' : ' bottom-bar-btn-mode') : ''}">${b.label}</button>`
         ).join('');
     }
 
