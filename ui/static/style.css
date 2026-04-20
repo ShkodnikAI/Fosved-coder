@@ -767,8 +767,51 @@ header {
     opacity: 0;
     transition: opacity 0.15s;
 }
-pre:hover .copy-btn { opacity: 1; }
+pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
 .copy-btn:hover { background: var(--border); color: white; }
+.code-btn-bar {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 2;
+}
+.code-btn-bar .copy-btn {
+    position: static;
+    opacity: 1;
+}
+.save-file-btn {
+    background: rgba(78, 201, 176, 0.15) !important;
+    border-color: var(--green) !important;
+    color: var(--green) !important;
+}
+.save-file-btn:hover {
+    background: var(--green) !important;
+    color: #000 !important;
+}
+
+/* ─── TOOL CALL (Function Calling) ─── */
+.tool-call {
+    padding: 8px 16px;
+    border-left: 3px solid var(--blue);
+    background: rgba(86, 156, 214, 0.06);
+}
+.tool-call-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.tool-icon { font-size: 16px; }
+.tool-label { font-weight: 600; color: var(--blue); }
+.tool-detail { color: var(--text-secondary); font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; opacity: 0.8; }
+.tool-spinner { margin-left: auto; }
+.tool-done { border-left-color: var(--green); }
+.tool-error { border-left-color: var(--red); }
 
 /* ─── INPUT AREA ─── */
 .input-area { padding: 20px 15%; background: var(--bg-primary); }

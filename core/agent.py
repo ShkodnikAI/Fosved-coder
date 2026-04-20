@@ -1,5 +1,6 @@
 import os
 import time
+import glob as glob_mod
 import litellm
 import json
 from core.memory import CONFIG, save_message, get_history, get_project
@@ -10,9 +11,128 @@ from core.action_logger import get_logger
 litellm.suppress_debug_info = True
 logger = get_logger()
 
+# ═══════════════════════════════════════════════════════
+# TOOL DEFINITIONS для litellm function calling
+# ═══════════════════════════════════════════════════════
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Прочитать содержимое файла из проекта. Возвращает полный текст файла.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Относительный путь к файлу от корня проекта (напр. 'src/app.py')"
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Создать или перезаписать файл в проекте. Автоматически создаёт поддиректории.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Относительный путь к файлу (напр. 'src/utils.py')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Полное содержимое файла"
+                    }
+                },
+                "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "Получить список файлов и директорий в проекте. Возвращает древовидную структуру.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Относительный путь к директории (по умолчанию — корень проекта)",
+                        "default": "."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_files",
+            "description": "Поиск текста во всех файлах проекта. Возвращает список совпадений с путями и строками.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Текст или regex для поиска"
+                    },
+                    "file_pattern": {
+                        "type": "string",
+                        "description": "Шаблон имени файла (напр. '*.py', '*.ts'), опционально",
+                        "default": "*"
+                    }
+                },
+                "required": ["pattern"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_command",
+            "description": "Выполнить shell-команду в директории проекта. Используй для: git, npm, pip, python и т.д.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Shell-команда для выполнения (напр. 'git status', 'pip install requests')"
+                    }
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_commit_push",
+            "description": "Закоммитить все изменения и запушить на GitHub. Используй после создания/изменения файлов.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Сообщение коммита (напр. 'feat: add login page')"
+                    }
+                },
+                "required": ["message"]
+            }
+        }
+    },
+]
+
+
 SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для разработки проекта.
-Ты работаешь внутри IDE пользователя и имеешь доступ к контексту текущего проекта.
-Ты помогаешь писать код, анализировать проект и решать задачи.
+Ты работаешь внутри IDE пользователя и имеешь ДОСТУП К ИНСТРУМЕНТАМ для работы с файлами и командами.
 
 {project_context}
 
@@ -22,52 +142,206 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 
 {compressed_context}
 
+Твои инструменты (function calling):
+- read_file(path) — прочитать файл проекта
+- write_file(path, content) — создать или перезаписать файл
+- list_files(path) — список файлов в директории
+- search_files(pattern) — поиск текста в файлах
+- execute_command(command) — выполнить shell-команду (git, npm, pip, python и т.д.)
+- git_commit_push(message) — закоммитить и запушить на GitHub
+
 Правила:
-- Ты работаешь над конкретным проектом. Ниже указано название, описание, шаблон и путь.
-- Если указана СТРУКТУРА ПРОЕКТА — ты видишь все файлы и их сигнатуры. Используй эту информацию.
-- При запросах к файлам — ссылайся на файлы из структуры, не проси пользователя показать их.
+- ИСПОЛЬЗУЙ ИНСТРУМЕНТЫ для работы с файлами — читай, создавай, редактируй файлы через tools
+- НЕ проси пользователя скопировать код — пиши прямо в файлы через write_file
+- После изменения файлов — предлагай git_commit_push
+- Для выполнения команд — используй execute_command, НЕ пиши пользователю команды для ручного выполнения
 - Отвечай на том языке, на котором задан вопрос
-- Для кода используй Markdown code blocks с указанием языка
-- Если задача требует выполнения команд — укажи какие команды выполнить
-- Будь кратким и по делу"""
+- Будь проактивным — если нужно создать файл, создавай его
+- Если задача требует нескольких шагов — делай их последовательно
+- Для кода в тексте ответа используй Markdown code blocks только для объяснений, реальные файлы пиши через write_file"""
 
 
-async def stream_llm_response(prompt: str, history: list, websocket, model: str = None, system_prompt: str = None):
-    """Stream AI response chunk by chunk to WebSocket. Uses keys_manager for API config."""
-    if model is None:
-        model = CONFIG["llm"].get("default_model")
-    if system_prompt is None:
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="", project_context="", compressed_context="")
+# ═══════════════════════════════════════════════════════
+# TOOL EXECUTION
+# ═══════════════════════════════════════════════════════
 
-    # Resolve model config from keys_manager if model_id is provided
+async def execute_tool(name: str, arguments: dict, project_path: str | None, websocket) -> str:
+    """Выполнить tool call и вернуть результат как строку для LLM."""
+    from core.executor import CommandExecutor
+    executor = CommandExecutor()
+
+    try:
+        if name == "read_file":
+            path = arguments.get("path", "")
+            if not project_path:
+                return "Ошибка: нет пути к проекту"
+            full_path = os.path.join(project_path, path)
+            if not os.path.isfile(full_path):
+                return f"Ошибка: файл не найден: {path}"
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            # Trim if too large
+            if len(content) > 30000:
+                content = content[:30000] + "\n\n... (файл обрезан, всего " + str(len(content)) + " символов)"
+            logger.log(f"tool: read_file {path}", level="info", source="agent")
+            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": path}, "status": "done"})
+            return content
+
+        elif name == "write_file":
+            path = arguments.get("path", "")
+            content = arguments.get("content", "")
+            if not project_path:
+                return "Ошибка: нет пути к проекту"
+            full_path = os.path.join(project_path, path)
+            # Create dirs
+            dir_path = os.path.dirname(full_path)
+            if dir_path and not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+            with open(full_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            logger.log(f"tool: write_file {path} ({len(content)} chars)", level="info", source="agent")
+            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": path, "size": len(content)}, "status": "done"})
+            return f"Файл {path} сохранён ({len(content)} символов)"
+
+        elif name == "list_files":
+            rel_path = arguments.get("path", ".")
+            if not project_path:
+                return "Ошибка: нет пути к проекту"
+            full_path = os.path.join(project_path, rel_path)
+            if not os.path.isdir(full_path):
+                return f"Ошибка: директория не найдена: {rel_path}"
+            entries = []
+            skip_dirs = {"venv", "__pycache__", "node_modules", ".git", ".cache", ".venv", "env", ".idea", ".vscode", "dist", "build", "__pypackages__", ".next", ".nuxt", ".gradle", "target"}
+            try:
+                for item in sorted(os.listdir(full_path)):
+                    if item.startswith(".") and item not in {".env", ".gitignore"}:
+                        continue
+                    item_path = os.path.join(full_path, item)
+                    if os.path.isdir(item_path) and item not in skip_dirs:
+                        entries.append(f"📁 {item}/")
+                    elif os.path.isfile(item_path):
+                        size = os.path.getsize(item_path)
+                        if size > 1024:
+                            entries.append(f"📄 {item} ({size // 1024}KB)")
+                        else:
+                            entries.append(f"📄 {item} ({size}B)")
+            except PermissionError:
+                return "Ошибка: нет доступа к директории"
+            result = "\n".join(entries) if entries else "(пустая директория)"
+            logger.log(f"tool: list_files {rel_path} ({len(entries)} entries)", level="info", source="agent")
+            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": rel_path}, "status": "done"})
+            return result
+
+        elif name == "search_files":
+            pattern = arguments.get("pattern", "")
+            file_pattern = arguments.get("file_pattern", "*")
+            if not project_path:
+                return "Ошибка: нет пути к проекту"
+            results = []
+            try:
+                for root, dirs, files in os.walk(project_path):
+                    dirs[:] = [d for d in dirs if d not in {"venv", "__pycache__", "node_modules", ".git", ".cache", ".venv", "dist", "build", ".next"}]
+                    for f in files:
+                        if file_pattern != "*" and not f.endswith(file_pattern.replace("*", "")):
+                            continue
+                        fpath = os.path.join(root, f)
+                        try:
+                            with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
+                                for i, line in enumerate(fh, 1):
+                                    if pattern.lower() in line.lower():
+                                        rel = os.path.relpath(fpath, project_path)
+                                        results.append(f"{rel}:{i}: {line.strip()[:120]}")
+                                        if len(results) >= 30:
+                                            break
+                        except Exception:
+                            continue
+                    if len(results) >= 30:
+                        break
+            except Exception as e:
+                return f"Ошибка поиска: {e}"
+            if not results:
+                result = f"Совпадений для '{pattern}' не найдено"
+            else:
+                result = f"Найдено {len(results)} совпадений:\n" + "\n".join(results[:30])
+            logger.log(f"tool: search_files '{pattern}' -> {len(results)} results", level="info", source="agent")
+            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"pattern": pattern}, "status": "done"})
+            return result
+
+        elif name == "execute_command":
+            command = arguments.get("command", "")
+            if not command.strip():
+                return "Ошибка: пустая команда"
+            logger.log(f"tool: execute_command '{command[:100]}'", level="info", source="agent")
+            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
+            result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=60)
+            output = ""
+            if result.get("stdout"):
+                output += result["stdout"][:5000]
+            if result.get("stderr"):
+                output += ("\n" if output else "") + result["stderr"][:2000]
+            if not output:
+                output = "(команда выполнена без вывода)"
+            exit_code = result.get("exit_code", -1)
+            status = "OK" if exit_code == 0 else f"exit code {exit_code}"
+            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"command": command}, "status": "done", "exit_code": exit_code})
+            return f"[{status}]\n{output}"
+
+        elif name == "git_commit_push":
+            message = arguments.get("message", "update")
+            if not project_path:
+                return "Ошибка: нет пути к проекту"
+            logger.log(f"tool: git_commit_push '{message}'", level="info", source="agent")
+            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"message": message}, "status": "running"})
+            # Stage all
+            r1 = await executor.execute("git add -A", cwd=project_path, need_approval=False)
+            # Commit
+            safe_msg = message.replace('"', "'")
+            r2 = await executor.execute(f'git commit -m "{safe_msg}" --allow-empty', cwd=project_path, need_approval=False)
+            commit_out = r2.get("stdout", "") + r2.get("stderr", "")
+            # Push
+            r3 = await executor.execute("git push", cwd=project_path, need_approval=False, timeout=30)
+            push_out = r3.get("stdout", "") + r3.get("stderr", "")
+            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"message": message}, "status": "done"})
+            return f"Commit: {commit_out.strip()}\nPush: {push_out.strip()}"
+
+        else:
+            return f"Неизвестный инструмент: {name}"
+
+    except Exception as e:
+        logger.log(f"tool_error: {name} -> {str(e)[:200]}", level="error", source="agent")
+        await websocket.send_json({"type": "tool_call", "tool": name, "status": "error", "error": str(e)[:200]})
+        return f"Ошибка выполнения {name}: {str(e)[:500]}"
+
+
+# ═══════════════════════════════════════════════════════
+# LLM STREAMING WITH TOOL CALLING
+# ═══════════════════════════════════════════════════════
+
+def _resolve_model(model_id: str) -> tuple[str, str, str]:
+    """Resolve model_id to (litellm_model, api_key, api_base)."""
     api_key = CONFIG["llm"].get("api_key", "")
     api_base = CONFIG["llm"].get("api_base", "")
 
-    # Safety: never use placeholder API keys from config
     if "YOUR_" in api_key.upper() or api_key == "YOUR_OPENROUTER_API_KEY_HERE":
         api_key = ""
 
-    model_config = keys_manager.get_model_config(model)
+    model_config = keys_manager.get_model_config(model_id)
     if model_config:
-        model = model_config["model"]  # full litellm model name
+        model = model_config["model"]
         api_key = model_config["api_key"]
         api_base = model_config.get("api_base", "")
     else:
-        # Fallback: голое имя модели или free модель
-        print(f"  [agent] get_model_config вернул None для '{model}' — пробуем fallback")
-
-        # Проверяем — это free модель?
+        model = model_id
+        # Fallback: free models
         for fm in keys_manager.FREE_MODELS:
             if fm["id"] == model:
                 or_config = keys_manager.providers.get("openrouter", {})
                 api_key = or_config.get("api_key", "")
                 model = f"openrouter/{fm['model']}"
                 api_base = or_config.get("api_base", "https://openrouter.ai/api/v1")
-                print(f"  [agent] fallback: найдена free модель, model={model}, has_key={bool(api_key)}")
                 break
         else:
-            # Последний resort: пытаемся найти модель по голому имени во всех провайдерах
-            bare_name = model.split("/")[-1]  # убираем prefix если есть
+            bare_name = model.split("/")[-1]
             for provider_id, config in keys_manager.providers.items():
                 if config.get("status") in ("valid", "rate_limited") and config.get("api_key"):
                     for model_name in config.get("models", []):
@@ -76,78 +350,155 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
                             model = f"{prefix}/{model_name}"
                             api_key = config["api_key"]
                             api_base = config.get("api_base", "")
-                            print(f"  [agent] fallback: найдена по голому имени '{bare_name}' в {provider_id}")
                             break
                     if api_key:
                         break
 
-    # Debug logging
-    has_key = bool(api_key)
-    print(f"  [agent] stream_llm_response: model={model}, has_key={has_key}, api_base={api_base}")
+    return model, api_key, api_base
 
-    if not has_key:
+
+async def stream_llm_response(prompt: str, history: list, websocket,
+                              model: str = None, system_prompt: str = None,
+                              project_path: str | None = None, use_tools: bool = True):
+    """Stream AI response with tool calling support. Loops until no more tool calls."""
+    if model is None:
+        model = CONFIG["llm"].get("default_model")
+    if system_prompt is None:
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="", project_context="", compressed_context="")
+
+    model, api_key, api_base = _resolve_model(model)
+
+    if not api_key:
         logger.log(f"no_api_key: {model}", level="error", source="agent")
-        await websocket.send_json({"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках (ключ ⚙) или через Environment Variables на сервере."})
+        await websocket.send_json({"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках."})
         return None
+
+    print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, project={project_path}")
+
+    # Build messages
+    api_messages = []
+    role_map = {"ai": "assistant", "system": "system", "user": "user"}
+    for msg in history:
+        mapped_role = role_map.get(msg.get("role", ""), msg.get("role", "user"))
+        api_messages.append({"role": mapped_role, "content": msg.get("content", "")})
+    messages = [{"role": "system", "content": system_prompt}] + api_messages + [{"role": "user", "content": prompt}]
 
     start_time = time.time()
-    try:
-        # Map internal roles to API-compatible roles
-        # Anthropic requires "assistant" (not "ai"), OpenAI accepts both
-        api_messages = []
-        role_map = {"ai": "assistant", "system": "system", "user": "user"}
-        for msg in history:
-            mapped_role = role_map.get(msg.get("role", ""), msg.get("role", "user"))
-            api_messages.append({"role": mapped_role, "content": msg.get("content", "")})
-        messages = [{"role": "system", "content": system_prompt}] + api_messages + [{"role": "user", "content": prompt}]
+    full_response = ""
+    max_tool_iterations = 10  # Prevent infinite loops
 
-        kwargs = {
-            "model": model,
-            "messages": messages,
-            "stream": True,
-            "temperature": CONFIG["llm"].get("temperature", 0.2),
-            "max_tokens": CONFIG["llm"].get("max_tokens", 4096),
-        }
-        if api_key:
-            kwargs["api_key"] = api_key
-        # Only pass api_base for custom/override URLs, not for standard providers
-        # litellm knows the correct URLs for anthropic, openai, xai, etc.
-        if api_base and not api_base.startswith("https://api.anthropic.com") and not api_base.startswith("https://api.openai.com/v1") and not api_base.startswith("https://api.x.ai/v1"):
-            kwargs["api_base"] = api_base
+    for iteration in range(max_tool_iterations):
+        try:
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": CONFIG["llm"].get("temperature", 0.2),
+                "max_tokens": CONFIG["llm"].get("max_tokens", 4096),
+            }
+            if api_key:
+                kwargs["api_key"] = api_key
+            if api_base and not api_base.startswith("https://api.anthropic.com") and not api_base.startswith("https://api.openai.com/v1") and not api_base.startswith("https://api.x.ai/v1"):
+                kwargs["api_base"] = api_base
 
-        response = await litellm.acompletion(**kwargs)
+            # Add tools if supported by the model
+            if use_tools:
+                kwargs["tools"] = TOOLS
 
-        full_response = ""
-        async for chunk in response:
-            delta = chunk.choices[0].delta.content
-            if delta is not None:
-                full_response += delta
-                await websocket.send_json({"type": "chunk", "content": delta})
+            # Check if model supports tool calling
+            # OpenRouter models and some others may not support tools
+            try:
+                response = await litellm.acompletion(**kwargs)
+            except Exception as tool_err:
+                err_str = str(tool_err)
+                # If tools not supported, retry without tools
+                if "tools" in err_str.lower() or "function" in err_str.lower() or "parameter" in err_str.lower():
+                    print(f"  [agent] Tools not supported by {model}, retrying without tools")
+                    use_tools = False
+                    kwargs.pop("tools", None)
+                    response = await litellm.acompletion(**kwargs)
+                else:
+                    raise
 
-        await websocket.send_json({"type": "done"})
-        duration = (time.time() - start_time) * 1000
-        tokens = len(full_response) // 4  # rough estimate
-        logger.ai_response(model=model, tokens=tokens, success=True,
-                           project_id=None, duration_ms=duration)
-        return full_response
+            choice = response.choices[0]
+            msg_obj = choice.message
 
-    except Exception as e:
-        duration = (time.time() - start_time) * 1000
-        error_msg = str(e)
-        if "401" in error_msg:
-            error_msg = "Ошибка 401: Неверный API ключ. Проверьте настройки ключей!"
-        elif "429" in error_msg:
-            error_msg = "Ошибка 429: Лимит запросов исчерпан или нет средств."
-        elif "500" in error_msg:
-            error_msg = "Ошибка 500: Сервер ИИ временно недоступен. Попробуйте позже."
-        elif "timeout" in error_msg.lower():
-            error_msg = "Таймаут: Модель слишком долго отвечает. Попробуйте другую."
-        else:
-            error_msg = f"Ошибка ИИ: {error_msg}"
-        logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
-        await websocket.send_json({"type": "error", "content": error_msg})
-        return None
+            # Check for tool calls
+            tool_calls = getattr(msg_obj, 'tool_calls', None)
 
+            if tool_calls:
+                # Add assistant message with tool calls to history
+                messages.append(msg_obj.model_dump())
+
+                # Execute each tool call
+                for tc in tool_calls:
+                    fn_name = tc.function.name
+                    try:
+                        fn_args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        fn_args = {}
+
+                    await websocket.send_json({
+                        "type": "tool_call",
+                        "tool": fn_name,
+                        "args": fn_args,
+                        "status": "running"
+                    })
+
+                    result = await execute_tool(fn_name, fn_args, project_path, websocket)
+
+                    # Add tool result to messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result
+                    })
+
+                # Continue loop — LLM will process tool results and respond
+                continue
+
+            # No tool calls — stream the text response
+            response_text = getattr(msg_obj, 'content', None) or ""
+
+            if response_text:
+                # Stream text to client
+                # Split into small chunks for real-time feel
+                chunk_size = 20
+                for i in range(0, len(response_text), chunk_size):
+                    chunk = response_text[i:i+chunk_size]
+                    await websocket.send_json({"type": "chunk", "content": chunk})
+                full_response += response_text
+
+            await websocket.send_json({"type": "done"})
+            duration = (time.time() - start_time) * 1000
+            tokens = len(full_response) // 4
+            logger.ai_response(model=model, tokens=tokens, success=True, duration_ms=duration)
+            return full_response
+
+        except Exception as e:
+            duration = (time.time() - start_time) * 1000
+            error_msg = str(e)
+            if "401" in error_msg:
+                error_msg = "Ошибка 401: Неверный API ключ."
+            elif "429" in error_msg:
+                error_msg = "Ошибка 429: Лимит запросов исчерпан."
+            elif "500" in error_msg:
+                error_msg = "Ошибка 500: Сервер ИИ недоступен."
+            elif "timeout" in error_msg.lower():
+                error_msg = "Таймаут модели. Попробуйте другую."
+            else:
+                error_msg = f"Ошибка ИИ: {error_msg}"
+            logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
+            await websocket.send_json({"type": "error", "content": error_msg})
+            return None
+
+    # Max iterations reached
+    await websocket.send_json({"type": "done"})
+    return full_response
+
+
+# ═══════════════════════════════════════════════════════
+# PRIORITY ROUTING
+# ═══════════════════════════════════════════════════════
 
 def _get_priority_models(project: dict) -> list[str]:
     """Extract up to 3 priority model IDs from project's selected_models."""
@@ -156,63 +507,40 @@ def _get_priority_models(project: dict) -> list[str]:
     try:
         models = json.loads(project["selected_models"])
         if isinstance(models, list):
-            return models[:3]  # max 3 priority models
+            return models[:3]
     except (json.JSONDecodeError, TypeError):
         pass
     return []
 
 
 async def _route_with_priority(prompt: str, priority_models: list[str]) -> str | None:
-    """
-    Use HybridRouter to decide: should we route to a cheaper model
-    from the priority list, or use the first (primary) model?
-    Returns the chosen model_id or None.
-    """
-    from core.router import HybridRouter
-    router = HybridRouter()
-
+    """Route to cheapest or best model based on prompt complexity."""
     prompt_lower = prompt.lower()
 
-    # Simple keywords → use cheapest model from priority list (last one)
-    simple_keywords = [
-        "fix typo", "формат", "xml", "json", "тест", "docstring",
-        "комментарий", "простой", "trivial", "rename", "lint",
-        "semicolon", "indent", "whitespace", "небольшой", "опечатк"
-    ]
+    simple_keywords = ["fix typo", "формат", "xml", "json", "тест", "docstring", "комментарий", "простой", "trivial", "rename", "lint"]
     for kw in simple_keywords:
         if kw in prompt_lower:
-            if len(priority_models) > 1:
-                # Pick the cheapest — if there's a free model, use it; otherwise use last
-                all_models = keys_manager.get_all_models()
-                free_in_priority = [m for m in priority_models if any(
-                    am["id"] == m and am["type"] == "free" for am in all_models
-                )]
-                if free_in_priority:
-                    return free_in_priority[0]
-                return priority_models[-1]  # last = least expensive
-            return priority_models[0]
+            return priority_models[-1] if len(priority_models) > 1 else priority_models[0]
 
-    # Complex keywords → always use primary (first) model
-    complex_keywords = [
-        "архитектур", "refactor", "redesign", "систем", "framework",
-        "engine", "парсером", "compiler", "параллельн", "микросервис",
-        "database schema", "модель данных", "api дизайн", "security",
-        "аутентификац", "интеграц", "многопоточ", "async"
-    ]
+    complex_keywords = ["архитектур", "refactor", "redesign", "систем", "framework", "engine", "параллельн", "микросервис", "database schema", "security", "интеграц"]
     for kw in complex_keywords:
         if kw in prompt_lower:
             return priority_models[0]
 
-    # Default: use primary model
     return priority_models[0]
 
 
+# ═══════════════════════════════════════════════════════
+# MAIN ENTRY POINT
+# ═══════════════════════════════════════════════════════
+
 async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None):
-    """Main entry point: get history, add repo_map context, stream response with smart fallback."""
+    """Main entry point: get history, build context, stream response with tool calling and fallback."""
     history = await get_history(project_id)
 
-    # Project context (name, description, template, base_prompt, file structure)
+    # Project context
     project_context_text = ""
+    project_path = None
     if project_id:
         project = await get_project(project_id)
         if project:
@@ -224,19 +552,14 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             if project.get("base_prompt"):
                 project_context_text += f"ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ: {project['base_prompt']}\n"
             if project.get("path"):
-                project_context_text += f"ПУТЬ К ПРОЕКТУ: {project['path']}\n"
-                # Add file listing as context
                 project_path = project["path"]
+                project_context_text += f"ПУТЬ К ПРОЕКТУ: {project_path}\n"
                 if os.path.isdir(project_path):
                     try:
                         file_list = []
+                        skip_dirs = {"venv", "__pycache__", "node_modules", ".git", ".cache", "__pypackages__", ".venv", "env", ".idea", ".vscode", "dist", "build", ".tox", ".mypy_cache", ".pytest_cache", "target", "bin", "obj", ".next", ".nuxt", ".gradle"}
                         for root, dirs, files in os.walk(project_path):
-                            dirs[:] = [d for d in dirs if d not in {
-                                "venv", "__pycache__", "node_modules", ".git", ".cache",
-                                "__pypackages__", ".venv", "env", ".idea", ".vscode",
-                                "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
-                                "target", "bin", "obj", ".next", ".nuxt", ".gradle"
-                            } and not d.startswith(".")]
+                            dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
                             level = root.replace(project_path, "").count(os.sep)
                             indent = "  " * level
                             dir_name = os.path.basename(root) or project.get("name", "project")
@@ -247,7 +570,6 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                                     continue
                                 file_list.append(f"{sub_indent}{f}")
                         if file_list:
-                            # Trim to max 80 lines to keep context small
                             if len(file_list) > 80:
                                 file_list = file_list[:80]
                                 file_list.append("  ... (и другие файлы)")
@@ -255,37 +577,24 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                     except Exception:
                         pass
 
-    # Auto-compression: LLM-based with regex fallback + DB cleanup
+    # Auto-compression
     compressed_context_text = ""
     compressor = ContextCompressor()
     if project_id and compressor.should_compress(history):
         try:
-            # Find a model for LLM compression (prefer free)
             comp_model = ContextCompressor.get_compression_model_config()
-            await websocket.send_json({
-                "type": "info",
-                "content": "Автосжатие контекста..."
-            })
-            # compress_and_cleanup: LLM summarize + delete old from DB
-            compressed_summary, remaining, was_llm = await compressor.compress_and_cleanup(
-                history, project_id, model_config=comp_model
-            )
+            await websocket.send_json({"type": "info", "content": "Автосжатие контекста..."})
+            compressed_summary, remaining, was_llm = await compressor.compress_and_cleanup(history, project_id, model_config=comp_model)
             if compressed_summary:
                 compressed_context_text = compressed_summary
                 method = "LLM" if was_llm else "regex"
                 removed = len(history) - len(remaining)
-                await websocket.send_json({
-                    "type": "info",
-                    "content": f"Автосжатие ({method}): {removed} сообщений сжато, {len(remaining)} активны"
-                })
-                # Use compressed history for LLM context
+                await websocket.send_json({"type": "info", "content": f"Автосжатие ({method}): {removed} сообщений сжато"})
                 history = remaining
         except Exception as e:
             print(f"  [agent] compression error: {e}")
 
-    repo_map_text = ""
-    if repo_map:
-        repo_map_text = f"СТРУКТУРА ПРОЕКТА (Repo Map):\n{repo_map}"
+    repo_map_text = f"СТРУКТУРА ПРОЕКТА (Repo Map):\n{repo_map}" if repo_map else ""
 
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         repo_map=repo_map_text,
@@ -293,90 +602,68 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         project_context=project_context_text,
         compressed_context="",
     )
-
-    # Inject compressed context into system prompt
     if compressed_context_text:
         system_prompt = compressor.build_compressed_system_prompt(system_prompt, compressed_context_text)
 
     await save_message(project_id, "user", prompt)
 
-    # Build list of models to try, in priority order
+    # Build model list with fallback
     models_to_try = []
-
-    # 1. Explicit model from UI (highest priority)
     if model_id:
         models_to_try.append(model_id)
 
-    # 2. Priority models from project settings
     project = await get_project(project_id) if project_id else None
-    priority_models = _get_priority_models(project)
-    for pm in priority_models:
+    for pm in _get_priority_models(project):
         if pm not in models_to_try:
             models_to_try.append(pm)
 
-    # 3. Any other valid/available models as fallback
     all_models = keys_manager.get_all_models()
     for m in all_models:
         if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
-            model_type = m.get("type", "")
-            # Пропускаем free модели без ключа и local модели без сервера
-            if model_type == "free" and m.get("status") == "no_key":
+            if m.get("type") == "free" and m.get("status") == "no_key":
                 continue
-            if model_type == "local" and not m.get("base_url"):
+            if m.get("type") == "local" and not m.get("base_url"):
                 continue
             models_to_try.append(m["id"])
 
     if not models_to_try:
-        await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ в настройках (🔑)."})
+        await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         return
 
-    # Try each model with fallback
+    # Try each model
     ai_response = None
     tried_count = 0
-    last_error = ""
 
     for i, model_to_try in enumerate(models_to_try):
-        # Verify model has a config with key
         model_config = keys_manager.get_model_config(model_to_try)
         if not model_config:
-            print(f"  [agent] fallback #{i}: {model_to_try} — нет конфига, пропускаем")
             continue
-        # Skip models without API key (except local models)
         has_key = bool(model_config.get("api_key"))
         is_local = model_to_try in [m["id"] for m in all_models if m["type"] == "local"]
         if not has_key and not is_local:
-            print(f"  [agent] fallback #{i}: {model_to_try} — нет API ключа, пропускаем")
             continue
 
         tried_count += 1
-        print(f"  [agent] fallback #{i}: пробую модель {model_to_try}")
+        print(f"  [agent] trying model #{i}: {model_to_try}")
 
-        # Send typing indicator
         await websocket.send_json({"type": "typing", "model": model_to_try})
 
-        # Notify user about fallback
         if i > 0:
             m_info = next((m for m in all_models if m["id"] == model_to_try), None)
             model_name = m_info["name"] if m_info else model_to_try
-            await websocket.send_json({
-                "type": "info",
-                "content": f"Переключаюсь на {model_name} (попытка {i+1})..."
-            })
+            await websocket.send_json({"type": "info", "content": f"Переключаюсь на {model_name} (попытка {i+1})..."})
 
         ai_response = await stream_llm_response(
             prompt, history, websocket,
-            model=model_to_try, system_prompt=system_prompt
+            model=model_to_try, system_prompt=system_prompt,
+            project_path=project_path, use_tools=True
         )
         if ai_response is not None:
-            print(f"  [agent] fallback #{i}: {model_to_try} — успешно")
             break
-        else:
-            print(f"  [agent] fallback #{i}: {model_to_try} — не удалось")
 
     if ai_response:
         await save_message(project_id, "ai", ai_response)
     elif tried_count == 0:
-        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом. Добавьте ключ через кнопку \U0001f511 или через Environment Variables на сервере."})
+        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом."})
     else:
-        # Все модели не ответили — информируем пользователя
-        await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили. Проверьте API ключи и подключение к интернету."})
+        await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили."})
