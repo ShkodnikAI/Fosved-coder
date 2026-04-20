@@ -11,7 +11,10 @@ from core.executor import CommandExecutor
 from core.ideas_injector import IdeasInjector
 from core.context_manager import ContextManager
 from core.router import HybridRouter
+from core.action_logger import get_logger
 from api.endpoints import router as api_router
+
+logger = get_logger()
 
 # Global instances
 executor = CommandExecutor()
@@ -93,6 +96,8 @@ async def websocket_chat(websocket: WebSocket):
     current_project_id = None
     repo_map = None
     current_mode = "manual"  # "manual" or "auto"
+    model_id = None
+    logger.log("websocket_connected", level="info", source="ws")
 
     try:
         while True:
@@ -100,6 +105,7 @@ async def websocket_chat(websocket: WebSocket):
 
             # Handle slash commands
             if data.startswith("/"):
+                logger.log(f"command: {data[:100]}", level="info", source="ws", project_id=current_project_id)
                 await handle_command(data, current_project_id, websocket, model_id)
                 continue
 
@@ -121,6 +127,9 @@ async def websocket_chat(websocket: WebSocket):
                 priority = []
                 payload = {}
 
+            # Log incoming ws message
+            logger.ws_message("in", payload, project_id=current_project_id)
+
             # Handle heartbeat ping
             if payload.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -130,6 +139,7 @@ async def websocket_chat(websocket: WebSocket):
             if payload.get("type") == "mode_change":
                 new_mode = payload.get("mode", "manual")
                 current_mode = new_mode
+                logger.user_action(f"mode_change: {new_mode}", project_id=current_project_id)
                 await websocket.send_json({"type": "system", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}"})
                 continue
 
@@ -177,15 +187,17 @@ async def websocket_chat(websocket: WebSocket):
 
             # Route based on mode
             if mode == "auto":
-                # Automatic mode — AI codes autonomously
+                logger.user_action("auto_mode_chat", project_id=current_project_id, details={"model": model_id})
                 from core.auto_agent import run_auto_mode
                 await run_auto_mode(prompt, current_project_id, repo_map, websocket, model_id=model_id)
             else:
-                # Manual mode — regular chat (default)
+                logger.user_action("manual_chat", project_id=current_project_id, details={"model": model_id})
                 await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id)
 
     except WebSocketDisconnect:
-        pass
+        logger.log("websocket_disconnected", level="info", source="ws", project_id=current_project_id)
+    except Exception as e:
+        logger.log("websocket_error", level="error", source="ws", project_id=current_project_id, error=str(e))
 
 
 async def handle_command(cmd: str, project_id, websocket, model_id: str = None):

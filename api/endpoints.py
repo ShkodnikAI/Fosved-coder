@@ -24,8 +24,10 @@ from core.memory import (
     save_project_archive, get_all_archives, get_archive,
 )
 from core.keys_manager import keys_manager, PROVIDER_DEFS, LOCAL_PROVIDERS
+from core.action_logger import get_logger
 
 router = APIRouter(prefix="/api/v1")
+action_logger = get_logger()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1582,3 +1584,35 @@ async def update_project_field_persist(project_id: int, field: str, value: str):
             project_obj = result.scalar_one_or_none()
             if project_obj:
                 setattr(project_obj, field, value)
+
+# ═══════════════════════════════════════════════════════════════
+# ACTION LOGGING API
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/logs")
+async def get_logs(limit: int = 200, level: str = None, source: str = None,
+                  project_id: int = None, since: str = None):
+    """Получить записи лога действий."""
+    return action_logger.get_entries(limit=limit, level=level, source=source,
+                                       project_id=project_id, since=since)
+
+@router.get("/logs/stats")
+async def get_log_stats():
+    """Статистика логов."""
+    return action_logger.get_stats()
+
+@router.get("/logs/errors")
+async def get_log_errors(limit: int = 50, project_id: int = None):
+    """Получить только ошибки."""
+    return action_logger.get_errors(limit=limit, project_id=project_id)
+
+@router.delete("/logs")
+async def clear_logs():
+    """Очистить логи в памяти."""
+    action_logger.clear_memory()
+    return {"success": True, "message": "Логи в памяти очищены (файл на диске сохранён)"}
+
+@router.get("/logs/file")
+async def get_log_file(limit: int = 500):
+    """Прочитать логи из файла на диске."""
+    return {"entries": action_logger.read_log_file(limit=limit)}

@@ -1,11 +1,14 @@
 import os
+import time
 import litellm
 import json
 from core.memory import CONFIG, save_message, get_history, get_project
 from core.keys_manager import keys_manager
 from core.context_compressor import ContextCompressor
+from core.action_logger import get_logger
 
 litellm.suppress_debug_info = True
+logger = get_logger()
 
 SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для разработки проекта.
 Ты работаешь внутри IDE пользователя и имеешь доступ к контексту текущего проекта.
@@ -66,9 +69,11 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
     print(f"  [agent] stream_llm_response: model={model}, has_key={has_key}, api_base={api_base}")
 
     if not has_key:
+        logger.log(f"no_api_key: {model}", level="error", source="agent")
         await websocket.send_json({"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках (ключ ⚙) или через Environment Variables на сервере."})
         return None
 
+    start_time = time.time()
     try:
         # Map internal roles to API-compatible roles
         # Anthropic requires "assistant" (not "ai"), OpenAI accepts both
@@ -101,9 +106,14 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
                 await websocket.send_json({"type": "chunk", "content": delta})
 
         await websocket.send_json({"type": "done"})
+        duration = (time.time() - start_time) * 1000
+        tokens = len(full_response) // 4  # rough estimate
+        logger.ai_response(model=model, tokens=tokens, success=True,
+                           project_id=None, duration_ms=duration)
         return full_response
 
     except Exception as e:
+        duration = (time.time() - start_time) * 1000
         error_msg = str(e)
         if "401" in error_msg:
             error_msg = "Ошибка 401: Неверный API ключ. Проверьте настройки ключей!"
@@ -115,6 +125,7 @@ async def stream_llm_response(prompt: str, history: list, websocket, model: str 
             error_msg = "Таймаут: Модель слишком долго отвечает. Попробуйте другую."
         else:
             error_msg = f"Ошибка ИИ: {error_msg}"
+        logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
         await websocket.send_json({"type": "error", "content": error_msg})
         return None
 
