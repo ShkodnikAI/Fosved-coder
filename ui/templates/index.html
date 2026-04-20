@@ -3000,11 +3000,18 @@
             if (data.success) {
                 output.textContent += `\n${"═".repeat(40)}\n`;
                 output.textContent += `✅ ${data.message}\n`;
-                output.textContent += `📦 APK: ${data.apk_filename || data.apk_path || "не найден"}\n`;
+                output.textContent += `📦 APK: ${data.apk_filename || "не найден"}\n`;
+                if (data.apk_path) {
+                    output.textContent += `📁 Путь: ${data.apk_path}\n`;
+                }
                 output.textContent += `🏷 ${data.app_name} v${body.app_version} (${data.build_type})\n`;
                 output.textContent += `🎨 Иконка: ${data.icon_generated ? "AI-генерация ✅" : "не сгенерирована"}\n`;
                 output.textContent += `⚙️ ${data.strategy}\n`;
-                showToast("APK успешно собран! 🎉", "success");
+                // Copy path to clipboard
+                if (data.apk_path) {
+                    try { navigator.clipboard.writeText(data.apk_path); } catch(e) {}
+                }
+                showToast("APK успешно собран! Путь скопирован в буфер обмена 🎉", "success");
             } else {
                 output.textContent += `\n❌ ${data.error}\n`;
                 showToast("Ошибка сборки APK", "error");
