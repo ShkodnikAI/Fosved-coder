@@ -289,14 +289,30 @@
                 </div>
                 <!-- Form -->
                 <div id="apk-form" style="display:none;">
-                    <div class="form-group">
-                        <label>Название приложения *</label>
-                        <input type="text" id="apk-app-name" placeholder="MyApp" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                    <div style="display:flex;gap:14px;align-items:flex-start;">
+                        <div style="flex:1;">
+                            <div class="form-group">
+                                <label>Название приложения *</label>
+                                <input type="text" id="apk-app-name" placeholder="MyApp" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                            </div>
+                            <div class="form-group">
+                                <label>Package ID *</label>
+                                <input type="text" id="apk-package-id" placeholder="com.mycompany.myapp" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                                <small style="color:var(--text-secondary);font-size:11px;">Формат: com.company.app (латиница)</small>
+                            </div>
+                        </div>
+                        <!-- Icon preview -->
+                        <div style="text-align:center;flex-shrink:0;">
+                            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Иконка</label>
+                            <div id="apk-icon-preview" style="width:72px;height:72px;border-radius:16px;background:var(--bg-tertiary);border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;margin:0 auto;overflow:hidden;">
+                                <span style="font-size:28px;opacity:0.3;">🎨</span>
+                            </div>
+                            <small style="color:var(--text-secondary);font-size:10px;display:block;margin-top:4px;">AI генерация</small>
+                        </div>
                     </div>
                     <div class="form-group">
-                        <label>Package ID *</label>
-                        <input type="text" id="apk-package-id" placeholder="com.mycompany.myapp" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
-                        <small style="color:var(--text-secondary);font-size:11px;">Формат: com.компания.приложение (только латиница)</small>
+                        <label>Описание иконки <span style="color:var(--text-secondary);font-weight:normal;">(опционально — подсказка для AI)</span></label>
+                        <input type="text" id="apk-icon-prompt" placeholder="Например: зелёная чат-иконка с молнией" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;">
                     </div>
                     <div style="display:flex;gap:12px;">
                         <div class="form-group" style="flex:1;">
@@ -310,24 +326,22 @@
                                 <option value="release">Release (рабочая)</option>
                             </select>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Цвет темы (splash screen)</label>
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <input type="color" id="apk-color" value="#8B1A1A" style="width:40px;height:32px;border:1px solid var(--border);border-radius:4px;cursor:pointer;padding:0;">
-                            <span id="apk-color-hex" style="font-size:12px;color:var(--text-secondary);font-family:monospace;">#8B1A1A</span>
+                        <div class="form-group" style="flex:0 0 auto;">
+                            <label>Цвет</label>
+                            <input type="color" id="apk-color" value="#8B1A1A" style="width:44px;height:38px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:0;">
                         </div>
                     </div>
                     <!-- Tools check -->
                     <div class="form-group">
                         <label>Окружение</label>
                         <div id="apk-env-check" style="font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;">
-                            Нажмите "Проверить" чтобы проверить установленные инструменты
+                            Нажмите "Проверить" чтобы проверить инструменты
                         </div>
                         <button class="btn-small btn-outline" onclick="checkAPKEnv()" style="margin-top:6px;padding:6px 14px;">🔍 Проверить инструменты</button>
                     </div>
                     <!-- Actions -->
                     <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                        <button class="btn-small btn-outline" onclick="generateAPKIcon()" style="padding:8px 14px;white-space:nowrap;">🎨 Сгенерировать иконку</button>
                         <button class="btn-small btn-outline" onclick="initAPKPlatform()" style="padding:8px 14px;white-space:nowrap;">⚡ Инициализировать Android</button>
                         <button class="btn-small" onclick="buildAPK()" style="padding:8px 20px;white-space:nowrap;background:var(--green);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">🚀 Собрать APK</button>
                     </div>
@@ -2843,10 +2857,51 @@
         document.getElementById("apk-modal").classList.remove("active");
     }
 
-    // Color picker sync
-    document.getElementById("apk-color").addEventListener("input", function() {
-        document.getElementById("apk-color-hex").textContent = this.value;
-    });
+    async function generateAPKIcon() {
+        if (!currentProjectId) return;
+        const appName = document.getElementById("apk-app-name").value.trim() || "App";
+        const color = document.getElementById("apk-color").value;
+        const customPrompt = document.getElementById("apk-icon-prompt").value.trim();
+        const p = allProjects.find(x => x.id === currentProjectId);
+        const desc = p ? p.description : "";
+
+        const preview = document.getElementById("apk-icon-preview");
+        preview.innerHTML = '<span style="font-size:12px;opacity:0.5;">⏳</span>';
+        preview.style.borderStyle = "solid";
+
+        // Build prompt
+        let prompt;
+        if (customPrompt) {
+            prompt = `App icon for ${appName}: ${customPrompt}`;
+        } else {
+            prompt = `Professional mobile app icon for '${appName}'${desc ? ", theme: " + desc : ""}. Modern flat design, clean minimalist, primary color ${color}, no text, rounded square, high contrast`;
+        }
+
+        try {
+            // Generate icon via API (endpoint proxies to z-ai-generate)
+            const resp = await fetch(`/api/v1/projects/${currentProjectId}/apk/generate-icon`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ prompt: prompt, color: color })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                // Show the icon preview as base64
+                preview.innerHTML = `<img src="${data.icon_base64}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;">`;
+                preview.style.borderStyle = "solid";
+                preview.style.borderColor = "var(--green)";
+                showToast("Иконка сгенерирована!", "success");
+            } else {
+                preview.innerHTML = '<span style="font-size:18px;opacity:0.3;">✕</span>';
+                preview.style.borderStyle = "dashed";
+                showToast(data.error || "Ошибка генерации иконки", "error");
+            }
+        } catch(e) {
+            preview.innerHTML = '<span style="font-size:18px;opacity:0.3;">✕</span>';
+            preview.style.borderStyle = "dashed";
+            showToast("Ошибка генерации иконки", "error");
+        }
+    }
 
     function showAPKLog(lines) {
         const logDiv = document.getElementById("apk-build-log");
@@ -2920,6 +2975,7 @@
             package_id: packageId,
             app_version: document.getElementById("apk-version").value.trim(),
             app_color: document.getElementById("apk-color").value,
+            app_icon_prompt: document.getElementById("apk-icon-prompt").value.trim(),
             build_type: document.getElementById("apk-build-type").value,
             android_min_sdk: 24,
             android_target_sdk: 34,
@@ -2944,8 +3000,9 @@
             if (data.success) {
                 output.textContent += `\n${"═".repeat(40)}\n`;
                 output.textContent += `✅ ${data.message}\n`;
-                output.textContent += `📦 APK: ${data.apk_path || "не найден"}\n`;
-                output.textContent += `🏷 Версия: ${data.app_name} v${body.app_version}\n`;
+                output.textContent += `📦 APK: ${data.apk_filename || data.apk_path || "не найден"}\n`;
+                output.textContent += `🏷 ${data.app_name} v${body.app_version} (${data.build_type})\n`;
+                output.textContent += `🎨 Иконка: ${data.icon_generated ? "AI-генерация ✅" : "не сгенерирована"}\n`;
                 output.textContent += `⚙️ ${data.strategy}\n`;
                 showToast("APK успешно собран! 🎉", "success");
             } else {

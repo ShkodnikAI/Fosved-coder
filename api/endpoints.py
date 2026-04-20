@@ -10,6 +10,7 @@ from typing import Optional
 import json
 import fnmatch
 import os
+import asyncio
 import subprocess
 import shutil
 import tempfile
@@ -1388,9 +1389,15 @@ class APKConfigRequest(BaseModel):
     package_id: str = ""
     app_version: str = "1.0.0"
     app_color: str = "#8B1A1A"
+    app_icon_prompt: str = ""
     build_type: str = "debug"  # "debug" or "release"
     android_min_sdk: int = 24
     android_target_sdk: int = 34
+
+
+class APKIconRequest(BaseModel):
+    prompt: str = ""
+    color: str = "#8B1A1A"
 
 
 @router.get("/projects/{project_id}/apk/strategy")
@@ -1424,6 +1431,48 @@ async def check_apk_environment(project_id: int):
     builder = APKBuilder()
     result = await builder.check_environment(template)
     return result
+
+
+@router.post("/projects/{project_id}/apk/generate-icon")
+async def generate_apk_icon(project_id: int, req: APKIconRequest):
+    """Generate app icon using AI (z-ai-generate) and return base64 preview."""
+    import tempfile
+    import base64
+    from core.apk_builder import APKBuilder
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+
+    # Generate icon to temp file
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        cmd = f'z-ai-generate -p "{req.prompt}" -o "{tmp_path}" -s 1024x1024'
+        process = await asyncio.create_subprocess_shell(
+            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+
+        if process.returncode == 0 and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1000:
+            with open(tmp_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            return {
+                "success": True,
+                "icon_base64": f"data:image/png;base64,{b64}",
+                "prompt_used": req.prompt,
+                "icon_size": os.path.getsize(tmp_path),
+            }
+        else:
+            err = stderr.decode("utf-8", errors="replace")[:200]
+            return {"success": False, "error": f"Генерация не удалась: {err}"}
+    except asyncio.TimeoutError:
+        return {"success": False, "error": "Таймаут генерации (120s)"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @router.post("/projects/{project_id}/apk/init")
@@ -1466,6 +1515,7 @@ async def build_apk(req: APKConfigRequest):
         "package_id": req.package_id or apk_data.get("package_id", "com.example.app"),
         "app_version": req.app_version,
         "app_color": req.app_color,
+        "app_icon_prompt": req.app_icon_prompt,
         "build_type": req.build_type,
         "android_min_sdk": req.android_min_sdk,
         "android_target_sdk": req.android_target_sdk,
@@ -1487,7 +1537,8 @@ async def build_apk(req: APKConfigRequest):
                 project_obj.apk_config = json.dumps(apk_data, ensure_ascii=False)
 
     builder = APKBuilder(CommandExecutor())
-    return await builder.build(project_path, template, config)
+    app_desc = project.get("description", "") or project.get("name", "")
+    return await builder.build(project_path, template, config, app_description=app_desc)
 
 
 @router.get("/projects/{project_id}/apk/config")

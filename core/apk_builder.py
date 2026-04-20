@@ -2,10 +2,13 @@
 Fosved Coder — APK Builder Module
 Сборка .apk в зависимости от шаблона проекта.
 Поддержка: React, Next.js, Expo, FastAPI, Flask, Python CLI.
+Автоматическая генерация иконки через AI.
 """
 import os
 import json
+import shutil
 import asyncio
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -18,9 +21,9 @@ class APKBuildConfig:
         "package_id": "",          # com.company.appname
         "app_version": "1.0.0",
         "app_version_code": 1,
-        "app_icon": "",            # path to icon (512x512)
+        "app_icon_prompt": "",     # custom prompt for icon generation (optional)
         "app_description": "",
-        "app_color": "#8B1A1A",   # primary color for splash screen
+        "app_color": "#8B1A1A",   # primary color for splash screen / icon hint
         "build_type": "debug",     # "debug" or "release"
         "keystore_path": "",       # for release builds
         "keystore_password": "",
@@ -82,7 +85,7 @@ class APKBuildConfig:
         "fastapi": {
             "engine": "capacitor-webview",
             "name": "Capacitor WebView (FastAPI)",
-            "description": "WebView обёртка для FastAPI backend —需要一个 фронтенд",
+            "description": "WebView обёртка для FastAPI backend",
             "requires": ["requirements.txt"],
             "pre_build": [],
             "init_commands": [
@@ -152,33 +155,26 @@ class APKBuildConfig:
         """Get build strategy for a template."""
         return self.TEMPLATE_STRATEGIES.get(template)
 
+    def _substitute(self, cmd: str) -> str:
+        """Replace {variables} in command strings."""
+        cmd = cmd.replace("{app_name}", self.data["app_name"] or "MyApp")
+        cmd = cmd.replace("{package_id}", self.data["package_id"] or "com.example.app")
+        cmd = cmd.replace("{build_type}", self.data["build_type"])
+        return cmd
+
     def get_build_commands(self, template: str) -> list[str]:
         """Get final build commands with variables substituted."""
         strategy = self.get_strategy(template)
         if not strategy:
             return []
-
-        commands = []
-        for cmd in strategy["build_commands"]:
-            cmd = cmd.replace("{app_name}", self.data["app_name"] or "MyApp")
-            cmd = cmd.replace("{package_id}", self.data["package_id"] or "com.example.app")
-            cmd = cmd.replace("{build_type}", self.data["build_type"])
-            commands.append(cmd)
-        return commands
+        return [self._substitute(cmd) for cmd in strategy["build_commands"]]
 
     def get_init_commands(self, template: str) -> list[str]:
         """Get init/setup commands with variables substituted."""
         strategy = self.get_strategy(template)
         if not strategy:
             return []
-
-        commands = []
-        for cmd in strategy["init_commands"]:
-            cmd = cmd.replace("{app_name}", self.data["app_name"] or "MyApp")
-            cmd = cmd.replace("{package_id}", self.data["package_id"] or "com.example.app")
-            cmd = cmd.replace("{build_type}", self.data["build_type"])
-            commands.append(cmd)
-        return commands
+        return [self._substitute(cmd) for cmd in strategy["init_commands"]]
 
     def validate(self, template: str) -> list[str]:
         """Validate config. Returns list of error messages."""
@@ -211,24 +207,20 @@ class APKBuildConfig:
             return None
 
         build_type = self.data["build_type"]
-        apk_name = f"{build_type.capitalize()}" if build_type == "debug" else "Release"
 
         if strategy["engine"] in ("capacitor", "capacitor-webview"):
-            # Capacitor output
-            apk_dir = os.path.join(project_path, "android", "app", "build", "outputs", "apk")
-            if os.path.exists(apk_dir):
-                for f in os.listdir(apk_dir):
-                    if f.endswith(".apk"):
-                        return os.path.join(apk_dir, f)
-            # Alternative path
-            alt_dir = os.path.join(project_path, "android", "app", "build", "outputs", "apk", build_type)
-            if os.path.exists(alt_dir):
-                for f in os.listdir(alt_dir):
-                    if f.endswith(".apk"):
-                        return os.path.join(alt_dir, f)
+            # Search in all common APK output directories
+            search_dirs = [
+                os.path.join(project_path, "android", "app", "build", "outputs", "apk", build_type),
+                os.path.join(project_path, "android", "app", "build", "outputs", "apk"),
+            ]
+            for search_dir in search_dirs:
+                if os.path.exists(search_dir):
+                    for f in sorted(os.listdir(search_dir)):
+                        if f.endswith(".apk"):
+                            return os.path.join(search_dir, f)
 
         elif strategy["engine"] == "buildozer":
-            # Buildozer output
             bin_dir = os.path.join(project_path, "bin")
             if os.path.exists(bin_dir):
                 for f in os.listdir(bin_dir):
@@ -264,6 +256,96 @@ class APKBuilder:
         except asyncio.TimeoutError:
             return {"exit_code": -1, "stdout": "", "stderr": "Timeout (300s)", "success": False, "cmd": cmd}
 
+    # ─────────────────────────────────────────────
+    #  ICON GENERATION (AI-powered via z-ai-generate)
+    # ─────────────────────────────────────────────
+
+    async def generate_icon(self, project_path: str, config: APKBuildConfig,
+                            app_description: str = "") -> dict:
+        """
+        Generate app icon using AI (z-ai-generate CLI).
+        Places the icon in the correct location for the build engine.
+        Returns dict with: success, icon_path, prompt_used.
+        """
+        app_name = config.data.get("app_name", "App")
+        app_color = config.data.get("app_color", "#8B1A1A")
+        custom_prompt = config.data.get("app_icon_prompt", "")
+
+        # Build prompt for icon generation
+        if custom_prompt:
+            prompt = f"App icon for {app_name}: {custom_prompt}"
+        else:
+            desc_part = f", theme: {app_description}" if app_description else ""
+            prompt = (
+                f"Professional mobile app icon for '{app_name}'{desc_part}. "
+                f"Modern flat design, clean minimalist style, "
+                f"primary color {app_color}, no text, rounded square, "
+                f"high contrast, suitable for Android launcher"
+            )
+
+        # Output path — store in project's android resources
+        icon_dir = os.path.join(project_path, "android", "app", "src", "main", "res")
+        icon_path = os.path.join(project_path, "android", "app", "src", "main", "res",
+                                  "mipmap-xxxhdpi", "ic_launcher.png")
+
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(icon_path), exist_ok=True)
+
+        print(f"  [apk] Генерация иконки: {prompt[:80]}...")
+
+        # Call z-ai-generate CLI
+        try:
+            result = await asyncio.create_subprocess_shell(
+                f'z-ai-generate -p "{prompt}" -o "{icon_path}" -s 1024x1024',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=120)
+
+            if result.returncode == 0 and os.path.exists(icon_path) and os.path.getsize(icon_path) > 1000:
+                print(f"  [apk] Иконка сгенерирована: {icon_path} ({os.path.getsize(icon_path)} bytes)")
+
+                # Copy to other mipmap directories for completeness
+                mipmap_sizes = {
+                    "mipmap-mdpi": 48, "mipmap-hdpi": 72, "mipmap-xhdpi": 96,
+                    "mipmap-xxhdpi": 144, "mipmap-xxxhdpi": 192,
+                }
+                for folder, _ in mipmap_sizes.items():
+                    target = os.path.join(icon_dir, folder)
+                    os.makedirs(target, exist_ok=True)
+                    target_file = os.path.join(target, "ic_launcher.png")
+                    if not os.path.exists(target_file):
+                        shutil.copy2(icon_path, target_file)
+
+                # Also set as adaptive icon foreground
+                adaptive_dir = os.path.join(icon_dir, "mipmap-xxxhdpi")
+                adaptive_path = os.path.join(adaptive_dir, "ic_launcher_foreground.png")
+                if not os.path.exists(adaptive_path):
+                    shutil.copy2(icon_path, adaptive_path)
+
+                return {
+                    "success": True,
+                    "icon_path": icon_path,
+                    "prompt_used": prompt,
+                    "icon_size": os.path.getsize(icon_path),
+                }
+            else:
+                err_msg = stderr.decode("utf-8", errors="replace")[:200]
+                print(f"  [apk] Не удалось сгенерировать иконку: {err_msg}")
+                return {
+                    "success": False,
+                    "error": f"z-ai-generate не удался: {err_msg}",
+                    "prompt_used": prompt,
+                }
+        except asyncio.TimeoutError:
+            return {"success": False, "error": "Таймаут генерации иконки (120s)", "prompt_used": prompt}
+        except Exception as e:
+            return {"success": False, "error": str(e), "prompt_used": prompt}
+
+    # ─────────────────────────────────────────────
+    #  PLATFORM INIT
+    # ─────────────────────────────────────────────
+
     async def init_platform(self, project_path: str, template: str, config: APKBuildConfig) -> dict:
         """Initialize Android platform for the project (first time setup)."""
         strategy = config.get_strategy(template)
@@ -271,14 +353,12 @@ class APKBuilder:
             return {"success": False, "error": f"Шаблон '{template}' не поддерживается"}
 
         init_commands = config.get_init_commands(template)
-
         results = []
+
         for i, cmd in enumerate(init_commands, 1):
             result = await self._exec(cmd, project_path)
             results.append({
-                "step": i,
-                "total": len(init_commands),
-                "cmd": cmd,
+                "step": i, "total": len(init_commands), "cmd": cmd,
                 "success": result["success"],
                 "output": result.get("stdout", "") + result.get("stderr", ""),
             })
@@ -297,8 +377,13 @@ class APKBuilder:
             "completed_steps": len(init_commands),
         }
 
-    async def build(self, project_path: str, template: str, config: APKBuildConfig) -> dict:
-        """Build APK. Returns result with path to APK file."""
+    # ─────────────────────────────────────────────
+    #  BUILD
+    # ─────────────────────────────────────────────
+
+    async def build(self, project_path: str, template: str, config: APKBuildConfig,
+                    app_description: str = "") -> dict:
+        """Build APK with auto-generated icon. Returns result with path to APK."""
         strategy = config.get_strategy(template)
         if not strategy:
             return {"success": False, "error": f"Шаблон '{template}' не поддерживается"}
@@ -308,11 +393,27 @@ class APKBuilder:
         if errors:
             return {"success": False, "error": "; ".join(errors)}
 
-        # Check project path exists
+        # Check project path
         if not os.path.isdir(project_path):
             return {"success": False, "error": f"Путь проекта не найден: {project_path}"}
 
-        # Pre-build git commit
+        build_log = []
+
+        # ── Step 1: Generate icon ──
+        print(f"  [apk] Шаг: генерация иконки...")
+        icon_result = await self.generate_icon(project_path, config, app_description)
+        build_log.append({
+            "step": 0, "cmd": "AI icon generation",
+            "success": icon_result["success"],
+            "output": icon_result.get("prompt_used", "") if icon_result["success"]
+                       else icon_result.get("error", ""),
+        })
+        if icon_result["success"]:
+            print(f"  [apk] Иконка готова: {icon_result['icon_path']}")
+        else:
+            print(f"  [apk] Иконка не сгенерирована (не критично): {icon_result.get('error', '')}")
+
+        # ── Step 2: Git checkpoint ──
         if config.data.get("auto_git_commit"):
             git_result = await self._exec(
                 'git add -A && git commit -m "[auto] before APK build" --allow-empty',
@@ -321,7 +422,7 @@ class APKBuilder:
             if git_result["success"]:
                 print(f"  [apk] Git checkpoint создан")
 
-        # Run pre-build commands
+        # ── Step 3: Pre-build ──
         pre_build = strategy.get("pre_build", [])
         for cmd in pre_build:
             result = await self._exec(cmd, project_path)
@@ -330,23 +431,19 @@ class APKBuilder:
                     "success": False,
                     "error": f"Pre-build не удался: {cmd}",
                     "output": result.get("stderr", ""),
+                    "build_log": build_log,
                 }
 
-        # Run build commands
+        # ── Step 4: Build commands ──
         build_commands = config.get_build_commands(template)
-        build_log = []
-        last_result = None
-
         for i, cmd in enumerate(build_commands, 1):
             print(f"  [apk] Build step {i}/{len(build_commands)}: {cmd}")
             result = await self._exec(cmd, project_path)
             build_log.append({
-                "step": i,
-                "cmd": cmd,
+                "step": i, "cmd": cmd,
                 "success": result["success"],
                 "output": result.get("stdout", "") + result.get("stderr", ""),
             })
-            last_result = result
             if not result["success"]:
                 return {
                     "success": False,
@@ -354,18 +451,40 @@ class APKBuilder:
                     "build_log": build_log,
                 }
 
-        # Find APK file
+        # ── Step 5: Find and rename APK ──
         apk_path = config.find_apk_output(project_path, template)
+        final_apk_path = apk_path
+
+        # Rename APK to {app_name}.apk (or {app_name}-{version}.apk)
+        if apk_path and os.path.exists(apk_path):
+            app_name = config.data.get("app_name", "app").lower().replace(" ", "-")
+            app_version = config.data.get("app_version", "1.0.0")
+            apk_dir = os.path.dirname(apk_path)
+            new_name = f"{app_name}-{app_version}.apk"
+            final_apk_path = os.path.join(apk_dir, new_name)
+            try:
+                shutil.move(apk_path, final_apk_path)
+                print(f"  [apk] APK переименован: {new_name}")
+            except Exception as e:
+                print(f"  [apk] Не удалось переименовать APK: {e}")
+                final_apk_path = apk_path
 
         return {
             "success": True,
             "message": "APK успешно собран!",
-            "apk_path": apk_path,
+            "apk_path": final_apk_path,
+            "apk_filename": os.path.basename(final_apk_path) if final_apk_path else None,
+            "icon_generated": icon_result["success"],
+            "icon_path": icon_result.get("icon_path"),
             "build_log": build_log,
             "build_type": config.data["build_type"],
             "app_name": config.data["app_name"],
             "strategy": strategy["name"],
         }
+
+    # ─────────────────────────────────────────────
+    #  ENVIRONMENT CHECK
+    # ─────────────────────────────────────────────
 
     async def check_environment(self, template: str) -> dict:
         """Check if build tools are installed on the system."""
@@ -377,17 +496,20 @@ class APKBuilder:
             "python": {"cmd": "python3 --version", "label": "Python 3", "required_for": ["python-cli", "fastapi", "flask"]},
             "buildozer": {"cmd": "buildozer --version", "label": "Buildozer", "required_for": ["python-cli"]},
             "eas": {"cmd": "eas --version", "label": "EAS CLI", "required_for": ["expo"]},
+            "z_ai_generate": {"cmd": "z-ai-generate --help", "label": "z-ai-generate (иконки)", "required_for": []},
         }
 
         strategy = APKBuildConfig.TEMPLATE_STRATEGIES.get(template)
-        required_tools = set(strategy["engine"].split("-")[0] if strategy else [])
+        required_tools = []
         if strategy:
             required_tools = [c for c in checks if template in checks[c]["required_for"]]
 
         results = {}
         all_ok = True
         for tool_name, tool_info in checks.items():
-            if tool_name not in required_tools and required_tools:
+            # Always check z-ai-generate (for icon), plus required tools
+            is_required = tool_name in required_tools
+            if not is_required and tool_name != "z_ai_generate":
                 continue
             result = await self._exec(tool_info["cmd"], cwd=None)
             installed = result["success"]
@@ -395,9 +517,10 @@ class APKBuilder:
                 "label": tool_info["label"],
                 "installed": installed,
                 "version": result.get("stdout", "").strip() if installed else None,
-                "required": tool_name in (required_tools or []),
+                "required": is_required,
+                "optional": tool_name == "z_ai_generate",
             }
-            if not installed and tool_info["required"]:
+            if not installed and is_required:
                 all_ok = False
 
         return {
