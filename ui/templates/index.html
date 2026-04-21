@@ -649,7 +649,7 @@
             if (debugMode) {
                 sendClientLog({
                     type: "console_error",
-                    message: args.map(a => typeof a === 'object' ? JSON.stringify(a)[:500] : String(a)).join(" "),
+                    message: args.map(a => typeof a === 'object' ? JSON.stringify(a).slice(0, 500) : String(a)).join(" "),
                     stack: new Error().stack || "",
                 });
             }
@@ -660,7 +660,7 @@
             if (debugMode) {
                 sendClientLog({
                     type: "console_warn",
-                    message: args.map(a => typeof a === 'object' ? JSON.stringify(a)[:500] : String(a)).join(" "),
+                    message: args.map(a => typeof a === 'object' ? JSON.stringify(a).slice(0, 500) : String(a)).join(" "),
                 });
             }
             origConsoleWarn.apply(console, args);
