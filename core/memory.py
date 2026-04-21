@@ -35,20 +35,27 @@ def _resolve_db_url() -> tuple[str, bool]:
     Returns: (db_url, is_postgres)
     """
     def _make_asyncpg_url(raw_url: str) -> str:
-        """Convert any postgres:// or postgresql:// URL to asyncpg format."""
-        # Handle postgres:// (short form used by some providers)
+        """Convert any postgres:// or postgresql:// URL to asyncpg format.
+        
+        asyncpg uses 'ssl=require' instead of 'sslmode=require' (psycopg2 style).
+        Also removes 'channel_binding' param which asyncpg doesn't support.
+        """
+        import re
         url = raw_url.strip()
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://"):]
-        # Now url starts with postgresql://
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         if "+asyncpg" not in url:
             url = "postgresql+asyncpg://" + url.split("://", 1)[1]
-        # Ensure SSL mode is set for cloud providers (Neon, Supabase, Render)
-        if "sslmode" not in url.lower():
+        # Convert psycopg2-style 'sslmode=require' → asyncpg-style 'ssl=require'
+        url = re.sub(r'([?&])sslmode=', r'\1ssl=', url)
+        # Remove channel_binding param (not supported by asyncpg)
+        url = re.sub(r'[?&]channel_binding=[^&]*', '', url)
+        # Ensure SSL is set for cloud providers (Neon, Supabase, Render)
+        if "ssl=" not in url.lower():
             separator = "&" if "?" in url else "?"
-            url = f"{url}{separator}sslmode=require"
+            url = f"{url}{separator}ssl=require"
         return url
 
     # 1. Environment variable (highest priority — for cloud deployments)
