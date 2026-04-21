@@ -1,5 +1,5 @@
 llm:
-  default_model: "claude-sonnet-4-20250514"
+  default_model: "openrouter__x-ai/grok-3"
   router_model: ""
   api_base: ""
   api_key: ""
