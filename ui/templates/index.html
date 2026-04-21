@@ -20,6 +20,18 @@
         </div>
     </div>
 
+    <!-- ═══════════ SETUP BANNER (shown when no API keys configured) ═══════════ -->
+    <div id="setup-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99998;background:linear-gradient(135deg,#1a1a2e,#16213e);border-bottom:2px solid var(--amber);padding:14px 20px;align-items:center;justify-content:space-between;gap:16px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <span style="font-size:22px;">⚠️</span>
+            <div>
+                <div style="font-weight:700;color:#fff;font-size:14px;">Первичная настройка</div>
+                <div style="color:rgba(255,255,255,0.6);font-size:12px;">Добавьте API ключ для начала работы с ИИ-ассистентом</div>
+            </div>
+        </div>
+        <button onclick="showKeysModal();document.getElementById('setup-banner').style.display='none'" style="background:var(--amber);color:#000;border:none;padding:8px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;white-space:nowrap;">🔑 Настроить ключи</button>
+    </div>
+
     <!-- ═══════════ TOAST CONTAINER ═══════════ -->
     <div id="toast-container"></div>
 
@@ -1416,6 +1428,26 @@
             allModels = data.models || [];
             renderModels();
             renderPriorityBar();
+            // Auto-detect setup needed: check if any models are usable
+            const usableModels = allModels.filter(m => m.status === 'valid' || m.status === 'rate_limited' || m.status === 'available');
+            if (usableModels.length === 0 && allModels.length > 0) {
+                // No usable models — show setup banner
+                const banner = document.getElementById('setup-banner');
+                if (banner) banner.style.display = 'flex';
+                // Auto-select first model anyway so user can try
+                if (!activeModelId && allModels.length > 0) {
+                    activeModelId = allModels[0].id;
+                }
+            } else if (usableModels.length > 0) {
+                // Hide setup banner if models are available
+                const banner = document.getElementById('setup-banner');
+                if (banner) banner.style.display = 'none';
+                // Auto-select first usable model if none selected
+                if (!activeModelId) {
+                    activeModelId = usableModels[0].id;
+                    renderModels();
+                }
+            }
             updateLoadingBar(80, 'Модели загружены. Загрузка проектов...');
             hideLoadingScreen();
         } catch(e) {
@@ -2365,7 +2397,21 @@
                 body: JSON.stringify({provider: providerId, api_key: apiKey, models: models})
             });
             const data = await resp.json();
-            if (resp.ok) { await loadModels(); showKeysModal(); showToast("Ключ добавлен", "success"); }
+            if (resp.ok) {
+                await loadModels();
+                showKeysModal();
+                showToast("Ключ добавлен", "success");
+                // Auto-set default model if none set
+                if (data.models && data.models.length > 0) {
+                    try {
+                        const newDefault = providerId + "__" + data.models[0];
+                        await fetch("/api/v1/settings", {
+                            method: "POST", headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({default_model: newDefault})
+                        });
+                    } catch(e) {}
+                }
+            }
             else { openGenericModal("Ошибка", '<div class="key-error">Ошибка: ' + (data.detail||data.error) + '</div>'); }
         } catch(e) { openGenericModal("Ошибка", '<div class="key-error">Ошибка сети: ' + e + '</div>'); }
     }

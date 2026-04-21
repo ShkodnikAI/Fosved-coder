@@ -15,7 +15,7 @@ def load_config():
             return yaml.safe_load(f)
     # Default config for cloud deployments
     return {
-        "llm": {"default_model": "openrouter/anthropic/claude-3.5-sonnet", "router_model": "openrouter/google/gemini-2.0-flash-exp:free", "api_base": "https://openrouter.ai/api/v1", "api_key": "", "temperature": 0.2, "max_tokens": 4096},
+        "llm": {"default_model": "", "router_model": "", "api_base": "", "api_key": "", "temperature": 0.2, "max_tokens": 4096},
         "system": {"db_url": "", "projects_dir": "/app/data/projects", "ideas_cache_dir": "/app/data/.cache/ideas", "archives_dir": "/app/data/archives", "max_iterations": 3, "max_context_files": 20, "max_idea_files": 10, "max_file_size_kb": 50},
         "security": {"allowed_commands": ["git", "python", "pip", "npm", "node", "cat", "ls", "dir", "echo", "mkdir", "cd"], "blocked_patterns": ["rm -rf /", "DROP DATABASE", "FORMAT C:"]},
     }

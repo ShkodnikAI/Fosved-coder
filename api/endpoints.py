@@ -2123,3 +2123,57 @@ async def debug_push_to_github():
         "warnings_count": sum(1 for e in server_entries if e.get("level") == "warning"),
         "raw_log": report_text[:5000] if not pushed else None,
     }
+
+
+# ═══════════════════════════════════════════════════════
+# SETTINGS (persist to config.yaml on server)
+# ═══════════════════════════════════════════════════════
+
+class UpdateSettingsRequest(BaseModel):
+    default_model: str = ""
+
+@router.get("/settings")
+async def get_settings():
+    """Get current server settings (LLM config)."""
+    try: action_logger.api_call("GET", "/api/v1/settings")
+    except Exception: pass
+    from core.memory import CONFIG
+    return {
+        "default_model": CONFIG.get("llm", {}).get("default_model", ""),
+        "temperature": CONFIG.get("llm", {}).get("temperature", 0.2),
+        "max_tokens": CONFIG.get("llm", {}).get("max_tokens", 4096),
+    }
+
+@router.post("/settings")
+async def update_settings(req: UpdateSettingsRequest):
+    """Update server settings and persist to config.yaml."""
+    try: action_logger.log("UPDATE_SETTINGS", source="api", details={"default_model": req.default_model})
+    except Exception: pass
+    from core.memory import CONFIG
+    import yaml as _yaml
+    
+    CONFIG["llm"]["default_model"] = req.default_model
+    
+    # Persist to config.yaml
+    try:
+        config_path = "config.yaml"
+        existing_data = {}
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                existing_data = _yaml.safe_load(f) or {}
+        if "llm" not in existing_data:
+            existing_data["llm"] = {}
+        existing_data["llm"]["default_model"] = req.default_model
+        # Keep other fields
+        for section in ["system", "security"]:
+            if section in CONFIG and section not in existing_data:
+                existing_data[section] = CONFIG[section]
+        with open(config_path, "w", encoding="utf-8") as f:
+            _yaml.dump(existing_data, f, default_flow_style=False, allow_unicode=True)
+        try: action_logger.log("SETTINGS_SAVED", source="api", level="success")
+        except Exception: pass
+    except Exception as e:
+        try: action_logger.log("SETTINGS_SAVE_ERROR", source="api", level="error", error=str(e))
+        except Exception: pass
+    
+    return {"success": True, "default_model": req.default_model}
