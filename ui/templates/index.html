@@ -136,6 +136,12 @@
 
         <!-- WORKSPACE -->
         <div class="workspace">
+            <!-- FILE SYNC WARNING BANNER -->
+            <div id="sync-warning" style="background:rgba(200,169,126,0.08);border-bottom:1px solid rgba(200,169,126,0.2);padding:7px 16px;display:flex;align-items:center;gap:10px;font-size:12px;color:rgba(255,255,255,0.55);">
+                <span style="font-size:14px;flex-shrink:0;">ℹ️</span>
+                <span>Файлы сохраняются <b style="color:var(--amber);">на сервере</b>. Для GitHub используйте <b style="color:var(--amber);">git_commit_push</b>. Локально — <b style="color:var(--amber);">git pull</b>.</span>
+                <button onclick="document.getElementById('sync-warning').style.display='none'" style="margin-left:auto;background:none;border:none;color:rgba(255,255,255,0.3);cursor:pointer;font-size:14px;padding:0 2px;flex-shrink:0;">✕</button>
+            </div>
             <div class="chat-box" id="chat-box">
                 <div class="msg system">Подключение к серверу...</div>
             </div>
@@ -1261,6 +1267,14 @@
                 if (spinner) spinner.textContent = statusIcon;
                 div.classList.add('tool-done');
                 activeToolDivs[key] = null;
+                // Напоминание после write_file: файл на сервере, нужен git push
+                if (tool === 'write_file') {
+                    const hint = document.createElement('div');
+                    hint.className = 'msg sync-hint';
+                    hint.innerHTML = '📁 Файл сохранён на <b>сервере</b>. Чтобы сохранить в GitHub — попросите ассистента выполнить <b>git_commit_push</b>, или сделайте <code>git pull</code> локально.';
+                    chatBox.appendChild(hint);
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
             }
             chatBox.scrollTop = chatBox.scrollHeight;
         } else if (status === 'error') {

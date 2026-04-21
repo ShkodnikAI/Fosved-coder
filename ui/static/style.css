@@ -813,6 +813,30 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
 .tool-done { border-left-color: var(--green); }
 .tool-error { border-left-color: var(--red); }
 
+/* ─── SYNC HINT (after write_file) ─── */
+.sync-hint {
+    align-self: center;
+    color: rgba(200,169,126,0.7);
+    font-size: 12px;
+    background: rgba(200,169,126,0.06);
+    padding: 6px 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(200,169,126,0.15);
+    text-align: center;
+    max-width: 95%;
+    margin: 2px 0;
+    line-height: 1.5;
+}
+.sync-hint b { color: var(--amber); }
+.sync-hint code {
+    background: rgba(200,169,126,0.15);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 11px;
+    color: var(--amber);
+}
+
 /* ─── INPUT AREA ─── */
 .input-area { padding: 20px 15%; background: var(--bg-primary); }
 .input-wrapper {
