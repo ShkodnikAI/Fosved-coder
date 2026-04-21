@@ -96,15 +96,20 @@ PROVIDER_DEFS = {
 }
 
 # Бесплатные модели (через OpenRouter) — требуют OPENROUTER_API_KEY
+# Обновлено 2026-04-21: многие старые free-модели больше не бесплатны
 FREE_MODELS = [
-    {"id": "gemini-2.5-flash-free", "name": "Gemini 2.5 Flash", "model": "google/gemini-2.5-flash-preview:free", "provider": "openrouter"},
-    {"id": "gemini-2-flash-free", "name": "Gemini 2.0 Flash", "model": "google/gemini-2.0-flash-exp:free", "provider": "openrouter"},
-    {"id": "llama-4-maverick-free", "name": "Llama 4 Maverick", "model": "meta-llama/llama-4-maverick:free", "provider": "openrouter"},
-    {"id": "deepseek-v3-free", "name": "DeepSeek V3", "model": "deepseek/deepseek-chat-v3-0324:free", "provider": "openrouter"},
-    {"id": "qwen-2.5-72b-free", "name": "Qwen 2.5 72B", "model": "qwen/qwen-2.5-72b-instruct:free", "provider": "openrouter"},
-    {"id": "mistral-large-free", "name": "Mistral Large", "model": "mistralai/mistral-large-2411:free", "provider": "openrouter"},
-    {"id": "phi-4-free", "name": "Phi-4", "model": "microsoft/phi-4:free", "provider": "openrouter"},
+    {"id": "gpt-oss-120b-free", "name": "OpenAI GPT-OSS 120B", "model": "openai/gpt-oss-120b:free", "provider": "openrouter"},
+    {"id": "hermes-3-405b-free", "name": "Hermes 3 Llama 405B", "model": "nousresearch/hermes-3-llama-3.1-405b:free", "provider": "openrouter"},
+    {"id": "nemotron-super-120b-free", "name": "Nemotron 3 Super 120B", "model": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
+    {"id": "qwen3-coder-free", "name": "Qwen3 Coder", "model": "qwen/qwen3-coder:free", "provider": "openrouter"},
+    {"id": "qwen3-next-80b-free", "name": "Qwen3 Next 80B", "model": "qwen/qwen3-next-80b-a3b-instruct:free", "provider": "openrouter"},
     {"id": "llama-3.3-70b-free", "name": "Llama 3.3 70B", "model": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"},
+    {"id": "gemma-4-31b-free", "name": "Gemma 4 31B", "model": "google/gemma-4-31b-it:free", "provider": "openrouter"},
+    {"id": "gemma-4-26b-free", "name": "Gemma 4 26B", "model": "google/gemma-4-26b-a4b-it:free", "provider": "openrouter"},
+    {"id": "gemma-3-27b-free", "name": "Gemma 3 27B", "model": "google/gemma-3-27b-it:free", "provider": "openrouter"},
+    {"id": "nemotron-nano-9b-free", "name": "Nemotron Nano 9B", "model": "nvidia/nemotron-nano-9b-v2:free", "provider": "openrouter"},
+    {"id": "glm-4.5-air-free", "name": "GLM 4.5 Air", "model": "z-ai/glm-4.5-air:free", "provider": "openrouter"},
+    {"id": "minimax-m2.5-free", "name": "MiniMax M2.5", "model": "minimax/minimax-m2.5:free", "provider": "openrouter"},
 ]
 
 # Локальные провайдеры по умолчанию
@@ -297,7 +302,7 @@ class KeysManager:
                     "api_key": api_key,
                     "api_base": provider_def["api_base"],
                     "litellm_prefix": provider_def["litellm_prefix"],
-                    "models": provider_def["suggested_models"],
+                    "models": existing.get("models") or provider_def["suggested_models"],
                     "status": "valid",  # Assume valid, startup_validation will re-check
                 }
                 env_loaded += 1
@@ -388,8 +393,8 @@ class KeysManager:
                 return {"status": "invalid", "error": "Неверный API ключ"}
             elif "429" in error_str or "rate" in error_str or "quota" in error_str:
                 return {"status": "rate_limited", "error": "Лимит запросов исчерпан или нет средств"}
-            elif "insufficient" in error_str or "billing" in error_str:
-                return {"status": "rate_limited", "error": "Недостаточно средств на счёте"}
+            elif "insufficient" in error_str or "billing" in error_str or "402" in error_str or "payment" in error_str or "credits" in error_str or "no credits" in error_str or "balance" in error_str:
+                return {"status": "rate_limited", "error": "Недостаточно средств — бесплатные модели доступны"}
             elif "timeout" in error_str:
                 return {"status": "valid", "error": ""}
             elif "404" in error_str or "not found" in error_str or "model not found" in error_str:
@@ -719,7 +724,23 @@ class KeysManager:
                 results[provider_id] = {"status": "invalid", "models": []}
                 continue
 
+            # Для OpenRouter: если первая модель платная и не проходит валидацию,
+            # пробуем бесплатную модель — ключ всё равно может работать для free-моделей
             validation = await self.validate_key(provider_id, api_key, test_model)
+            if provider_id == "openrouter" and validation["status"] == "invalid":
+                # Проверяем: это ошибка аутентификации или проблема с оплатой?
+                err_lower = validation.get("error", "").lower()
+                is_auth_error = "401" in err_lower or "unauthorized" in err_lower or "неверный" in err_lower
+                if not is_auth_error and FREE_MODELS:
+                    # Пробуем валидацию с бесплатной моделью
+                    free_test = FREE_MODELS[0]["model"]  # e.g. "google/gemini-2.5-flash-preview:free"
+                    free_validation = await self.validate_key(
+                        "openrouter", api_key, free_test,
+                        config.get("api_base", "https://openrouter.ai/api/v1")
+                    )
+                    if free_validation["status"] in ("valid", "rate_limited"):
+                        validation = {"status": "rate_limited", "error": "Платные модели недоступны, бесплатные работают"}
+
             self.providers[provider_id]["status"] = validation["status"]
             results[provider_id] = {"status": validation["status"], "models": config.get("models", [])}
 
@@ -885,8 +906,13 @@ class KeysManager:
                 result = {
                     "model": model_str,
                     "api_key": provider_config.get("api_key", ""),
-                    "api_base": provider_config.get("api_base", "https://openrouter.ai/api/v1"),
                 }
+                # api_base включаем только если отличается от дефолтного для OpenRouter
+                provider_def = PROVIDER_DEFS.get(fm["provider"], {})
+                default_base = provider_def.get("api_base", "https://openrouter.ai/api/v1")
+                current_base = provider_config.get("api_base", default_base)
+                if current_base and current_base != default_base:
+                    result["api_base"] = current_base
                 return result
 
         # Кастомные модели
