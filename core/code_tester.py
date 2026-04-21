@@ -7,10 +7,12 @@ Fosved Coder v2.0 — Code Tester & Validator
 2. Линтинг (flake8, eslint, ruff — если доступны)
 3. Запуск тестов (pytest, jest, npm test — если есть)
 4. LLM-анализ ошибок с предложениями исправления
+5. Сохранение тотального лога в файл + git push
 """
 import os
 import asyncio
 import re
+from datetime import datetime
 from core.executor import CommandExecutor
 
 executor = CommandExecutor()
@@ -315,6 +317,96 @@ async def llm_analyze_errors(errors_text: str, websocket, model_id: str = None) 
 
 
 # ═══════════════════════════════════════════════════
+# LOG WRITER — сохранение лога + git push
+# ═══════════════════════════════════════════════════
+
+async def save_test_log_and_push(project_path: str, report: str, status: str, error_count: int) -> dict:
+    """Сохраняет тотальный лог проверки в файл и пушит в git."""
+    from core.action_logger import get_logger
+    logger = get_logger()
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = os.path.join(project_path, "test_logs")
+
+    # Создаём директорию test_logs
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception as e:
+        print(f"  [tester] Не удалось создать test_logs: {e}")
+        return {"saved": False, "error": str(e)}
+
+    # Формируем имя файла
+    status_tag = "OK" if error_count == 0 else f"ERR_{error_count}"
+    log_filename = f"test_{timestamp}_{status_tag}.md"
+    log_path = os.path.join(log_dir, log_filename)
+
+    # Полный лог с метаданными
+    header = f"""# Code Test Report
+
+- **Дата:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+- **Статус:** {'✅ Ошибок нет' if error_count == 0 else f'⚠️ {error_count} проблем(ы)'}
+- **Путь:** `{project_path}`
+
+---
+
+"""
+    full_log = header + report + "\n"
+
+    # Пишем файл
+    try:
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(full_log)
+        print(f"  [tester] Лог сохранён: {log_filename}")
+    except Exception as e:
+        print(f"  [tester] Ошибка записи лога: {e}")
+        return {"saved": False, "error": str(e)}
+
+    # Добавляем .gitignore если нет
+    gitignore_path = os.path.join(log_dir, ".gitignore")
+    if not os.path.exists(gitignore_path):
+        try:
+            with open(gitignore_path, "w") as f:
+                f.write("# Старые логи (оставляем последние 20)\n")
+            # Удаляем старые логи (оставляем 20 последних)
+            log_files = sorted([f for f in os.listdir(log_dir) if f.startswith("test_") and f.endswith(".md")])
+            if len(log_files) > 20:
+                for old_file in log_files[:-20]:
+                    try:
+                        os.remove(os.path.join(log_dir, old_file))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Git add + commit + push
+    try:
+        await executor.execute("git add test_logs/", cwd=project_path, timeout=10)
+        commit_result = await executor.execute(
+            f'git commit -m "test: {status_tag} — {timestamp}" --allow-empty',
+            cwd=project_path, timeout=10
+        )
+        push_result = await executor.execute("git push", cwd=project_path, timeout=30)
+
+        push_ok = push_result.get("exit_code", -1) == 0
+        commit_out = (commit_result.get("stdout", "") + commit_result.get("stderr", "")).strip()
+        push_out = (push_result.get("stdout", "") + push_result.get("stderr", "")).strip()
+
+        print(f"  [tester] Commit+Push: {'OK' if push_ok else 'FAILED'}")
+        logger.log("test_log_pushed", level="success" if push_ok else "warning", source="tester",
+                   details={"file": log_filename, "push_ok": push_ok})
+
+        return {
+            "saved": True,
+            "file": log_filename,
+            "pushed": push_ok,
+            "commit": commit_out.split("\n")[-1] if commit_out else "",
+        }
+    except Exception as e:
+        print(f"  [tester] Git push ошибка: {e}")
+        return {"saved": True, "file": log_filename, "pushed": False, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════
 # MAIN — полный запуск проверки
 # ═══════════════════════════════════════════════════
 
@@ -410,6 +502,18 @@ async def run_full_check(project_path: str, websocket, model_id: str = None, run
     # Send report as AI message (rendered as markdown)
     await websocket.send_json({"type": "chunk", "content": full_report})
     await websocket.send_json({"type": "done"})
+
+    # 5.5 Save log to file + git push
+    await websocket.send_json({"type": "system", "content": "💾 Сохраняю лог и пушу в Git..."})
+    log_result = await save_test_log_and_push(project_path, full_report, "ok" if total_errors == 0 else "has_errors", total_errors)
+    if log_result.get("saved"):
+        file_msg = f"📄 Лог: `test_logs/{log_result['file']}`"
+        if log_result.get("pushed"):
+            await websocket.send_json({"type": "system", "content": f"✅ {file_msg} — запушен в Git"})
+        else:
+            await websocket.send_json({"type": "system", "content": f"⚠️ {file_msg} — сохранён, пуш не удался"})
+    else:
+        await websocket.send_json({"type": "system", "content": "⚠️ Не удалось сохранить лог файла"})
 
     # 6. LLM analysis if errors found and model is available
     if total_errors > 0 and model_id:

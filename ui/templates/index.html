@@ -72,16 +72,6 @@
                 </div>
             </div>
 
-            <!-- MODE TOGGLE (Manual / Automatic) -->
-            <div class="mode-toggle-bar" id="mode-toggle-bar">
-                <div class="mode-toggle-track" id="mode-toggle-track" onclick="toggleWorkMode()">
-                    <div class="mode-toggle-thumb" id="mode-toggle-thumb"></div>
-                    <div class="mode-toggle-label" id="mode-toggle-label-manual">Ручной</div>
-                    <div class="mode-toggle-label" id="mode-toggle-label-auto">Авто</div>
-                </div>
-                <div class="mode-status-dot" id="mode-status-dot"></div>
-            </div>
-
             <!-- AI Models (gets most of the space) -->
             <div class="sidebar-section" style="flex:3; display:flex; flex-direction:column; overflow:hidden; border-bottom:none; padding-bottom:0;">
                 <div class="section-header" data-hint="Выбирайте модели ИИ для чата. Кликните на модель, чтобы сделать её активной.">
@@ -1398,32 +1388,22 @@
         workMode = workMode === "manual" ? "auto" : "manual";
         updateModeUI();
         renderBottomBar();
-        showToast(workMode === "auto" ? "Автоматический режим включён — ИИ кодит сам" : "Ручной режим — вы контролируете каждый шаг", "info");
-        // Notify server about mode change
+        showToast(workMode === "auto" ? "Автоматический режим — ИИ кодит сам" : "Ручной режим — вы контролируете каждый шаг", "info");
         wsSend({ type: "mode_change", mode: workMode });
     }
 
     function updateModeUI() {
-        const track = document.getElementById("mode-toggle-track");
-        const thumb = document.getElementById("mode-toggle-thumb");
-        const labelManual = document.getElementById("mode-toggle-label-manual");
-        const labelAuto = document.getElementById("mode-toggle-label-auto");
-        const dot = document.getElementById("mode-status-dot");
-
-        if (workMode === "auto") {
-            track.classList.add("mode-auto");
-            thumb.style.transform = "translateX(48px)";
-            labelManual.style.color = "var(--text-secondary)";
-            labelAuto.style.color = "#fff";
-            dot.style.background = "var(--green)";
-            dot.title = "Автоматический режим активен";
-        } else {
-            track.classList.remove("mode-auto");
-            thumb.style.transform = "translateX(2px)";
-            labelManual.style.color = "#fff";
-            labelAuto.style.color = "var(--text-secondary)";
-            dot.style.background = "var(--accent)";
-            dot.title = "Ручной режим";
+        // Обновляем кнопки в bottom-bar если они существуют
+        const manualBtn = document.getElementById("mode-btn-manual");
+        const autoBtn = document.getElementById("mode-btn-auto");
+        if (manualBtn && autoBtn) {
+            if (workMode === "auto") {
+                autoBtn.classList.add("mode-btn-active");
+                manualBtn.classList.remove("mode-btn-active");
+            } else {
+                manualBtn.classList.add("mode-btn-active");
+                autoBtn.classList.remove("mode-btn-active");
+            }
         }
     }
 
@@ -2189,11 +2169,13 @@
             // Кнопки только для активного проекта
             buttons.push({ label: '✏️ Редактировать', action: `openProjectModal(${p.id})` });
 
-            // Mode toggle button — always visible in bottom bar
-            const modeIcon = workMode === 'auto' ? '🤖' : '✋';
-            const modeLabel = workMode === 'auto' ? 'Авто-режим' : 'Ручной режим';
-            const modeAction = 'toggleWorkMode()';
-            buttons.push({ label: `${modeIcon} ${modeLabel}`, action: modeAction, isMode: true });
+            // Mode toggle — красивые раздельные кнопки (вместо одной)
+            const manualActive = workMode === 'manual' ? ' mode-btn-active' : '';
+            const autoActive = workMode === 'auto' ? ' mode-btn-active' : '';
+            buttons.push({
+                label: `<span id="mode-btn-manual" class="mode-btn${manualActive}" onclick="event.stopPropagation();toggleWorkMode()">✋ Ручной</span><span class="mode-btn-sep"></span><span id="mode-btn-auto" class="mode-btn${autoActive}" onclick="event.stopPropagation();toggleWorkMode()">🤖 Авто</span>`,
+                action: "void(0)", isModeGroup: true
+            });
 
             buttons.push({ label: '🖥 Сервер', action: "insertCommand('/terminal ')" });
             buttons.push({ label: '🌐 Сайт', action: "openProjectSite()" });
@@ -2215,7 +2197,9 @@
         }
 
         bar.innerHTML = buttons.map(b =>
-            `<button onclick="${b.action}" class="bottom-bar-btn${b.isMode ? (workMode === 'auto' ? ' bottom-bar-btn-auto' : ' bottom-bar-btn-mode') : ''}">${b.label}</button>`
+            b.isModeGroup
+                ? `<div class="mode-btn-group">${b.label}</div>`
+                : `<button onclick="${b.action}" class="bottom-bar-btn${b.isMode ? (workMode === 'auto' ? ' bottom-bar-btn-auto' : ' bottom-bar-btn-mode') : ''}">${b.label}</button>`
         ).join('');
     }
 

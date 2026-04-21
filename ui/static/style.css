@@ -98,9 +98,9 @@ header {
 
 /* ─── SIDEBAR ─── */
 .sidebar {
-    width: 260px;
-    min-width: 200px;
-    max-width: 500px;
+    width: 350px;
+    min-width: 260px;
+    max-width: 550px;
     background: var(--bg-secondary);
     border-right: none;
     display: flex;
@@ -226,67 +226,48 @@ header {
     to { transform: rotate(360deg); }
 }
 
-/* ─── MODE TOGGLE (Manual / Automatic) ─── */
-.mode-toggle-bar {
+/* ─── MODE TOGGLE BUTTONS (Manual / Automatic) — in bottom-bar ─── */
+.mode-btn-group {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 15px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
-    flex-shrink: 0;
-}
-.mode-toggle-track {
-    position: relative;
-    width: 100px;
-    height: 28px;
+    gap: 2px;
     background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 10px;
-    transition: background 0.3s, border-color 0.3s;
+    border-radius: 6px;
+    padding: 2px;
     flex-shrink: 0;
 }
-.mode-toggle-track.mode-auto {
-    background: rgba(78, 201, 176, 0.15);
-    border-color: var(--green);
-}
-.mode-toggle-thumb {
-    position: absolute;
-    top: 3px;
-    left: 0;
-    width: 22px;
-    height: 22px;
-    background: var(--accent);
-    border-radius: 50%;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s;
-    transform: translateX(2px);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-.mode-toggle-track.mode-auto .mode-toggle-thumb {
-    background: var(--green);
-    transform: translateX(48px);
-}
-.mode-toggle-label {
+.mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    border-radius: 5px;
     font-size: 11px;
     font-weight: 600;
     color: var(--text-secondary);
-    transition: color 0.3s;
-    z-index: 1;
+    cursor: pointer;
+    transition: all 0.25s ease;
     user-select: none;
-    line-height: 1;
+    white-space: nowrap;
 }
-.mode-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
+.mode-btn:hover {
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+}
+.mode-btn-active {
+    background: var(--accent) !important;
+    color: #000 !important;
+    box-shadow: 0 1px 4px rgba(200,169,126,0.4);
+}
+.mode-btn-group:has(.mode-btn-active:nth-child(3)) .mode-btn-active {
+    background: var(--green) !important;
+    box-shadow: 0 1px 4px rgba(78,201,176,0.4);
+}
+.mode-btn-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
     flex-shrink: 0;
-    transition: background 0.3s;
 }
 /* Projects */
 .project-list { flex: 1; overflow-y: auto; background: var(--bg-primary); }
