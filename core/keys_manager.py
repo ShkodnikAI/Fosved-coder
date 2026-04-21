@@ -855,15 +855,6 @@ class KeysManager:
                 results[provider_id] = {"status": "invalid", "models": []}
                 continue
 
-            # Для Abacus.AI: загружаем актуальный список моделей с API
-            if provider_id == "abacus":
-                try:
-                    abacus_result = await self.fetch_abacus_models(api_key)
-                    if abacus_result["success"] and abacus_result["models"]:
-                        test_model = abacus_result["models"][0]  # Используем актуальную модель
-                except Exception as e:
-                    print(f"  [keys] Abacus model fetch failed: {e}")
-
             # Для OpenRouter: если первая модель платная и не проходит валидацию,
             # пробуем бесплатную модель — ключ всё равно может работать для free-моделей
             validation = await self.validate_key(provider_id, api_key, test_model)
