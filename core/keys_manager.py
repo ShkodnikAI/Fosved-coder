@@ -154,6 +154,7 @@ ENV_KEY_MAP = {
     "GOOGLE_API_KEY": "gemini",
     "MINIMAX_API_KEY": "minimax",
     "DEEPSEEK_API_KEY": "deepseek",
+    "ZAI_API_KEY": "zai",
 }
 
 
