@@ -44,17 +44,7 @@ PROVIDER_DEFS = {
             "gpt-4o-mini",
         ],
     },
-    "openrouter": {
-        "name": "OpenRouter",
-        "litellm_prefix": "openrouter",
-        "api_base": "https://openrouter.ai/api/v1",
-        "suggested_models": [
-            "anthropic/claude-opus-4-7",
-            "anthropic/claude-sonnet-4-6",
-            "openai/gpt-4.1",
-            "google/gemini-2.5-flash-preview",
-        ],
-    },
+
     "grok": {
         "name": "Grok (xAI)",
         "litellm_prefix": "xai",
@@ -148,22 +138,8 @@ PROVIDER_DEFS = {
     },
 }
 
-# Бесплатные модели (через OpenRouter) — требуют OPENROUTER_API_KEY
-# Обновлено 2026-04-21: многие старые free-модели больше не бесплатны
-FREE_MODELS = [
-    {"id": "gpt-oss-120b-free", "name": "OpenAI GPT-OSS 120B", "model": "openai/gpt-oss-120b:free", "provider": "openrouter"},
-    {"id": "hermes-3-405b-free", "name": "Hermes 3 Llama 405B", "model": "nousresearch/hermes-3-llama-3.1-405b:free", "provider": "openrouter"},
-    {"id": "nemotron-super-120b-free", "name": "Nemotron 3 Super 120B", "model": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
-    {"id": "qwen3-coder-free", "name": "Qwen3 Coder", "model": "qwen/qwen3-coder:free", "provider": "openrouter"},
-    {"id": "qwen3-next-80b-free", "name": "Qwen3 Next 80B", "model": "qwen/qwen3-next-80b-a3b-instruct:free", "provider": "openrouter"},
-    {"id": "llama-3.3-70b-free", "name": "Llama 3.3 70B", "model": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"},
-    {"id": "gemma-4-31b-free", "name": "Gemma 4 31B", "model": "google/gemma-4-31b-it:free", "provider": "openrouter"},
-    {"id": "gemma-4-26b-free", "name": "Gemma 4 26B", "model": "google/gemma-4-26b-a4b-it:free", "provider": "openrouter"},
-    {"id": "gemma-3-27b-free", "name": "Gemma 3 27B", "model": "google/gemma-3-27b-it:free", "provider": "openrouter"},
-    {"id": "nemotron-nano-9b-free", "name": "Nemotron Nano 9B", "model": "nvidia/nemotron-nano-9b-v2:free", "provider": "openrouter"},
-    {"id": "glm-4.5-air-free", "name": "GLM 4.5 Air", "model": "z-ai/glm-4.5-air:free", "provider": "openrouter"},
-    {"id": "minimax-m2.5-free", "name": "MiniMax M2.5", "model": "minimax/minimax-m2.5:free", "provider": "openrouter"},
-]
+# Бесплатные модели — больше не используются (OpenRouter удалён)
+FREE_MODELS = []
 
 # Локальные провайдеры по умолчанию
 LOCAL_PROVIDERS = {
@@ -199,7 +175,6 @@ LEGACY_KEYS_FILE = "data/keys.json"
 
 # Mapping: env var name -> provider_id
 ENV_KEY_MAP = {
-    "OPENROUTER_API_KEY": "openrouter",
     "ANTHROPIC_API_KEY": "claude",
     "OPENAI_API_KEY": "openai",
     "XAI_API_KEY": "grok",
@@ -276,7 +251,6 @@ class KeysManager:
                 return
 
             # Маппинг legacy провайдеров → PROVIDER_DEFS
-            # "custom" обычно содержал OpenRouter ключ
             legacy_key_patterns = {
                 "claude": "claude",
                 "openai": "openai",
@@ -284,7 +258,6 @@ class KeysManager:
                 "gemini": "gemini",
                 "deepseek": "deepseek",
                 "minimax": "minimax",
-                "openrouter": "openrouter",
             }
 
             migrated = 0
@@ -296,9 +269,9 @@ class KeysManager:
                 # Определяем реальный провайдер по формату ключа
                 real_provider = prov_id
                 if prov_id == "custom" or prov_id not in PROVIDER_DEFS:
-                    # Ключ начинается с sk-or-v1 → это OpenRouter
+                    # Пропускаем неизвестные форматы ключей
                     if api_key.startswith("sk-or-v1"):
-                        real_provider = "openrouter"
+                        continue  # OpenRouter удалён
                     elif api_key.startswith("sk-ant-"):
                         real_provider = "claude"
                     elif api_key.startswith("sk-proj-") or api_key.startswith("sk-"):
@@ -855,23 +828,7 @@ class KeysManager:
                 results[provider_id] = {"status": "invalid", "models": []}
                 continue
 
-            # Для OpenRouter: если первая модель платная и не проходит валидацию,
-            # пробуем бесплатную модель — ключ всё равно может работать для free-моделей
             validation = await self.validate_key(provider_id, api_key, test_model)
-            if provider_id == "openrouter" and validation["status"] == "invalid":
-                # Проверяем: это ошибка аутентификации или проблема с оплатой?
-                err_lower = validation.get("error", "").lower()
-                is_auth_error = "401" in err_lower or "unauthorized" in err_lower or "неверный" in err_lower
-                if not is_auth_error and FREE_MODELS:
-                    # Пробуем валидацию с бесплатной моделью
-                    free_test = FREE_MODELS[0]["model"]  # e.g. "google/gemini-2.5-flash-preview:free"
-                    free_validation = await self.validate_key(
-                        "openrouter", api_key, free_test,
-                        config.get("api_base", "https://openrouter.ai/api/v1")
-                    )
-                    if free_validation["status"] in ("valid", "rate_limited"):
-                        validation = {"status": "rate_limited", "error": "Платные модели недоступны, бесплатные работают"}
-
             self.providers[provider_id]["status"] = validation["status"]
             results[provider_id] = {"status": validation["status"], "models": config.get("models", [])}
 
@@ -903,7 +860,10 @@ class KeysManager:
         models = []
 
         # 1. Платные модели из настроенных провайдеров (с валидными ключами)
+        # Пропускаем openrouter (удалён)
         for provider_id, config in self.providers.items():
+            if provider_id == "openrouter":
+                continue
             provider_def = PROVIDER_DEFS.get(provider_id, {})
             prefix = config.get("litellm_prefix", provider_id)
             status = config.get("status", "not_configured")
@@ -958,23 +918,6 @@ class KeysManager:
                 "type": "local",
                 "status": "available",
                 "base_url": lm.get("base_url", ""),
-            })
-
-        # 3. Бесплатные модели через OpenRouter
-        openrouter_config = self.providers.get("openrouter", {})
-        has_openrouter_key = bool(openrouter_config.get("api_key"))
-        openrouter_status = openrouter_config.get("status", "not_configured")
-
-        for fm in FREE_MODELS:
-            available = has_openrouter_key and openrouter_status in ("valid", "rate_limited")
-            models.append({
-                "id": fm["id"],
-                "name": fm["name"],
-                "model": fm["model"],
-                "provider": fm["provider"],
-                "provider_name": PROVIDER_DEFS.get(fm["provider"], {}).get("name", fm["provider"]),
-                "type": "free",
-                "status": "available" if available else "no_key",
             })
 
         # 4. Кастомные модели (force connect)
@@ -1078,26 +1021,6 @@ class KeysManager:
                     "api_key": "",  # Локальные не нуждаются в ключе
                     "api_base": base_url,
                 }
-
-        # Бесплатные модели (OpenRouter)
-        for fm in FREE_MODELS:
-            if fm["id"] == model_id:
-                provider_config = self.providers.get(fm["provider"], {})
-                # Litellm нужен prefix "openrouter/" для маршрутизации
-                model_str = fm["model"]
-                if not model_str.startswith("openrouter/"):
-                    model_str = f"openrouter/{model_str}"
-                result = {
-                    "model": model_str,
-                    "api_key": provider_config.get("api_key", ""),
-                }
-                # api_base включаем только если отличается от дефолтного для OpenRouter
-                provider_def = PROVIDER_DEFS.get(fm["provider"], {})
-                default_base = provider_def.get("api_base", "https://openrouter.ai/api/v1")
-                current_base = provider_config.get("api_base", default_base)
-                if current_base and current_base != default_base:
-                    result["api_base"] = current_base
-                return result
 
         # Кастомные модели
         for cm in self.custom_models:

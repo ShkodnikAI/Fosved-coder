@@ -323,7 +323,7 @@ def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
     api_base = CONFIG["llm"].get("api_base", "")
     is_thinking = False
 
-    if "YOUR_" in api_key.upper() or api_key == "YOUR_OPENROUTER_API_KEY_HERE":
+    if "YOUR_" in api_key.upper():
         api_key = ""
 
     model_config = keys_manager.get_model_config(model_id)
@@ -334,27 +334,19 @@ def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
         is_thinking = model_config.get("thinking", False)
     else:
         model = model_id
-        # Fallback: free models
-        for fm in keys_manager.FREE_MODELS:
-            if fm["id"] == model:
-                or_config = keys_manager.providers.get("openrouter", {})
-                api_key = or_config.get("api_key", "")
-                model = f"openrouter/{fm['model']}"
-                api_base = or_config.get("api_base", "https://openrouter.ai/api/v1")
-                break
-        else:
-            bare_name = model.split("/")[-1]
-            for provider_id, config in keys_manager.providers.items():
-                if config.get("status") in ("valid", "rate_limited") and config.get("api_key"):
-                    for model_name in config.get("models", []):
-                        if model_name == bare_name:
-                            prefix = config.get("litellm_prefix", provider_id)
-                            model = f"{prefix}/{model_name}"
-                            api_key = config["api_key"]
-                            api_base = config.get("api_base", "")
-                            break
-                    if api_key:
+        # Fallback: ищем модель по списку провайдеров
+        bare_name = model.split("/")[-1]
+        for provider_id, config in keys_manager.providers.items():
+            if config.get("status") in ("valid", "rate_limited") and config.get("api_key"):
+                for model_name in config.get("models", []):
+                    if model_name == bare_name:
+                        prefix = config.get("litellm_prefix", provider_id)
+                        model = f"{prefix}/{model_name}"
+                        api_key = config["api_key"]
+                        api_base = config.get("api_base", "")
                         break
+                if api_key:
+                    break
 
     return model, api_key, api_base, is_thinking
 
@@ -411,7 +403,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                 kwargs["tools"] = TOOLS
 
             # Check if model supports tool calling
-            # OpenRouter models and some others may not support tools
+            # Some models may not support tools
             try:
                 response = await litellm.acompletion(**kwargs)
             except Exception as tool_err:

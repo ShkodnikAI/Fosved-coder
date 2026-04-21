@@ -212,7 +212,7 @@ async def api_root():
         "endpoints": {
             "system": ["GET /api/v1/health", "GET /api/v1/status"],
             "keys": ["GET /api/v1/keys/providers", "POST /api/v1/keys/add", "DELETE /api/v1/keys/{provider_id}", "GET /api/v1/keys/github", "POST /api/v1/keys/github"],
-            "models": ["GET /api/v1/models", "POST /api/v1/models/test-openrouter", "GET /api/v1/models/local", "GET /api/v1/models/custom", "GET /api/v1/models/abacus/refresh"],
+            "models": ["GET /api/v1/models", "GET /api/v1/models/local", "GET /api/v1/models/custom", "GET /api/v1/models/abacus/refresh"],
             "projects": ["GET /api/v1/projects", "POST /api/v1/projects", "DELETE /api/v1/projects/{id}", "PUT /api/v1/projects/settings", "PUT /api/v1/projects/rename", "POST /api/v1/projects/regenerate-key", "GET /api/v1/projects/by-key/{key}"],
             "files": ["GET /api/v1/projects/{id}/tree", "GET /api/v1/projects/{id}/read-file", "POST /api/v1/projects/{id}/save-file", "POST /api/v1/projects/{id}/search-files"],
             "git": ["POST /api/v1/projects/{id}/git"],
@@ -330,41 +330,6 @@ async def refresh_abacus_models():
         try: action_logger.log("REFRESH_ABACUS_MODELS", source="api", level="success", details={"count": result["count"]})
         except Exception: pass
     return result
-
-
-@router.post("/models/test-openrouter")
-async def test_openrouter_key():
-    """Быстрый тест OpenRouter ключа — отправляем запрос к бесплатной модели."""
-    import litellm
-    try: action_logger.log("TEST_OPENROUTER", source="api")
-    except Exception: pass
-    config = keys_manager.providers.get("openrouter")
-    if not config or not config.get("api_key"):
-        try: action_logger.log("TEST_OPENROUTER", source="api", level="error", error="OpenRouter key not configured")
-        except Exception: pass
-        return {"success": False, "error": "Ключ OpenRouter не настроен. Добавьте OPENROUTER_API_KEY в Environment Variables."}
-    try:
-        response = await litellm.acompletion(
-            model="openrouter/qwen/qwen-2.5-72b-instruct:free",
-            messages=[{"role": "user", "content": "Ответь одним словом: работает"}],
-            api_key=config["api_key"],
-            api_base=config.get("api_base", "https://openrouter.ai/api/v1"),
-            max_tokens=10,
-            temperature=0,
-            timeout=20,
-        )
-        answer = response.choices[0].message.content if response.choices else "пустой ответ"
-        return {"success": True, "response": answer, "message": f"OpenRouter работает! Ответ: {answer}"}
-    except Exception as e:
-        err = str(e)
-        if "401" in err:
-            return {"success": False, "error": "Ключ OpenRouter НЕВЕРНЫЙ (401). Проверьте OPENROUTER_API_KEY."}
-        elif "429" in err:
-            return {"success": False, "error": "Лимит исчерпан или нет средств (429)."}
-        elif "404" in err:
-            return {"success": False, "error": f"Модель не найдена (404): {err[:200]}"}
-        else:
-            return {"success": False, "error": f"Ошибка: {err[:200]}"}
 
 
 # ═══════════════════════════════════════════════════════════════

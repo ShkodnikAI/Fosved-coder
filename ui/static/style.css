@@ -449,31 +449,7 @@ header {
 }
 .active-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
 
-/* OpenRouter Block */
-.openrouter-block {
-    background: rgba(200,169,126,0.06);
-    border: 0.5px solid rgba(200,169,126,0.25);
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 6px;
-}
-.or-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; width: 100%; }
-.or-logo {
-    width: 26px; height: 26px; background: var(--accent); border-radius: 6px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 700; color: #fff;
-    font-family: monospace; flex-shrink: 0;
-}
-.or-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-.or-sub { font-size: 9px; color: var(--text-secondary); }
-.or-input-row { display: flex; gap: 4px; }
-.or-input {
-    flex: 1; background: var(--bg-primary);
-    border: 0.5px solid var(--border); border-radius: 6px;
-    padding: 6px 8px; font-size: 11px;
-    font-family: monospace; color: var(--text-primary); outline: none;
-}
-.or-input:focus { border-color: var(--accent); }
+/* OpenRouter removed — styles removed */
 
 /* Add Model Button */
 .add-model-btn {
@@ -1994,10 +1970,15 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
     color: #569cd6;
     border: 1px solid rgba(86,156,214,0.3);
 }
-.project-model-chip.type-openrouter {
-    background: rgba(160,120,200,0.15);
-    color: #a078c8;
-    border: 1px solid rgba(160,120,200,0.3);
+.project-model-chip.type-abacus {
+    background: rgba(240,160,48,0.15);
+    color: #f0a030;
+    border: 1px solid rgba(240,160,48,0.3);
+}
+.project-model-chip.type-custom {
+    background: rgba(86,156,214,0.15);
+    color: #569cd6;
+    border: 1px solid rgba(86,156,214,0.3);
 }
 .project-model-chip.type-local {
     background: rgba(224,96,112,0.15);
@@ -2012,7 +1993,8 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
 }
 .project-model-chip.type-paid .chip-dot { background: #C8A97E; }
 .project-model-chip.type-free .chip-dot { background: #569cd6; }
-.project-model-chip.type-openrouter .chip-dot { background: #a078c8; }
+.project-model-chip.type-abacus .chip-dot { background: #f0a030; }
+.project-model-chip.type-custom .chip-dot { background: #569cd6; }
 .project-model-chip.type-local .chip-dot { background: #e06070; }
 
 /* ═══════════════════════════════════════════════════════

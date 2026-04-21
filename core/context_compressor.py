@@ -279,18 +279,7 @@ class ContextCompressor:
                     "name": f"Abacus {models[0]}",
                 }
 
-        # 2. Try free models (no cost via OpenRouter)
-        for fm in keys_manager.FREE_MODELS:
-            or_config = keys_manager.providers.get("openrouter", {})
-            if or_config.get("api_key"):
-                return {
-                    "model": f"openrouter/{fm['model']}",
-                    "api_key": or_config["api_key"],
-                    "api_base": or_config.get("api_base", "https://openrouter.ai/api/v1"),
-                    "name": fm.get("name", fm["model"]),
-                }
-
-        # 3. Try any model with a valid key (pick the first available)
+        # 2. Try any model with a valid key (pick the first available)
         all_models = keys_manager.get_all_models()
         for m in all_models:
             if m.get("status") in ("valid", "rate_limited", "available"):
