@@ -87,10 +87,10 @@ PROVIDER_DEFS = {
         ],
     },
     "zai": {
-        "name": "Z.AI",
+        "name": "Z.AI (GLM)",
         "litellm_prefix": "openai",
-        "api_base": "https://chat.z.ai/v1",
-        "suggested_models": ["default"],
+        "api_base": "https://open.bigmodel.cn/api/paas/v4",
+        "suggested_models": ["glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.6", "glm-4.5", "glm-4.5-air"],
         "is_custom": True,
     },
 }
