@@ -212,7 +212,7 @@ async def api_root():
         "endpoints": {
             "system": ["GET /api/v1/health", "GET /api/v1/status"],
             "keys": ["GET /api/v1/keys/providers", "POST /api/v1/keys/add", "DELETE /api/v1/keys/{provider_id}", "GET /api/v1/keys/github", "POST /api/v1/keys/github"],
-            "models": ["GET /api/v1/models", "POST /api/v1/models/test-openrouter", "GET /api/v1/models/local", "GET /api/v1/models/custom"],
+            "models": ["GET /api/v1/models", "POST /api/v1/models/test-openrouter", "GET /api/v1/models/local", "GET /api/v1/models/custom", "GET /api/v1/models/abacus/refresh"],
             "projects": ["GET /api/v1/projects", "POST /api/v1/projects", "DELETE /api/v1/projects/{id}", "PUT /api/v1/projects/settings", "PUT /api/v1/projects/rename", "POST /api/v1/projects/regenerate-key", "GET /api/v1/projects/by-key/{key}"],
             "files": ["GET /api/v1/projects/{id}/tree", "GET /api/v1/projects/{id}/read-file", "POST /api/v1/projects/{id}/save-file", "POST /api/v1/projects/{id}/search-files"],
             "git": ["POST /api/v1/projects/{id}/git"],
@@ -314,6 +314,21 @@ async def revalidate_provider(provider_id: str):
     )
     keys_manager.providers[provider_id]["status"] = result["status"]
     keys_manager._save_keys()
+    return result
+
+
+@router.get("/models/abacus/refresh")
+async def refresh_abacus_models():
+    """Загрузить актуальный список моделей с Abacus.AI RouteLLM API."""
+    try: action_logger.log("REFRESH_ABACUS_MODELS", source="api")
+    except Exception: pass
+    result = await keys_manager.fetch_abacus_models()
+    if not result["success"]:
+        try: action_logger.log("REFRESH_ABACUS_MODELS", source="api", level="error", error=result["error"])
+        except Exception: pass
+    else:
+        try: action_logger.log("REFRESH_ABACUS_MODELS", source="api", level="success", details={"count": result["count"]})
+        except Exception: pass
     return result
 
 

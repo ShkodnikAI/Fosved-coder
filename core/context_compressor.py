@@ -251,12 +251,35 @@ class ContextCompressor:
     def get_compression_model_config() -> dict | None:
         """
         Find a suitable model config for compression.
-        Priority: free model → cheapest available model.
+        Priority: Abacus route-llm (smart routing, cheap) → free model → cheapest available.
         Returns model_config dict or None.
         """
-        from core.keys_manager import keys_manager
+        from core.keys_manager import keys_manager, PROVIDER_DEFS
 
-        # 1. Try free models first (no cost)
+        # 1. Abacus.AI route-llm — умная маршрутизация автоматически выбирает
+        #    лучшую модель по соотношению цена/качество. Идеально для фоновых задач.
+        abacus_config = keys_manager.providers.get("abacus", {})
+        if abacus_config.get("api_key") and abacus_config.get("status") in ("valid", "rate_limited"):
+            abacus_def = PROVIDER_DEFS.get("abacus", {})
+            models = abacus_config.get("models", abacus_def.get("suggested_models", []))
+            # Ищем route-llm в списке моделей
+            if "route-llm" in models:
+                return {
+                    "model": f"openai/route-llm",
+                    "api_key": abacus_config["api_key"],
+                    "api_base": abacus_config.get("api_base", abacus_def.get("api_base", "")),
+                    "name": "Abacus route-llm (smart routing)",
+                }
+            # Если route-llm нет, берём первую модель Abacus
+            if models:
+                return {
+                    "model": f"openai/{models[0]}",
+                    "api_key": abacus_config["api_key"],
+                    "api_base": abacus_config.get("api_base", abacus_def.get("api_base", "")),
+                    "name": f"Abacus {models[0]}",
+                }
+
+        # 2. Try free models (no cost via OpenRouter)
         for fm in keys_manager.FREE_MODELS:
             or_config = keys_manager.providers.get("openrouter", {})
             if or_config.get("api_key"):
@@ -267,7 +290,7 @@ class ContextCompressor:
                     "name": fm.get("name", fm["model"]),
                 }
 
-        # 2. Try any model with a valid key (pick the first available)
+        # 3. Try any model with a valid key (pick the first available)
         all_models = keys_manager.get_all_models()
         for m in all_models:
             if m.get("status") in ("valid", "rate_limited", "available"):

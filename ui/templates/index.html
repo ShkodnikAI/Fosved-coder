@@ -1480,7 +1480,7 @@
 
     // Helper: get avatar color by model type
     function getAvatarColor(type) {
-        const colors = { paid: '#C8A97E', free: 'var(--blue)', local: '#e06070', custom: '#c080d0' };
+        const colors = { paid: '#C8A97E', free: 'var(--blue)', local: '#e06070', custom: '#c080d0', abacus: '#f0a030' };
         return colors[type] || 'var(--text-secondary)';
     }
 
@@ -1501,7 +1501,8 @@
             paid: '<span class="model-tag tag-paid">Платная</span>',
             free: '<span class="model-tag tag-free">Бесплатная</span>',
             local: '<span class="model-tag tag-local">Локальная</span>',
-            custom: '<span class="model-tag tag-custom">Кастомная</span>'
+            custom: '<span class="model-tag tag-custom">Кастомная</span>',
+            abacus: '<span class="model-tag tag-abacus">Abacus.AI</span>'
         };
         return tags[type] || '';
     }
@@ -1555,6 +1556,10 @@
         const paidValid = allModels.filter(m => m.type === "paid" && (m.status === 'valid' || m.status === 'rate_limited'));
         const paidInvalid = allModels.filter(m => m.type === "paid" && m.status !== 'valid' && m.status !== 'rate_limited');
 
+        // 1a. Abacus.AI модели (отдельный премиум-секция)
+        const abacusModels = paidValid.filter(m => m.provider === 'abacus');
+        const otherPaid = paidValid.filter(m => m.provider !== 'abacus');
+
         // 2. Модели через OpenRouter (paid + provider=openrouter OR free models)
         const openrouterPaid = allModels.filter(m => m.type === 'paid' && m.provider === 'openrouter');
         const freeModels = allModels.filter(m => m.type === "free");
@@ -1567,10 +1572,21 @@
 
         let html = "";
 
-        // ═══ 1. ПЛАТНЫЕ И ПРОШЕДШИЕ ВАЛИДАЦИЮ ═══
-        if (paidValid.length) {
+        // ═══ 0. ABACUS.AI — УМНАЯ МАРШРУТИЗАЦИЯ (премиум) ═══
+        if (abacusModels.length) {
+            html += '<div class="model-section-label" style="color:#f0a030;display:flex;align-items:center;justify-content:space-between;">' +
+                '<span>⚡ ABACUS.AI — ВСЕ МОДЕЛИ (1 КЛЮЧ)</span>' +
+                '<button onclick="event.stopPropagation();refreshAbacusModels()" class="btn-small" ' +
+                'style="padding:2px 8px;font-size:10px;border:1px solid #f0a030;color:#f0a030;background:transparent;cursor:pointer;border-radius:4px;">Обновить</button>' +
+                '</div>';
+            html += '<div style="font-size:10px;color:var(--text-secondary);padding:2px 0 4px 4px;margin-bottom:4px;">route-llm автоматически выбирает лучшую модель по сложности запроса • 65+ моделей • без наценки</div>';
+            abacusModels.forEach(m => { html += buildModelCard(m, 'abacus'); });
+        }
+
+        // ═══ 1. ПЛАТНЫЕ И ВАЛИДИРОВАННЫЕ (кроме Abacus) ═══
+        if (otherPaid.length) {
             html += '<div class="model-section-label" style="color:var(--accent);">ПЛАТНЫЕ И ВАЛИДИРОВАННЫЕ</div>';
-            paidValid.forEach(m => { html += buildModelCard(m, 'paid'); });
+            otherPaid.forEach(m => { html += buildModelCard(m, 'paid'); });
         }
 
         // ═══ 2. OPENROUTER — платные модели OR ═══
@@ -1602,7 +1618,7 @@
         }
 
         // Если совсем пусто
-        if (!paidValid.length && !openrouterPaid.length && !freeModels.length && !local.length && !custom.length) {
+        if (!abacusModels.length && !otherPaid.length && !openrouterPaid.length && !freeModels.length && !local.length && !custom.length) {
             html = '<div class="model-empty">Нет моделей. Настройте ключи или подключите локальные.</div>';
         }
 
@@ -1696,6 +1712,22 @@
             }
         } catch (e) {
             showToast('Ошибка теста: ' + e, 'error');
+        }
+    }
+
+    async function refreshAbacusModels() {
+        showToast('Загружаем модели с Abacus.AI...', 'info');
+        try {
+            const resp = await fetch('/api/v1/models/abacus/refresh');
+            const data = await resp.json();
+            if (data.success) {
+                showToast(`Abacus.AI: ${data.count} моделей загружено`, 'success');
+                await loadModels();
+            } else {
+                showToast(data.error || 'Не удалось загрузить модели', 'error');
+            }
+        } catch (e) {
+            showToast('Ошибка: ' + e, 'error');
         }
     }
 
