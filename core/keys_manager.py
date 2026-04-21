@@ -93,6 +93,23 @@ PROVIDER_DEFS = {
         "suggested_models": ["glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.6", "glm-4.5", "glm-4.5-air"],
         "is_custom": True,
     },
+    "abacus": {
+        "name": "Abacus.AI (RouteLLM)",
+        "litellm_prefix": "openai",
+        "api_base": "https://routellm.abacus.ai/v1",
+        "suggested_models": [
+            "route-llm",
+            "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
+            "claude-opus-4-7", "claude-sonnet-4-6",
+            "gemini-3.1-pro", "gemini-3.1-flash-lite",
+            "grok-4.2", "grok-4",
+            "deepseek-v3.2", "deepseek-R1",
+            "qwen3-235b-a22b", "qwen3-coder",
+            "llama-4-Maverick",
+            "abacus-smaug2", "abacus-dracarys",
+        ],
+        "is_custom": True,
+    },
 }
 
 # Бесплатные модели (через OpenRouter) — требуют OPENROUTER_API_KEY
@@ -155,6 +172,7 @@ ENV_KEY_MAP = {
     "MINIMAX_API_KEY": "minimax",
     "DEEPSEEK_API_KEY": "deepseek",
     "ZAI_API_KEY": "zai",
+    "ABACUS_API_KEY": "abacus",
 }
 
 

@@ -106,6 +106,8 @@ async def stream_chat(messages, model_id=None, project_keys=None):
         "google": ("GOOGLE_API_KEY", api_key),
         "deepseek": ("DEEPSEEK_API_KEY", api_key),
         "minimax": ("MINIMAX_API_KEY", api_key),
+        "zai": ("ZAI_API_KEY", api_key),
+        "abacus": ("ABACUS_API_KEY", api_key),
     }
     env_var, key_val = env_map.get(provider, (None, None))
     if env_var:
