@@ -63,6 +63,22 @@ async def lifespan(app: FastAPI):
         icon = "+" if gh["enabled"] else "o"
         print(f"    [{icon}] GitHub: {'активен (' + gh['user'] + ')' if gh['enabled'] else 'отключён'}")
     print("  Ключи проверены\n")
+
+    # Abacus.AI: загрузка моделей в фоне (не блокирует старт)
+    import asyncio
+    async def _bg_load_abacus():
+        try:
+            abacus_cfg = keys_manager.providers.get("abacus", {})
+            if abacus_cfg.get("api_key"):
+                result = await keys_manager.fetch_abacus_models()
+                if result["success"]:
+                    print(f"  [abacus] Загружено {result['count']} моделей в фоне")
+                else:
+                    print(f"  [abacus] Фоновая загрузка не удалась: {result.get('error', '?')[:80]}")
+        except Exception as e:
+            print(f"  [abacus] Фоновая загрузка: {e}")
+    asyncio.create_task(_bg_load_abacus())
+
     print(f"  Готово! Откройте приложение в браузере.\n")
     yield
 

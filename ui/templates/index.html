@@ -1513,6 +1513,7 @@
         const priorityIdx = priorityModels.indexOf(m.id);
         const avatarColor = getAvatarColor(type);
         const initials = getModelInitials(m.name || m.provider_name || '??');
+        const isThinking = m.thinking === true;
 
         // Card classes
         let cardCls = 'model-card';
@@ -1524,12 +1525,18 @@
         // Priority badge
         const priorityHtml = priorityIdx >= 0 ? `<span class="priority-badge" style="position:absolute;top:6px;right:6px;width:14px;height:14px;font-size:9px;">${priorityIdx + 1}</span>` : '';
 
-        // Provider subtitle
-        const sub = m.provider_name ? escapeHtml(m.provider_name) : '';
+        // Provider subtitle + category
+        let sub = m.provider_name ? escapeHtml(m.provider_name) : '';
+        if (m.category) {
+            sub += sub ? ' · ' + escapeHtml(m.category) : escapeHtml(m.category);
+        }
 
         // Action link for models without keys
         const actionLink = (!m.status || m.status === 'not_configured') ?
             '<span class="model-action-link" onclick="event.stopPropagation();showKeysModal()">Настроить →</span>' : '';
+
+        // Thinking indicator in footer
+        const thinkingTag = isThinking ? '<span class="model-tag tag-thinking">Thinking</span>' : '';
 
         return `<div class="${cardCls}" data-id="${m.id}" onclick="selectModel('${m.id}')" style="position:relative;">
             <div class="model-card-header">
@@ -1542,6 +1549,7 @@
             </div>
             <div class="model-card-footer">
                 ${getTagHtml(type)}
+                ${thinkingTag}
                 ${actionLink}
             </div>
             ${priorityHtml}
@@ -1579,8 +1587,40 @@
                 '<button onclick="event.stopPropagation();refreshAbacusModels()" class="btn-small" ' +
                 'style="padding:2px 8px;font-size:10px;border:1px solid #f0a030;color:#f0a030;background:transparent;cursor:pointer;border-radius:4px;">Обновить</button>' +
                 '</div>';
-            html += '<div style="font-size:10px;color:var(--text-secondary);padding:2px 0 4px 4px;margin-bottom:4px;">route-llm автоматически выбирает лучшую модель по сложности запроса • 65+ моделей • без наценки</div>';
-            abacusModels.forEach(m => { html += buildModelCard(m, 'abacus'); });
+            html += '<div style="font-size:10px;color:var(--text-secondary);padding:2px 0 4px 4px;margin-bottom:4px;">route-llm автоматически выбирает лучшую модель по сложности • Extended Thinking для глубоких рассуждений • без наценки</div>';
+
+            // Группировка по категориям
+            const categoryOrder = ['Extended Thinking', 'Умная маршрутизация', 'Код', 'Рассуждения', 'Быстрые'];
+            const grouped = {};
+            const uncategorized = [];
+
+            abacusModels.forEach(m => {
+                if (m.category) {
+                    if (!grouped[m.category]) grouped[m.category] = [];
+                    grouped[m.category].push(m);
+                } else {
+                    uncategorized.push(m);
+                }
+            });
+
+            // Рендерим по порядку категорий
+            categoryOrder.forEach(cat => {
+                if (grouped[cat] && grouped[cat].length) {
+                    const icon = cat === 'Extended Thinking' ? '🧠' : cat === 'Умная маршрутизация' ? '⚡' : cat === 'Код' ? '💻' : cat === 'Рассуждения' ? '🔬' : '⚡';
+                    html += `<div style="font-size:10px;color:#f0a030;padding:6px 0 2px 4px;font-weight:600;opacity:0.85;">${icon} ${cat}</div>`;
+                    grouped[cat].forEach(m => { html += buildModelCard(m, 'abacus'); });
+                    delete grouped[cat];
+                }
+            });
+
+            // Остальные категории
+            Object.keys(grouped).forEach(cat => {
+                html += `<div style="font-size:10px;color:#f0a030;padding:6px 0 2px 4px;font-weight:600;opacity:0.85;">${cat}</div>`;
+                grouped[cat].forEach(m => { html += buildModelCard(m, 'abacus'); });
+            });
+
+            // Без категории
+            uncategorized.forEach(m => { html += buildModelCard(m, 'abacus'); });
         }
 
         // ═══ 1. ПЛАТНЫЕ И ВАЛИДИРОВАННЫЕ (кроме Abacus) ═══

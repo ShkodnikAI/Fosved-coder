@@ -898,7 +898,7 @@ class KeysManager:
     def get_all_models(self) -> list[dict]:
         """
         Все доступные модели: платные → локальные → OpenRouter(inline key) → бесплатные → кастомные.
-        Returns: [{id, name, model, provider, provider_name, type, status}]
+        Returns: [{id, name, model, provider, provider_name, type, status, category, thinking}]
         """
         models = []
 
@@ -907,8 +907,17 @@ class KeysManager:
             provider_def = PROVIDER_DEFS.get(provider_id, {})
             prefix = config.get("litellm_prefix", provider_id)
             status = config.get("status", "not_configured")
+            thinking_models = provider_def.get("thinking_models", [])
+            categories = provider_def.get("model_categories", {})
 
             for model_name in config.get("models", []):
+                # Determine category for this model
+                category = ""
+                for cat_id, cat_info in categories.items():
+                    if model_name in cat_info.get("models", []):
+                        category = cat_info.get("label", cat_id)
+                        break
+
                 models.append({
                     "id": f"{provider_id}__{model_name}",
                     "name": model_name,
@@ -917,7 +926,26 @@ class KeysManager:
                     "provider_name": provider_def.get("name", provider_id),
                     "type": "paid",
                     "status": status,
+                    "category": category,
+                    "thinking": model_name in thinking_models,
                 })
+
+            # Extended Thinking: генерируем -thinking варианты для Abacus
+            if provider_id == "abacus" and thinking_models:
+                abacus_models = config.get("models", [])
+                for tm in thinking_models:
+                    if tm in abacus_models:
+                        models.append({
+                            "id": f"{provider_id}__{tm}-thinking",
+                            "name": f"{tm}-thinking",
+                            "model": f"{prefix}/{tm}-thinking",
+                            "provider": provider_id,
+                            "provider_name": provider_def.get("name", provider_id),
+                            "type": "paid",
+                            "status": status,
+                            "category": "Extended Thinking",
+                            "thinking": True,
+                        })
 
         # 2. Локальные модели
         for lm in self.local_models:
@@ -966,16 +994,31 @@ class KeysManager:
     def get_model_config(self, model_id: str) -> dict | None:
         """
         Получить конфиг для litellm по ID модели.
-        Returns: {model, api_key, api_base} или None
+        Returns: {model, api_key, api_base, thinking} или None
         
         Поддерживает форматы:
           - provider__model_name (напр. claude__claude-sonnet-4-20250514)
+          - provider__model_name-thinking (Abacus extended thinking)
           - bare model_name (напр. claude-sonnet-4-20250514) — ищет по всем провайдерам
           - free model ID (напр. gemini-2.5-flash-free)
           - local/custom model ID
         
         api_base включается ТОЛЬКО для кастомных/нестандартных провайдеров.
         """
+        # Abacus Extended Thinking: model_id = "abacus__claude-opus-4-7-thinking"
+        _thinking = False
+        if model_id.endswith("-thinking") and "__" in model_id:
+            parts = model_id.rsplit("-thinking", 1)
+            base_id = parts[0]
+            # Проверяем что базовая модель существует у Abacus
+            provider_part = base_id.split("__", 1)
+            if len(provider_part) == 2:
+                pid, mname = provider_part
+                pdef = PROVIDER_DEFS.get(pid, {})
+                if mname in pdef.get("thinking_models", []):
+                    model_id = base_id  # Поиск будет по базовой модели
+                    _thinking = True
+
         # 0. Bare model name fallback: если model_id не содержит "__" и не matches local/free/custom
         if "__" not in model_id and not model_id.startswith("local_") and not model_id.startswith("custom_"):
             # Проверяем — это может быть голое имя модели из config.yaml
@@ -986,10 +1029,15 @@ class KeysManager:
                             # Найдено! Возвращаем конфиг
                             prefix = config.get("litellm_prefix", provider_id)
                             provider_def = PROVIDER_DEFS.get(provider_id, {})
+                            litellm_name = f"{prefix}/{model_name}"
+                            if _thinking:
+                                litellm_name += "-thinking"
                             result = {
-                                "model": f"{prefix}/{model_name}",
+                                "model": litellm_name,
                                 "api_key": config.get("api_key", ""),
                             }
+                            if _thinking:
+                                result["thinking"] = True
                             is_custom = provider_def.get("is_custom", False)
                             default_base = provider_def.get("api_base", "")
                             current_base = config.get("api_base", "")
@@ -1003,10 +1051,15 @@ class KeysManager:
                 if f"{provider_id}__{model_name}" == model_id:
                     prefix = config.get("litellm_prefix", provider_id)
                     provider_def = PROVIDER_DEFS.get(provider_id, {})
+                    litellm_name = f"{prefix}/{model_name}"
+                    if _thinking:
+                        litellm_name += "-thinking"
                     result = {
-                        "model": f"{prefix}/{model_name}",
+                        "model": litellm_name,
                         "api_key": config.get("api_key", ""),
                     }
+                    if _thinking:
+                        result["thinking"] = True
                     # Only include api_base for custom providers or when explicitly overridden
                     is_custom = provider_def.get("is_custom", False)
                     default_base = provider_def.get("api_base", "")

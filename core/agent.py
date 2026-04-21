@@ -317,10 +317,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
 # LLM STREAMING WITH TOOL CALLING
 # ═══════════════════════════════════════════════════════
 
-def _resolve_model(model_id: str) -> tuple[str, str, str]:
-    """Resolve model_id to (litellm_model, api_key, api_base)."""
+def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
+    """Resolve model_id to (litellm_model, api_key, api_base, is_thinking)."""
     api_key = CONFIG["llm"].get("api_key", "")
     api_base = CONFIG["llm"].get("api_base", "")
+    is_thinking = False
 
     if "YOUR_" in api_key.upper() or api_key == "YOUR_OPENROUTER_API_KEY_HERE":
         api_key = ""
@@ -330,6 +331,7 @@ def _resolve_model(model_id: str) -> tuple[str, str, str]:
         model = model_config["model"]
         api_key = model_config["api_key"]
         api_base = model_config.get("api_base", "")
+        is_thinking = model_config.get("thinking", False)
     else:
         model = model_id
         # Fallback: free models
@@ -354,7 +356,7 @@ def _resolve_model(model_id: str) -> tuple[str, str, str]:
                     if api_key:
                         break
 
-    return model, api_key, api_base
+    return model, api_key, api_base, is_thinking
 
 
 async def stream_llm_response(prompt: str, history: list, websocket,
@@ -366,14 +368,18 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     if system_prompt is None:
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="", project_context="", compressed_context="")
 
-    model, api_key, api_base = _resolve_model(model)
+    model, api_key, api_base, is_thinking = _resolve_model(model)
 
     if not api_key:
         logger.log(f"no_api_key: {model}", level="error", source="agent")
         await websocket.send_json({"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках."})
         return None
 
-    print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, project={project_path}")
+    print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, thinking={is_thinking}, project={project_path}")
+
+    # Extended Thinking: уведомить клиента и настроить параметры
+    if is_thinking:
+        await websocket.send_json({"type": "info", "content": "Extended Thinking включён — модель будет рассуждать глубже"})
 
     # Build messages
     api_messages = []
@@ -393,7 +399,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                 "model": model,
                 "messages": messages,
                 "temperature": CONFIG["llm"].get("temperature", 0.2),
-                "max_tokens": CONFIG["llm"].get("max_tokens", 4096),
+                "max_tokens": CONFIG["llm"].get("max_tokens", 16384) if is_thinking else CONFIG["llm"].get("max_tokens", 4096),
             }
             if api_key:
                 kwargs["api_key"] = api_key

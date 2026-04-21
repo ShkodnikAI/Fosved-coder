@@ -450,6 +450,7 @@ header {
 .tag-local { background: rgba(224,96,112,0.15); color: #e06070; }
 .tag-custom { background: rgba(192,128,208,0.15); color: #c080d0; }
 .tag-abacus { background: rgba(240,160,48,0.15); color: #f0a030; font-weight: 600; }
+.tag-thinking { background: rgba(147,130,220,0.2); color: #9382dc; font-weight: 600; font-style: italic; }
 .tag-offline { background: rgba(78,201,176,0.15); color: var(--green); }
 .model-action-link {
     font-size: 10px; font-weight: 600; color: var(--blue);
