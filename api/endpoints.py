@@ -738,11 +738,11 @@ async def search_files(req: SearchFilesRequest):
 # ═══════════════════════════════════════════════════════════════
 
 @router.post("/projects/{project_id}/git")
-async def git_operation(req: GitOperationRequest):
+async def git_operation(project_id: int, req: GitOperationRequest):
     """Git операции: commit, push, pull, log, status, diff."""
-    try: action_logger.log(f"GIT_{req.operation.upper()}", source="api", project_id=req.project_id, details={"operation": req.operation})
+    try: action_logger.log(f"GIT_{req.operation.upper()}", source="api", project_id=project_id, details={"operation": req.operation})
     except Exception: pass
-    project = await get_project(req.project_id)
+    project = await get_project(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
     cwd = project["path"]
