@@ -87,11 +87,6 @@
                         <button class="btn-add" onclick="refreshModels()" title="Обновить" data-hint="Обновить список моделей и перепроверить API ключи" style="font-size:12px">↻</button>
                     </div>
                 </div>
-                <!-- Priority Models Bar -->
-                <div id="priority-bar" style="display:none; margin-bottom:8px;">
-                    <div class="model-section-label" style="color:var(--amber);">ПРИОРИТЕТНЫЕ</div>
-                    <div id="priority-models-bar" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
-                </div>
                 <div id="models-list" style="flex:1; overflow-y:auto; margin-right:-4px; padding-right:4px;">
                     <div class="model-card loading">Загрузка...</div>
                 </div>
@@ -189,8 +184,8 @@
                 <button class="log-filter-btn" data-filter="debug" onclick="filterLogs('debug',this)">🔍</button>
             </div>
             <!-- Progress bar -->
-            <div id="auto-log-progress-bar" style="display:none;height:3px;background:var(--bg-primary);overflow:hidden;flex-shrink:0;">
-                <div id="auto-log-progress-fill" style="height:100%;background:var(--green);width:0%;transition:width 0.3s ease;border-radius:2px;"></div>
+            <div id="auto-log-progress-bar" style="display:none;height:4px;background:var(--bg-primary);overflow:hidden;flex-shrink:0;">
+                <div id="auto-log-progress-fill" style="height:100%;background:var(--green);width:0%;transition:width 0.4s ease;border-radius:0 2px 2px 0;"></div>
             </div>
             <!-- Log entries -->
             <div id="auto-log-entries" style="flex:1;overflow-y:auto;padding:6px 0;display:flex;flex-direction:column;gap:1px;font-family:'Cascadia Code',Consolas,monospace;font-size:12px;"></div>
@@ -1564,7 +1559,6 @@
             const data = await resp.json();
             allModels = data.models || [];
             renderModels();
-            renderPriorityBar();
             // Auto-detect setup needed: check if any models are usable
             const usableModels = allModels.filter(m => m.status === 'valid' || m.status === 'rate_limited' || m.status === 'available');
             if (usableModels.length === 0 && allModels.length > 0) {
@@ -1779,23 +1773,6 @@
         updateActiveModelIndicator();
     }
 
-    function renderPriorityBar() {
-        const bar = document.getElementById("priority-bar");
-        const container = document.getElementById("priority-models-bar");
-        if (!priorityModels.length) { bar.style.display = "none"; return; }
-        bar.style.display = "block";
-        container.innerHTML = "";
-        priorityModels.forEach((mid, idx) => {
-            const m = allModels.find(x => x.id === mid);
-            const label = m ? (m.name.length > 16 ? m.name.substring(0,14) + '...' : m.name) : mid;
-            const chip = document.createElement("div");
-            chip.className = "priority-chip";
-            chip.innerHTML = `<span style="font-weight:700;">${idx+1}.</span> ${escapeHtml(label)} <span class="priority-chip-remove" onclick="event.stopPropagation();toggleModelPriority('${mid}')">&times;</span>`;
-            chip.title = `Приоритет #${idx+1}: ${m ? m.name : mid}\nКликните × чтобы убрать`;
-            container.appendChild(chip);
-        });
-    }
-
     // Галочка приоритета — правый клик или клик на кружок на карточке модели
     function toggleModelPriority(modelId) {
         const idx = priorityModels.indexOf(modelId);
@@ -1815,7 +1792,6 @@
             showToast(`⚡ Приоритет #${priorityModels.length}: ${name}`, "success");
         }
         renderModels();
-        renderPriorityBar();
         // Авто-сохранение в проект
         if (currentProjectId) {
             fetch('/api/v1/projects/models', {
@@ -1978,7 +1954,6 @@
         }
 
         renderModels();
-        renderPriorityBar();
         renderProjectModels();
     }
 
@@ -2257,22 +2232,20 @@
                     try {
                         const models = JSON.parse(p.selected_models);
                         if (Array.isArray(models) && models.length) {
-                            priorityModels = models.slice(0, 3);
+                            priorityModels = models.slice(0, 10);
                             // Не перезаписываем activeModelId, если пользователь уже выбрал модель
                             if (!activeModelId || !allModels.find(x => x.id === activeModelId)) {
                                 activeModelId = priorityModels[0];
                             }
                             renderModels();
-                            renderPriorityBar();
-                        } else { priorityModels = []; renderModels(); renderPriorityBar(); }
-                    } catch(e) { priorityModels = []; renderModels(); renderPriorityBar(); }
-                } else { priorityModels = []; renderModels(); renderPriorityBar(); }
+                        } else { priorityModels = []; renderModels(); }
+                    } catch(e) { priorityModels = []; renderModels(); }
+                } else { priorityModels = []; renderModels(); }
             } catch(e) { progressBar.style.display = "none"; }
         } else {
             progressBar.style.display = "none";
             priorityModels = [];
             renderModels();
-            renderPriorityBar();
         }
 
         renderBottomBar();
@@ -2867,15 +2840,21 @@
     let logSidebarVisible = true;
     let currentLogFilter = 'all';
     let autoLogDone = false;
+    // Счётчики сессии выполнения для прогресс-бара
+    let sessionToolTotal = 0;    // всего tool calls в текущей сессии
+    let sessionToolDone = 0;    // выполнено успешно
+    let sessionToolErrors = 0;  // с ошибкой
 
     const AUTO_LOG_ICONS = {
         info:    { icon: '◉', color: 'var(--blue)' },
-        success: { icon: '✔', color: 'var(--green)' },
+        success: { icon: '✅', color: 'var(--green)' },
         warning: { icon: '⚠', color: 'var(--amber)' },
-        error:   { icon: '✖', color: 'var(--red)' },
+        error:   { icon: '🐛', color: 'var(--red)' },
         command: { icon: '▸', color: 'var(--text-secondary)' },
-        file:    { icon: '∎', color: '#569cd6' },
+        file:    { icon: '📄', color: '#569cd6' },
         done:    { icon: '■', color: 'var(--green)' },
+        bug:     { icon: '🐛', color: '#ff6b6b' },
+        ok:      { icon: '✅', color: 'var(--green)' },
     };
 
     function handleAutoLog(data) {
@@ -2890,7 +2869,14 @@
             autoLogDone = true;
             updateAutoLogProgress();
             const statusEl = document.getElementById('auto-log-status');
-            if (statusEl) statusEl.textContent = 'Завершено';
+            if (statusEl) {
+                const ok = sessionToolDone;
+                const err = sessionToolErrors;
+                statusEl.textContent = `Готово: ${ok} OK` + (err ? `, ${err} баг` : '');
+                statusEl.style.color = err > 0 ? 'var(--amber)' : 'var(--green)';
+            }
+            // Сброс счётчиков сессии
+            sessionToolTotal = 0; sessionToolDone = 0; sessionToolErrors = 0;
             return;
         }
 
@@ -2899,7 +2885,18 @@
             openAutoLogPanel();
         }
 
-        // Track total steps for progress
+        // Track tool calls for session progress bar
+        if (level === 'command' || level === 'file') {
+            sessionToolTotal++;
+        }
+        if (level === 'success') {
+            sessionToolDone++;
+        }
+        if (level === 'error') {
+            sessionToolErrors++;
+        }
+
+        // Track total steps for progress (auto mode)
         if (total && total > 0 && autoLogTotalSteps === 0) {
             autoLogTotalSteps = total;
         }
@@ -2916,10 +2913,16 @@
             stepBadge = '<span class="auto-log-step">' + step + '/' + total + '</span>';
         }
 
+        // Маркер результата: ✅ для success, 🐛 для error
+        let resultMark = '';
+        if (level === 'success') resultMark = '<span class="log-result-mark mark-ok">OK</span>';
+        if (level === 'error') resultMark = '<span class="log-result-mark mark-bug">BUG</span>';
+
         entry.innerHTML =
             '<span class="auto-log-icon" style="color:' + iconData.color + '">' + iconData.icon + '</span>' +
             '<span class="auto-log-time">' + escapeHtml(time) + '</span>' +
             stepBadge +
+            resultMark +
             '<span class="auto-log-text">' + escapeHtml(content) + '</span>';
 
         // Apply current filter
@@ -2939,26 +2942,29 @@
         // Update count label
         const countLabel = document.getElementById('log-count-label');
         if (countLabel) {
-            const total = container ? container.querySelectorAll('[data-level]').length : 0;
-            countLabel.textContent = `${total} записей`;
+            const totalEntries = container ? container.querySelectorAll('[data-level]').length : 0;
+            countLabel.textContent = `${totalEntries} записей`;
         }
 
-        // Update progress bar if we have step info
+        // Update progress bar
         if (step !== undefined && total !== undefined) {
             updateAutoLogProgress(step, total);
+        } else if (sessionToolTotal > 0) {
+            // Прогресс по tool calls в ручном режиме
+            updateSessionProgressBar();
         }
 
         // Update status text
         const statusEl = document.getElementById('auto-log-status');
         if (statusEl && level !== 'done') {
             if (level === 'error') {
-                statusEl.textContent = 'Ошибка';
+                statusEl.textContent = `Ошибка (${sessionToolErrors})`;
                 statusEl.style.color = 'var(--red)';
-            } else if (level === 'success' && step !== undefined) {
-                statusEl.textContent = 'Шаг ' + step + '/' + total;
-                statusEl.style.color = 'var(--green)';
+            } else if (level === 'success') {
+                statusEl.textContent = `${sessionToolDone}/${sessionToolTotal} OK` + (sessionToolErrors ? `, ${sessionToolErrors} баг` : '');
+                statusEl.style.color = sessionToolErrors > 0 ? 'var(--amber)' : 'var(--green)';
             } else {
-                statusEl.textContent = 'Выполнение...';
+                statusEl.textContent = `Выполнение... ${sessionToolTotal} действий`;
                 statusEl.style.color = 'var(--text-secondary)';
             }
         }
@@ -2994,14 +3000,36 @@
     // Backward compatibility
     function toggleAutoLogPanel() { toggleLogSidebar(); }
 
+    function updateSessionProgressBar() {
+        const bar = document.getElementById('auto-log-progress-bar');
+        const fill = document.getElementById('auto-log-progress-fill');
+        if (!bar || !fill) return;
+        if (sessionToolTotal > 0) {
+            bar.style.display = 'block';
+            const pct = Math.round(((sessionToolDone + sessionToolErrors) / sessionToolTotal) * 100);
+            fill.style.width = pct + '%';
+            // Цвет прогресса: зелёный если нет ошибок, жёлтый/красный если есть
+            if (sessionToolErrors > 0) {
+                fill.style.background = sessionToolErrors > sessionToolDone ? 'var(--red)' : 'var(--amber)';
+            } else {
+                fill.style.background = 'var(--green)';
+            }
+        }
+    }
+
     function clearAutoLog() {
         const container = document.getElementById('auto-log-entries');
         if (container) container.innerHTML = '';
         autoLogCount = 0;
         autoLogTotalSteps = 0;
         autoLogDone = false;
+        sessionToolTotal = 0;
+        sessionToolDone = 0;
+        sessionToolErrors = 0;
         updateAutoLogBadge();
         updateAutoLogProgress();
+        const bar = document.getElementById('auto-log-progress-bar');
+        if (bar) bar.style.display = 'none';
         const statusEl = document.getElementById('auto-log-status');
         if (statusEl) { statusEl.textContent = ''; statusEl.style.color = 'var(--text-secondary)'; }
         const label = document.getElementById('log-count-label');

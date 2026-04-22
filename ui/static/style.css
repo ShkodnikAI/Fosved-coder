@@ -1689,6 +1689,32 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
     border-top: 1px dashed rgba(78,201,176,0.2);
     margin-top: 2px;
 }
+
+/* ─── RESULT MARKERS (OK / BUG) ─── */
+.log-result-mark {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 0px 5px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    letter-spacing: 0.5px;
+}
+.mark-ok {
+    background: rgba(78,201,176,0.15);
+    color: var(--green);
+    border: 1px solid rgba(78,201,176,0.3);
+}
+.mark-bug {
+    background: rgba(244,71,71,0.15);
+    color: var(--red);
+    border: 1px solid rgba(244,71,71,0.3);
+    animation: bug-pulse 2s ease-in-out infinite;
+}
+@keyframes bug-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
 .auto-log-icon {
     flex-shrink: 0;
     font-size: 11px;
