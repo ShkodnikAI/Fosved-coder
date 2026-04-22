@@ -2356,3 +2356,115 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
     .model-card { padding: 10px 12px; }
     .bottom-bar-btn { min-height: 38px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   LOG SIDEBAR (right panel)
+   ═══════════════════════════════════════════════════════════════ */
+.log-sidebar {
+    width: 320px;
+    min-width: 200px;
+    max-width: 500px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border);
+    overflow: hidden;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.log-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: linear-gradient(135deg, rgba(78,201,176,0.08), rgba(200,169,126,0.08));
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    gap: 8px;
+}
+
+.log-sidebar-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+}
+
+.log-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s;
+    line-height: 1.2;
+}
+.log-btn:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.log-filter-bar {
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-primary);
+    flex-shrink: 0;
+}
+
+.log-filter-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s;
+}
+.log-filter-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.log-filter-btn.active {
+    background: var(--bg-tertiary);
+    border-color: var(--border);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.log-sidebar-footer {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 12px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    flex-shrink: 0;
+}
+
+/* Log entry hover */
+#auto-log-entries > div:hover {
+    background: rgba(255,255,255,0.03);
+}
+
+/* Resize handle for log sidebar (mirror of sidebar resize handle) */
+#log-resize-handle {
+    width: 5px;
+    cursor: col-resize;
+    background: transparent;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 5;
+    transition: background 0.2s;
+}
+#log-resize-handle:hover,
+#log-resize-handle.active {
+    background: var(--accent);
+}

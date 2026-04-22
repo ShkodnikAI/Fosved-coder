@@ -38,7 +38,7 @@
     <!-- HEADER -->
     <header>
         <div class="header-left">
-            <button class="btn-debug-test" id="btn-debug-test" onclick="toggleDebugMode()" title="Нажми = логирование. Ещё раз = пуш логов на GitHub">
+            <button class="btn-debug-test" id="btn-debug-test" onclick="toggleDebugMode()" title="Нажми = начать запись логов. Ещё раз = остановить и показать в панели">
                 <span class="debug-dot" id="debug-dot"></span>
                 <span id="debug-btn-label">ТЕСТ</span>
                 <span class="debug-timer" id="debug-timer"></span>
@@ -52,6 +52,7 @@
             </div>
         </div>
         <div class="header-actions">
+            <button class="btn-add" onclick="toggleLogSidebar()" title="Лог" data-hint="Показать/скрыть панель логов">📋</button>
             <button class="btn-add" onclick="showHelp()" title="Помощь" data-hint="Справка, горячие клавиши и список команд">❓</button>
             <button class="btn-add" onclick="clearChat()" title="Очистить" data-hint="Очистить историю чата текущего проекта">🗑</button>
         </div>
@@ -158,6 +159,47 @@
                 <!-- Кнопки будут рендериться динамически через renderBottomBar() -->
             </div>
         </div>
+
+        <!-- LOG SIDEBAR RESIZE HANDLE -->
+        <div class="resize-handle" id="log-resize-handle"></div>
+
+        <!-- LOG SIDEBAR (right) -->
+        <div class="log-sidebar" id="log-sidebar">
+            <div class="log-sidebar-header">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="log-sidebar-title">📋 Лог</span>
+                    <span id="auto-log-badge" style="display:none;background:var(--green);color:#000;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;">0</span>
+                    <span id="auto-log-status" style="font-size:11px;color:var(--text-secondary);"></span>
+                </div>
+                <div style="display:flex;gap:4px;">
+                    <button class="log-btn" onclick="copyAllLogs()" title="Копировать все логи">📋</button>
+                    <button class="log-btn" onclick="saveAllLogs()" title="Сохранить лог в файл">💾</button>
+                    <button class="log-btn" onclick="loadServerLogs({level:'error'})" title="Только ошибки">❌</button>
+                    <button class="log-btn" onclick="clearAutoLog();fetch('/api/v1/logs',{method:'DELETE'})" title="Очистить">🗑</button>
+                    <button class="log-btn" onclick="toggleLogSidebar()" title="Скрыть панель">✕</button>
+                </div>
+            </div>
+            <!-- Filter bar -->
+            <div class="log-filter-bar">
+                <button class="log-filter-btn active" data-filter="all" onclick="filterLogs('all',this)">Все</button>
+                <button class="log-filter-btn" data-filter="info" onclick="filterLogs('info',this)">ℹ️</button>
+                <button class="log-filter-btn" data-filter="success" onclick="filterLogs('success',this)">✅</button>
+                <button class="log-filter-btn" data-filter="warning" onclick="filterLogs('warning',this)">⚠️</button>
+                <button class="log-filter-btn" data-filter="error" onclick="filterLogs('error',this)">❌</button>
+                <button class="log-filter-btn" data-filter="debug" onclick="filterLogs('debug',this)">🔍</button>
+            </div>
+            <!-- Progress bar -->
+            <div id="auto-log-progress-bar" style="display:none;height:3px;background:var(--bg-primary);overflow:hidden;flex-shrink:0;">
+                <div id="auto-log-progress-fill" style="height:100%;background:var(--green);width:0%;transition:width 0.3s ease;border-radius:2px;"></div>
+            </div>
+            <!-- Log entries -->
+            <div id="auto-log-entries" style="flex:1;overflow-y:auto;padding:6px 0;display:flex;flex-direction:column;gap:1px;font-family:'Cascadia Code',Consolas,monospace;font-size:12px;"></div>
+            <!-- Bottom stats -->
+            <div class="log-sidebar-footer">
+                <span id="log-count-label">0 записей</span>
+                <span id="log-session-time"></span>
+            </div>
+        </div>
     </div>
 
     <!-- ═══════════ SEARCH PANEL ═══════════ -->
@@ -249,29 +291,6 @@
             <div id="file-tree" class="file-tree">
                 <div class="panel-placeholder">Загрузка дерева файлов...</div>
             </div>
-        </div>
-    </div>
-
-    <!-- ═══════════ AUTO LOG PANEL (right side) ═══════════ -->
-    <div class="slide-panel slide-panel-right" id="panel-auto-log" style="width:380px;">
-        <div class="slide-panel-header" style="background:linear-gradient(135deg, rgba(78,201,176,0.15), rgba(200,169,126,0.15));">
-            <div style="display:flex;align-items:center;gap:8px;">
-                <span class="slide-panel-title">📋 Лог выполнения</span>
-                <span id="auto-log-badge" style="display:none;background:var(--green);color:#000;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;">0</span>
-                <span id="auto-log-status" style="font-size:11px;color:var(--text-secondary);"></span>
-            </div>
-            <div style="display:flex;gap:6px;">
-                <button class="btn-small btn-outline" onclick="loadServerLogs({level:'error'})" title="Только ошибки">❌</button>
-                <button class="btn-small btn-outline" onclick="clearAutoLog();fetch('/api/v1/logs',{method:'DELETE'})" title="Очистить лог">🗑</button>
-                <button class="btn-small btn-outline" onclick="toggleAutoLogPanel()" title="Свернуть">✕</button>
-            </div>
-        </div>
-        <div class="slide-panel-body" style="padding:0;">
-            <!-- Progress bar -->
-            <div id="auto-log-progress-bar" style="display:none;height:3px;background:var(--bg-primary);overflow:hidden;flex-shrink:0;">
-                <div id="auto-log-progress-fill" style="height:100%;background:var(--green);width:0%;transition:width 0.3s ease;border-radius:2px;"></div>
-            </div>
-            <div id="auto-log-entries" style="flex:1;overflow-y:auto;padding:8px 0;display:flex;flex-direction:column;gap:1px;font-family:'Cascadia Code',Consolas,monospace;font-size:12px;"></div>
         </div>
     </div>
 
@@ -694,7 +713,7 @@
                     btn.classList.add('debug-active');
                     dot.classList.add('debug-recording');
                     label.textContent = 'СТОП';
-                    showToast('🔴 ТЕСТ: логирование включено! Делайте что угодно, потом нажмите СТОП → пуш на GitHub.', 'info', 5000);
+                    showToast('🔴 ТЕСТ: логирование включено! Делайте что угодно, потом нажмите СТОП.', 'info', 5000);
                     // Таймер записи
                     if (timer) {
                         timer.style.display = 'inline';
@@ -710,13 +729,13 @@
                 showToast('Ошибка запуска: ' + e.message, 'error');
             }
         } else {
-            // ═══ СТОП → ПУШ НА GITHUB ═══
-            await stopAndPushToGitHub();
+            // ═══ СТОП → ПОКАЗАТЬ ЛОГИ В ПАНЕЛИ ═══
+            await stopAndShowLogs();
         }
     }
 
-    // Остановка + пуш логов на GitHub
-    async function stopAndPushToGitHub() {
+    // Остановка записи и загрузка логов в правую панель
+    async function stopAndShowLogs() {
         const btn = document.getElementById('btn-debug-test');
         const label = document.getElementById('debug-btn-label');
         const dot = document.getElementById('debug-dot');
@@ -728,89 +747,57 @@
 
         if (dot) dot.classList.remove('debug-recording');
         btn.classList.remove('debug-active');
-        label.textContent = 'ПУШ...';
+        label.textContent = 'ТЕСТ';
         debugMode = false;
 
         try {
-            // Показываем модальное окно с прогрессом
-            document.getElementById('debug-modal').classList.add('active');
-            document.getElementById('debug-analyzing').style.display = 'block';
-            document.getElementById('debug-analysis-content').style.display = 'none';
-            document.getElementById('debug-raw-section').style.display = 'none';
-            document.getElementById('debug-stats-bar').innerHTML = '';
-            document.getElementById('debug-modal-title').textContent = 'Пуш логов на GitHub';
-            document.getElementById('debug-modal-icon').textContent = '🚀';
-            document.getElementById('debug-modal-badge').style.display = 'none';
-            // Меняем текст спиннера
-            document.getElementById('debug-analyzing').innerHTML =
-                '<div class="debug-spinner"></div>' +
-                '<div style="margin-top:16px;color:var(--text-secondary);font-size:14px;">Собираю логи и пушу на GitHub...</div>';
-
-            const resp = await fetch('/api/v1/debug/push-to-github', { method: 'POST' });
+            // Останавливаем debug-сессию на сервере
+            const resp = await fetch('/api/v1/debug/stop', { method: 'POST' });
             const data = await resp.json();
+            const entries = data.entries || [];
+            const clientErrors = data.client_errors || [];
 
-            document.getElementById('debug-analyzing').style.display = 'none';
-            document.getElementById('debug-analysis-content').style.display = 'block';
+            // Показываем правую панель логов
+            openAutoLogPanel();
+            toggleLogSidebar();
 
-            if (data.error) {
-                document.getElementById('debug-modal-icon').textContent = '❌';
-                document.getElementById('debug-analysis-content').textContent = 'Ошибка: ' + data.error;
-                return;
+            // Добавляем заголовок сессии
+            const container = document.getElementById('auto-log-entries');
+            if (container) {
+                const duration = data.duration_sec ? Math.round(data.duration_sec) + 'с' : '?';
+                const sep = document.createElement('div');
+                sep.style.cssText = 'padding:6px 8px;font-size:11px;color:var(--amber);font-weight:700;border-left:2px solid var(--amber);border-bottom:1px solid var(--border);margin-bottom:4px;';
+                sep.innerHTML = `═══ ТЕСТ-СЕССИЯ (${duration}) — ${entries.length} событий, ${clientErrors.length} JS ошибок ═══`;
+                container.appendChild(sep);
             }
 
-            // Показываем статистику
-            const statsBar = document.getElementById('debug-stats-bar');
-            const stats = [
-                { label: 'Длительность', value: (data.duration_sec || 0) + 'с', color: 'var(--blue)' },
-                { label: 'Событий сервер', value: data.server_entries || 0, color: 'var(--accent)' },
-                { label: 'JS ошибок', value: data.client_errors || 0, color: data.client_errors > 0 ? 'var(--red)' : 'var(--green)' },
-                { label: 'Ошибок API', value: data.errors_count || 0, color: data.errors_count > 0 ? 'var(--red)' : 'var(--green)' },
-            ];
-            statsBar.innerHTML = stats.map(s =>
-                '<div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:6px 12px;text-align:center;">' +
-                '<div style="font-size:18px;font-weight:700;color:' + s.color + ';">' + s.value + '</div>' +
-                '<div style="font-size:10px;color:var(--text-secondary);">' + s.label + '</div></div>'
-            ).join('');
+            // Загружаем записи в панель
+            for (const entry of entries) {
+                addLogEntryToPanel(entry);
+            }
 
-            const badge = document.getElementById('debug-modal-badge');
-            const pushed = data.pushed;
-            if (pushed) {
-                document.getElementById('debug-modal-icon').textContent = '✅';
-                badge.textContent = 'ЗАПУШЕНО';
-                badge.style.display = 'inline';
-                badge.style.background = 'var(--green)';
-                badge.style.color = '#000';
-                const logUrl = data.github_url || '';
-                document.getElementById('debug-analysis-content').innerHTML =
-                    'Логи успешно запушены на GitHub!\n\n' +
-                    'Файл: ' + (data.log_file || 'debug_session.md') + '\n' +
-                    (logUrl ? 'Репозиторий: ' + logUrl + '\n' : '') +
-                    '\nРазбор и исправление багов — в работе.';
-                if (logUrl) {
-                    document.getElementById('debug-raw-section').style.display = 'block';
-                    document.getElementById('debug-raw-log').textContent = logUrl;
+            // Добавляем JS ошибки
+            if (clientErrors.length > 0 && container) {
+                const sep2 = document.createElement('div');
+                sep2.style.cssText = 'padding:6px 8px;font-size:11px;color:var(--red);font-weight:700;border-left:2px solid var(--red);border-bottom:1px solid var(--border);margin:4px 0;';
+                sep2.innerHTML = `═══ JS ОШИБКИ (${clientErrors.length}) ═══`;
+                container.appendChild(sep2);
+                for (const err of clientErrors) {
+                    addLogEntryToPanel({level: 'error', source: 'js', action: err.message || err, time: err.time || ''});
                 }
-            } else {
-                document.getElementById('debug-modal-icon').textContent = '⚠️';
-                badge.textContent = 'БЕЗ GITHUB';
-                badge.style.display = 'inline';
-                badge.style.background = 'var(--amber)';
-                badge.style.color = '#000';
-                document.getElementById('debug-analysis-content').textContent =
-                    'Логи собраны, но GitHub не подключён.\n' +
-                    'Сырой лог:\n' + (data.raw_log || '(пусто)');
-                document.getElementById('debug-raw-section').style.display = 'block';
-                document.getElementById('debug-raw-log').textContent = data.raw_log || '';
             }
+
+            const totalEntries = entries.length + clientErrors.length;
+            const errorsCount = entries.filter(e => e.level === 'error').length + clientErrors.length;
+            const label2 = document.getElementById('log-count-label');
+            if (label2) label2.textContent = `${container ? container.querySelectorAll('[data-level]').length : totalEntries} записей`;
+
+            showToast(`📋 ТЕСТ завершён: ${totalEntries} записей, ${errorsCount} ошибок. Логи в панели справа →`, 'success', 5000);
 
         } catch(e) {
-            document.getElementById('debug-analyzing').style.display = 'none';
-            document.getElementById('debug-analysis-content').style.display = 'block';
-            document.getElementById('debug-analysis-content').textContent = 'Ошибка: ' + e.message;
+            showToast('Ошибка: ' + e.message, 'error');
+            label.textContent = 'ТЕСТ';
         }
-
-        // Возвращаем кнопку в исходное состояние
-        label.textContent = 'ТЕСТ';
     }
 
     function closeDebugModal() {
@@ -896,6 +883,81 @@
         handle.addEventListener("dblclick", function() {
             sidebar.style.width = "260px";
             localStorage.setItem("fosved-sidebar-width", "260px");
+        });
+    })();
+
+    // ═══════════════════════════════════════════════════════
+    // Log Sidebar Resize Handle (drag to resize right panel)
+    // ═══════════════════════════════════════════════════════
+    (function() {
+        const handle = document.getElementById("log-resize-handle");
+        const logSidebar = document.getElementById("log-sidebar");
+        if (!handle || !logSidebar) return;
+
+        let isDragging = false;
+        let startX = 0;
+        let startWidth = 0;
+
+        // Restore saved width
+        const savedWidth = localStorage.getItem("fosved-log-sidebar-width");
+        if (savedWidth) {
+            const w = parseInt(savedWidth, 10);
+            if (w >= 200 && w <= 500) logSidebar.style.width = w + "px";
+        }
+
+        handle.addEventListener("mousedown", function(e) {
+            e.preventDefault();
+            isDragging = true;
+            startX = e.clientX;
+            startWidth = logSidebar.offsetWidth;
+            handle.classList.add("active");
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mousemove", function(e) {
+            if (!isDragging) return;
+            // For right sidebar: drag LEFT = wider, drag RIGHT = narrower
+            const dx = startX - e.clientX;
+            const newWidth = Math.min(Math.max(startWidth + dx, 200), 500);
+            logSidebar.style.width = newWidth + "px";
+        });
+
+        document.addEventListener("mouseup", function() {
+            if (!isDragging) return;
+            isDragging = false;
+            handle.classList.remove("active");
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            localStorage.setItem("fosved-log-sidebar-width", logSidebar.offsetWidth + "px");
+        });
+
+        // Touch support
+        handle.addEventListener("touchstart", function(e) {
+            isDragging = true;
+            startX = e.touches[0].clientX;
+            startWidth = logSidebar.offsetWidth;
+            handle.classList.add("active");
+        }, {passive: true});
+
+        document.addEventListener("touchmove", function(e) {
+            if (!isDragging) return;
+            const dx = startX - e.touches[0].clientX;
+            const newWidth = Math.min(Math.max(startWidth + dx, 200), 500);
+            logSidebar.style.width = newWidth + "px";
+        }, {passive: true});
+
+        document.addEventListener("touchend", function() {
+            if (!isDragging) return;
+            isDragging = false;
+            handle.classList.remove("active");
+            localStorage.setItem("fosved-log-sidebar-width", logSidebar.offsetWidth + "px");
+        });
+
+        // Double-click to reset
+        handle.addEventListener("dblclick", function() {
+            logSidebar.style.width = "320px";
+            localStorage.setItem("fosved-log-sidebar-width", "320px");
         });
     })();
 
@@ -1114,6 +1176,9 @@
 
         chatBox.appendChild(div);
         chatBox.scrollTop = chatBox.scrollHeight;
+
+        // Also write to log panel
+        addLogEntryToPanel({level: type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info', source: 'auto', action: text, time: new Date().toLocaleTimeString()});
     }
 
     // ═══════════════════════════════════════════════════════
@@ -2260,7 +2325,7 @@
             buttons.push({ label: '📁 Files', action: "togglePanel('files')" });
             buttons.push({ label: '🧪 Test', action: "wsSend('/test')" });
             buttons.push({ label: '📱 APK', action: "openAPKModal()" });
-            buttons.push({ label: '📋 Лог', action: "toggleAutoLogPanel()" });
+            buttons.push({ label: '📋 Лог', action: "toggleLogSidebar()" });
 
             // GitHub проекта (если указан свой репо)
             if (p.github_repo) {
@@ -2719,8 +2784,10 @@
     // 📋 AUTO LOG PANEL
     // ═══════════════════════════════════════════════════════
     let autoLogCount = 0;
-    let autoLogPanelVisible = false;
+    let autoLogPanelVisible = true;
     let autoLogTotalSteps = 0;
+    let logSidebarVisible = true;
+    let currentLogFilter = 'all';
     let autoLogDone = false;
 
     const AUTO_LOG_ICONS = {
@@ -2762,6 +2829,7 @@
         // Create log entry element
         const entry = document.createElement('div');
         entry.className = 'auto-log-entry auto-log-' + level;
+        entry.dataset.level = level;
 
         const iconData = AUTO_LOG_ICONS[level] || AUTO_LOG_ICONS.info;
 
@@ -2776,6 +2844,11 @@
             stepBadge +
             '<span class="auto-log-text">' + escapeHtml(content) + '</span>';
 
+        // Apply current filter
+        if (currentLogFilter !== 'all' && level !== currentLogFilter) {
+            entry.style.display = 'none';
+        }
+
         const container = document.getElementById('auto-log-entries');
         if (container) {
             container.appendChild(entry);
@@ -2784,6 +2857,13 @@
 
         autoLogCount++;
         updateAutoLogBadge();
+
+        // Update count label
+        const countLabel = document.getElementById('log-count-label');
+        if (countLabel) {
+            const total = container ? container.querySelectorAll('[data-level]').length : 0;
+            countLabel.textContent = `${total} записей`;
+        }
 
         // Update progress bar if we have step info
         if (step !== undefined && total !== undefined) {
@@ -2807,26 +2887,34 @@
     }
 
     function openAutoLogPanel() {
-        const panel = document.getElementById('panel-auto-log');
-        if (!panel) return;
-        panel.classList.add('active');
-        openPanels.add('auto-log');
+        const sidebar = document.getElementById('log-sidebar');
+        const handle = document.getElementById('log-resize-handle');
+        if (!sidebar) return;
+        sidebar.style.display = 'flex';
+        if (handle) handle.style.display = 'block';
+        logSidebarVisible = true;
         autoLogPanelVisible = true;
     }
 
-    function toggleAutoLogPanel() {
-        const panel = document.getElementById('panel-auto-log');
-        if (!panel) return;
-        if (panel.classList.contains('active')) {
-            panel.classList.remove('active');
-            openPanels.delete('auto-log');
-            autoLogPanelVisible = false;
+    function toggleLogSidebar() {
+        const sidebar = document.getElementById('log-sidebar');
+        const handle = document.getElementById('log-resize-handle');
+        if (!sidebar) return;
+        logSidebarVisible = !logSidebarVisible;
+        autoLogPanelVisible = logSidebarVisible;
+        if (logSidebarVisible) {
+            sidebar.style.display = 'flex';
+            if (handle) handle.style.display = 'block';
+            const saved = localStorage.getItem('fosved-log-sidebar-width');
+            if (saved) sidebar.style.width = saved + 'px';
         } else {
-            panel.classList.add('active');
-            openPanels.add('auto-log');
-            autoLogPanelVisible = true;
+            sidebar.style.display = 'none';
+            if (handle) handle.style.display = 'none';
         }
     }
+
+    // Backward compatibility
+    function toggleAutoLogPanel() { toggleLogSidebar(); }
 
     function clearAutoLog() {
         const container = document.getElementById('auto-log-entries');
@@ -2838,6 +2926,8 @@
         updateAutoLogProgress();
         const statusEl = document.getElementById('auto-log-status');
         if (statusEl) { statusEl.textContent = ''; statusEl.style.color = 'var(--text-secondary)'; }
+        const label = document.getElementById('log-count-label');
+        if (label) label.textContent = '0 записей';
     }
 
     // ── Server-side action logs ──
@@ -2868,15 +2958,69 @@
     function addLogEntryToPanel(entry) {
         const container = document.getElementById('auto-log-entries');
         if (!container) return;
-        const el = document.createElement('div');
         const lvl = entry.level || 'info';
+        const el = document.createElement('div');
+        el.dataset.level = lvl;
         const colors = {info: 'var(--text-secondary)', success: 'var(--green)', warning: 'var(--amber)', error: 'var(--red)', debug: 'var(--text-secondary)'};
         const icons = {info: 'ℹ️', success: '✅', warning: '⚠️', error: '❌', debug: '🔍'};
         const src = entry.source ? `[${entry.source}] ` : '';
         el.style.cssText = `padding:4px 8px;font-size:11px;border-left:2px solid ${colors[lvl]};color:${colors[lvl]};opacity:0.9;`;
+        if (currentLogFilter !== 'all' && lvl !== currentLogFilter) el.style.display = 'none';
         el.innerHTML = `<span style="opacity:0.6">${entry.time || ''}</span> ${icons[lvl] || ''} ${src}${escapeHtml(entry.action || '')}${entry.error ? ' — <b>' + escapeHtml(entry.error.substring(0, 100)) + '</b>' : ''}`;
         container.appendChild(el);
         container.scrollTop = container.scrollHeight;
+        autoLogCount++;
+        updateAutoLogBadge();
+        const label = document.getElementById('log-count-label');
+        if (label) {
+            const total = container.querySelectorAll('[data-level]').length;
+            label.textContent = `${total} записей`;
+        }
+    }
+
+    function copyAllLogs() {
+        const container = document.getElementById('auto-log-entries');
+        if (!container) return;
+        const text = container.innerText;
+        if (!text.trim()) { showToast('Лог пуст', 'info'); return; }
+        navigator.clipboard.writeText(text).then(() => showToast('Лог скопирован', 'success'));
+    }
+
+    function saveAllLogs() {
+        const container = document.getElementById('auto-log-entries');
+        if (!container) return;
+        const text = container.innerText;
+        if (!text.trim()) { showToast('Лог пуст', 'info'); return; }
+        const blob = new Blob([text], {type: 'text/plain'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `fosved-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Лог сохранён', 'success');
+    }
+
+    function filterLogs(level, btn) {
+        currentLogFilter = level;
+        document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        const container = document.getElementById('auto-log-entries');
+        if (!container) return;
+        const entries = container.children;
+        let visible = 0;
+        for (const el of entries) {
+            if (level === 'all') {
+                el.style.display = '';
+                visible++;
+            } else {
+                const match = el.dataset.level === level;
+                el.style.display = match ? '' : 'none';
+                if (match) visible++;
+            }
+        }
+        const label = document.getElementById('log-count-label');
+        if (label) label.textContent = `${visible} записей`;
     }
 
     function updateAutoLogBadge() {
