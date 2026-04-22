@@ -391,6 +391,7 @@ header {
 
 .model-card-header {
     display: flex; align-items: center; gap: 8px;
+    padding-right: 28px;
 }
 
 .model-avatar {

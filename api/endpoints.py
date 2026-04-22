@@ -1771,6 +1771,105 @@ async def get_log_file(limit: int = 500):
 
 
 # ═══════════════════════════════════════════════════════════════
+# EXTENDED STATS (расширенная статистика проекта)
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/stats/extended")
+async def get_extended_stats():
+    """Расширенная статистика: модели, ошибки, файлы проекта, GitHub, APK."""
+    from core.memory import get_all_projects, CONFIG
+    import os as _os
+
+    stats = {}
+
+    # 1. Все проекты с путями
+    try:
+        projects = await get_all_projects()
+        stats["projects"] = []
+        for p in projects:
+            pinfo = {
+                "id": p.get("id"),
+                "name": p.get("name"),
+                "path": p.get("path", ""),
+                "github_repo": p.get("github_repo", ""),
+                "local_path": p.get("local_path", ""),
+                "progress": p.get("progress", 0),
+                "template": p.get("template", ""),
+                "selected_models": p.get("selected_models", "[]"),
+                "message_count": p.get("message_count", 0),
+            }
+            stats["projects"].append(pinfo)
+    except Exception:
+        stats["projects"] = []
+
+    # 2. Статистика логов
+    try:
+        log_stats = action_logger.get_stats()
+        stats["logs"] = log_stats
+    except Exception:
+        stats["logs"] = {"total": 0, "errors": 0}
+
+    # 3. Модели — статистика по ошибкам из логов
+    try:
+        model_errors = {}
+        model_success = {}
+        for entry in action_logger._entries:
+            src = entry.get("source", "")
+            lvl = entry.get("level", "")
+            action = entry.get("action", "")
+            # Извлекаем имя модели из логов агента
+            if src == "agent" and "model=" in action:
+                # Простой парсинг: ищем patterns вроде "stream_llm_response: model=xxx"
+                model_name = "unknown"
+                for kw in ["model=", "Модель:", "Ответ от", "Переключаюсь на"]:
+                    idx = action.find(kw)
+                    if idx >= 0:
+                        rest = action[idx + len(kw):].strip().split(",")[0].split(" ")[0]
+                        if rest:
+                            model_name = rest
+                            break
+                if lvl == "error":
+                    model_errors[model_name] = model_errors.get(model_name, 0) + 1
+                elif lvl in ("success", "info"):
+                    model_success[model_name] = model_success.get(model_name, 0) + 1
+
+        stats["model_stats"] = {
+            "errors": model_errors,
+            "success": model_success,
+            "worst_model": max(model_errors, key=model_errors.get) if model_errors else None,
+            "best_model": max(model_success, key=model_success.get) if model_success else None,
+        }
+    except Exception:
+        stats["model_stats"] = {"errors": {}, "success": {}, "worst_model": None, "best_model": None}
+
+    # 4. Файлы проектов — путь к APK (если есть)
+    try:
+        apk_paths = []
+        projects_dir = CONFIG.get("system", {}).get("projects_dir", "projects")
+        for root, dirs, files in _os.walk(projects_dir):
+            dirs[:] = [d for d in dirs if d not in {".git", "__pycache__", "node_modules", "venv", ".next", "build", "dist"}]
+            for f in files:
+                if f.endswith(".apk"):
+                    apk_paths.append(_os.path.join(root, f))
+        stats["apk_paths"] = apk_paths
+    except Exception:
+        stats["apk_paths"] = []
+
+    # 5. Системная информация
+    try:
+        import platform
+        stats["system"] = {
+            "os": platform.system(),
+            "python": platform.python_version(),
+            "hostname": platform.node(),
+        }
+    except Exception:
+        stats["system"] = {}
+
+    return stats
+
+
+# ═══════════════════════════════════════════════════════════════
 # DEBUG MODE API (красная кнопка ТЕСТ)
 # ═══════════════════════════════════════════════════════════════
 

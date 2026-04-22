@@ -567,13 +567,13 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 # ═══════════════════════════════════════════════════════
 
 def _get_priority_models(project: dict) -> list[str]:
-    """Extract up to 3 priority model IDs from project's selected_models."""
+    """Extract up to 10 priority model IDs from project's selected_models."""
     if not project or not project.get("selected_models"):
         return []
     try:
         models = json.loads(project["selected_models"])
         if isinstance(models, list):
-            return models[:3]
+            return models[:10]
     except (json.JSONDecodeError, TypeError):
         pass
     return []

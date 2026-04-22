@@ -1805,8 +1805,8 @@
             showToast(`Модель убрана из приоритета`, "info");
         } else {
             // Добавляем в конец приоритета
-            if (priorityModels.length >= 5) {
-                showToast("Максимум 5 приоритетных моделей", "error");
+            if (priorityModels.length >= 10) {
+                showToast("Максимум 10 приоритетных моделей", "error");
                 return;
             }
             priorityModels.push(modelId);
@@ -2306,6 +2306,8 @@
             { label: '🛠 Terminal', action: "insertCommand('/terminal ')" },
             { label: '⚡ PowerShell', action: "runTerminalCommand('powershell')" },
             { label: '🔗 GitHub', action: "window.open('https://github.com/ShkodnikAI/Fosved-coder','_blank')" },
+            { label: '📋 Лог', action: "toggleLogSidebar()" },
+            { label: '📊 Стат', action: "showStats()" },
         ];
 
         if (p) {
@@ -2331,7 +2333,6 @@
             buttons.push({ label: '📁 Files', action: "togglePanel('files')" });
             buttons.push({ label: '🧪 Test', action: "wsSend('/test')" });
             buttons.push({ label: '📱 APK', action: "openAPKModal()" });
-            buttons.push({ label: '📋 Лог', action: "toggleLogSidebar()" });
 
             // GitHub проекта (если указан свой репо)
             if (p.github_repo) {
@@ -2672,22 +2673,93 @@
     // ═══════════════════════════════════════════════════════
     async function showStats() {
         try {
-            const resp = await fetch("/api/v1/stats"); const stats = await resp.json();
-            const html = `<div class="stats-grid">
-                <div class="stat-card"><div class="stat-value">${stats.projects_count}</div><div class="stat-label">Проекты</div></div>
-                <div class="stat-card"><div class="stat-value">${stats.ideas_count}</div><div class="stat-label">Идеи</div></div>
-                <div class="stat-card"><div class="stat-value">${stats.messages_count}</div><div class="stat-label">Сообщений</div></div>
-                <div class="stat-card"><div class="stat-value">${stats.routing_decisions}</div><div class="stat-label">Роутингов</div></div>
-            </div>`;
-            openGenericModal("Статистика", html);
-        } catch(e) { openGenericModal("Ошибка", "Не удалось загрузить статистику."); }
+            const resp = await fetch("/api/v1/stats/extended");
+            const stats = await resp.json();
+
+            // Проекты
+            let projectsHtml = '<div style="margin-bottom:12px;">';
+            if (stats.projects && stats.projects.length > 0) {
+                projectsHtml += '<h4 style="margin:0 0 8px;color:var(--accent);">Проекты</h4>';
+                for (const p of stats.projects) {
+                    const repoLink = p.github_repo ? ` <a href="${escapeHtml(p.github_repo)}" target="_blank" style="color:var(--blue);">GitHub</a>` : '';
+                    const pathInfo = p.path ? `<br><span style="color:var(--text-secondary);font-size:11px;">${escapeHtml(p.path)}</span>` : '';
+                    const localInfo = p.local_path ? `<br><span style="color:var(--text-secondary);font-size:11px;">Local: ${escapeHtml(p.local_path)}</span>` : '';
+                    const progressBar = p.progress > 0 ? `<div style="margin-top:4px;height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;max-width:120px;"><div style="height:100%;background:var(--green);width:${Math.min(p.progress,100)}%;border-radius:2px;"></div></div><span style="font-size:10px;color:var(--text-secondary);">${p.progress}%</span>` : '';
+                    const msgs = p.message_count ? `<span style="font-size:10px;color:var(--text-secondary);margin-left:8px;">${p.message_count} msg</span>` : '';
+                    projectsHtml += `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
+                        <b>${escapeHtml(p.name)}</b>${repoLink}${msgs}${progressBar}${pathInfo}${localInfo}
+                    </div>`;
+                }
+            } else {
+                projectsHtml += '<span style="color:var(--text-secondary);">Нет проектов</span>';
+            }
+            projectsHtml += '</div>';
+
+            // Логи
+            let logsHtml = '<div style="margin-bottom:12px;">';
+            if (stats.logs) {
+                logsHtml += `<h4 style="margin:0 0 8px;color:var(--accent);">Логи</h4>`;
+                logsHtml += `<div class="stats-grid">
+                    <div class="stat-card"><div class="stat-value">${stats.logs.total || 0}</div><div class="stat-label">Записей</div></div>
+                    <div class="stat-card"><div class="stat-value" style="color:var(--red);">${stats.logs.errors || 0}</div><div class="stat-label">Ошибок</div></div>
+                    <div class="stat-card"><div class="stat-value">${stats.logs.file_size_mb || 0}MB</div><div class="stat-label">Файл логов</div></div>
+                </div>`;
+                if (stats.logs.by_source) {
+                    const sources = Object.entries(stats.logs.by_source).sort((a,b)=>b[1]-a[1]).slice(0,6);
+                    if (sources.length) {
+                        logsHtml += '<div style="font-size:11px;color:var(--text-secondary);margin-top:6px;">';
+                        for (const [src, cnt] of sources) logsHtml += `<span style="margin-right:10px;">${escapeHtml(src)}: ${cnt}</span>`;
+                        logsHtml += '</div>';
+                    }
+                }
+            }
+            logsHtml += '</div>';
+
+            // Модели
+            let modelsHtml = '<div style="margin-bottom:12px;">';
+            if (stats.model_stats) {
+                const ms = stats.model_stats;
+                modelsHtml += '<h4 style="margin:0 0 8px;color:var(--accent);">Модели</h4>';
+                if (ms.worst_model) modelsHtml += `<div style="color:var(--red);font-size:12px;">Худшая: <b>${escapeHtml(ms.worst_model)}</b> (${ms.errors[ms.worst_model]} ошибок)</div>`;
+                if (ms.best_model) modelsHtml += `<div style="color:var(--green);font-size:12px;">Лучшая: <b>${escapeHtml(ms.best_model)}</b> (${ms.success[ms.best_model]} успехов)</div>`;
+                if (Object.keys(ms.errors).length > 0) {
+                    modelsHtml += '<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">Ошибки по моделям: ';
+                    for (const [m, c] of Object.entries(ms.errors).sort((a,b)=>b[1]-a[1])) {
+                        modelsHtml += `<span style="margin-right:8px;">${escapeHtml(m)}: ${c}</span>`;
+                    }
+                    modelsHtml += '</div>';
+                }
+            }
+            modelsHtml += '</div>';
+
+            // APK
+            let apkHtml = '';
+            if (stats.apk_paths && stats.apk_paths.length > 0) {
+                apkHtml = '<div style="margin-bottom:12px;"><h4 style="margin:0 0 8px;color:var(--accent);">APK файлы</h4>';
+                for (const p of stats.apk_paths) {
+                    apkHtml += `<div style="font-size:12px;color:var(--blue);word-break:break-all;">${escapeHtml(p)}</div>`;
+                }
+                apkHtml += '</div>';
+            }
+
+            // Система
+            let sysHtml = '';
+            if (stats.system) {
+                sysHtml = `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">
+                    OS: ${stats.system.os || '?'} | Python: ${stats.system.python || '?'} | Host: ${escapeHtml(stats.system.hostname || '?')}
+                </div>`;
+            }
+
+            const html = projectsHtml + logsHtml + modelsHtml + apkHtml + sysHtml;
+            openGenericModal("Расширенная статистика", html);
+        } catch(e) { openGenericModal("Ошибка", "Не удалось загрузить статистику: " + e.message); }
     }
 
     function showHelp() {
         openGenericModal("Помощь — Fosved Coder", `
             <h3>Приоритетные модели ⚡</h3>
             <ul>
-                <li>Нажмите <span style="color:var(--amber)">⚡</span> в сайдбаре — настроить до 3 моделей</li>
+                <li>Нажмите <span style="color:var(--amber)">⊙</span> на карточке модели — назначить приоритет (до 10 моделей)</li>
                 <li><span style="color:var(--amber)">1 — Основная</span> — для сложных задач</li>
                 <li><span style="color:var(--amber)">2 — Резервная</span> — если основная недоступна</li>
                 <li><span style="color:var(--amber)">3 — Фоллбэк</span> — последняя надежда</li>
@@ -2964,15 +3036,17 @@
     function addLogEntryToPanel(entry) {
         const container = document.getElementById('auto-log-entries');
         if (!container) return;
+        // Автооткрытие панели если скрыта
+        if (!autoLogPanelVisible) openAutoLogPanel();
         const lvl = entry.level || 'info';
         const el = document.createElement('div');
         el.dataset.level = lvl;
-        const colors = {info: 'var(--text-secondary)', success: 'var(--green)', warning: 'var(--amber)', error: 'var(--red)', debug: 'var(--text-secondary)'};
-        const icons = {info: 'ℹ️', success: '✅', warning: '⚠️', error: '❌', debug: '🔍'};
+        const colors = {info: 'var(--text-secondary)', success: 'var(--green)', warning: 'var(--amber)', error: 'var(--red)', debug: 'var(--text-secondary)', file: '#569cd6', command: 'var(--blue)'};
+        const icons = {info: 'ℹ️', success: '✅', warning: '⚠️', error: '❌', debug: '🔍', file: '📄', command: '⚡'};
         const src = entry.source ? `[${entry.source}] ` : '';
-        el.style.cssText = `padding:4px 8px;font-size:11px;border-left:2px solid ${colors[lvl]};color:${colors[lvl]};opacity:0.9;`;
+        el.style.cssText = `padding:4px 8px;font-size:11px;border-left:2px solid ${colors[lvl] || colors.info};color:${colors[lvl] || colors.info};opacity:0.9;`;
         if (currentLogFilter !== 'all' && lvl !== currentLogFilter) el.style.display = 'none';
-        el.innerHTML = `<span style="opacity:0.6">${entry.time || ''}</span> ${icons[lvl] || ''} ${src}${escapeHtml(entry.action || '')}${entry.error ? ' — <b>' + escapeHtml(entry.error.substring(0, 100)) + '</b>' : ''}`;
+        el.innerHTML = `<span style="opacity:0.6">${entry.time || ''}</span> ${icons[lvl] || icons.info} ${src}${escapeHtml(entry.action || '')}${entry.error ? ' — <b>' + escapeHtml(entry.error.substring(0, 100)) + '</b>' : ''}`;
         container.appendChild(el);
         container.scrollTop = container.scrollHeight;
         autoLogCount++;
