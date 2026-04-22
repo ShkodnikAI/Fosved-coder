@@ -83,7 +83,6 @@
                             <div class="active-dot"></div>
                             <span id="active-model-name"></span>
                         </div>
-                        <button class="btn-add" onclick="showPriorityModal()" title="Приоритетные модели" data-hint="Настройте приоритетные модели для проекта — система автоматически выберет оптимальную" style="font-size:11px; background:var(--amber); color:#000;">⚡</button>
                         <button class="btn-add" onclick="refreshModels()" title="Обновить" data-hint="Обновить список моделей и перепроверить API ключи" style="font-size:12px">↻</button>
                     </div>
                 </div>
@@ -1066,9 +1065,8 @@
             } else if (data.type === "error") {
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 setWaitingAI(false);
-                addMessage("error", data.content);
+                // Only route to log panel — no duplicate chat message or toast
                 addLogEntryToPanel({level: 'error', source: 'ws', action: data.content, time: new Date().toLocaleTimeString()});
-                showToast(data.content, "error");
                 currentAiDiv = null; currentAiText = "";
             } else if (data.type === "system") {
                 addMessage("system", data.content);
@@ -1103,7 +1101,6 @@
                 autoModeRunning = false;
                 addAutoStepMessage(data.content, "error", true);
                 setWaitingAI(false);
-                showToast(data.content, "error");
             } else if (data.type === "idea_result") {
                 addMessage("idea", data.content);
             } else if (data.type === "auto_log") {
@@ -1871,91 +1868,8 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    // PRIORITY MODELS MODAL
+    // PRIORITY MODELS MODAL — removed (models selected via click on cards)
     // ═══════════════════════════════════════════════════════
-    function showPriorityModal() {
-        const available = allModels.filter(m => 
-            (m.status === 'valid' || m.status === 'rate_limited' || m.status === 'available' || m._canSelect)
-        );
-        if (!available.length) { openGenericModal("Приоритетные модели", '<div class="key-error">Нет доступных моделей. Настройте API ключи.</div>'); return; }
-
-        const slotLabels = ['Основная', 'Резервная', 'Фоллбэк'];
-        let html = '<div class="priority-modal-desc">Выберите до 3 приоритетных моделей. Если основная недоступна — автоматически переключится на резервную.</div>';
-
-        for (let i = 0; i < 3; i++) {
-            const selected = priorityModels[i] || '';
-            const m = allModels.find(x => x.id === selected);
-            html += `<div class="priority-slot">
-                <div class="priority-slot-header">
-                    <span class="priority-slot-num">${i+1}</span>
-                    <span class="priority-slot-label">${slotLabels[i]}</span>
-                    ${m ? `<span class="priority-slot-current">${escapeHtml(m.name)}</span>` : '<span class="priority-slot-empty">не выбрана</span>'}
-                </div>
-                <select id="priority-slot-${i}" class="priority-select" onchange="updatePriorityFromSelects()">
-                    <option value="">— не выбрано —</option>`;
-            available.forEach(am => {
-                const isUsed = priorityModels.includes(am.id) && priorityModels.indexOf(am.id) !== i;
-                html += `<option value="${am.id}" ${am.id === selected ? 'selected' : ''} ${isUsed ? 'disabled' : ''}>${escapeHtml(am.name)} (${escapeHtml(am.provider_name)})</option>`;
-            });
-            html += '</select></div>';
-        }
-
-        html += '<div style="display:flex; gap:8px; margin-top:16px;">' +
-            '<button class="btn-small btn-outline" onclick="closeGenericModal()" style="flex:1">Отмена</button>' +
-            '<button class="btn-small" onclick="savePriorityModels()" style="flex:1">Сохранить</button>' +
-            '</div>';
-
-        openGenericModal('⚡ Приоритетные модели', html);
-    }
-
-    function updatePriorityFromSelects() {
-        for (let i = 0; i < 3; i++) {
-            const sel = document.getElementById(`priority-slot-${i}`);
-            if (!sel) continue;
-            document.querySelectorAll('.priority-select').forEach(s => {
-                Array.from(s.options).forEach(opt => { opt.disabled = false; });
-            });
-            document.querySelectorAll('.priority-select').forEach(s => {
-                if (s.id !== sel.id && s.value) {
-                    document.querySelectorAll('.priority-select').forEach(s2 => {
-                        if (s2.id !== s.id) {
-                            const opt = s2.querySelector(`option[value="${s.value}"]`);
-                            if (opt) opt.disabled = true;
-                        }
-                    });
-                }
-            });
-        }
-    }
-
-    async function savePriorityModels() {
-        const models = [];
-        for (let i = 0; i < 3; i++) {
-            const sel = document.getElementById(`priority-slot-${i}`);
-            if (sel && sel.value) models.push(sel.value);
-        }
-        priorityModels = models;
-        closeGenericModal();
-
-        if (currentProjectId) {
-            try {
-                await fetch('/api/v1/projects/models', {
-                    method: 'PUT', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ project_id: currentProjectId, model_ids: models })
-                });
-                showToast(`Приоритетные модели сохранены (${models.length}/3)`, "success");
-            } catch(e) { showToast("Ошибка сохранения моделей", "error"); }
-        } else {
-            showToast(`Приоритетные модели выбраны (${models.length}/3)`, "info");
-        }
-
-        if (models.length && !activeModelId) {
-            selectModel(models[0]);
-        }
-
-        renderModels();
-        renderProjectModels();
-    }
 
     // ═══════════════════════════════════════════════════════
     // PROJECTS
