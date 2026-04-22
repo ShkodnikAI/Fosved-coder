@@ -1574,8 +1574,11 @@
         else if (m.status === 'rate_limited') cardCls += ' card-warning';
         else if (m.status === 'invalid') cardCls += ' card-error';
 
-        // Priority badge
-        const priorityHtml = priorityIdx >= 0 ? `<span class="priority-badge" style="position:absolute;top:6px;right:6px;width:14px;height:14px;font-size:9px;">${priorityIdx + 1}</span>` : '';
+        // Priority badge — visible circle with number OR empty slot for right-click
+        const hasPriority = priorityIdx >= 0;
+        const priorityBadge = hasPriority
+            ? `<div class="model-priority-toggle priority-set" onclick="event.stopPropagation();toggleModelPriority('${m.id}')" title="Приоритет #${priorityIdx+1} — кликните чтобы убрать">${priorityIdx + 1}</div>`
+            : `<div class="model-priority-toggle" onclick="event.stopPropagation();toggleModelPriority('${m.id}')" title="Правый клик или нажмите для назначения приоритета"></div>`;
 
         // Provider subtitle + category
         let sub = m.provider_name ? escapeHtml(m.provider_name) : '';
@@ -1590,7 +1593,7 @@
         // Thinking indicator in footer
         const thinkingTag = isThinking ? '<span class="model-tag tag-thinking">Thinking</span>' : '';
 
-        return `<div class="${cardCls}" data-id="${m.id}" onclick="selectModel('${m.id}')" style="position:relative;">
+        return `<div class="${cardCls}" data-id="${m.id}" onclick="selectModel('${m.id}')" oncontextmenu="event.preventDefault();toggleModelPriority('${m.id}')" style="position:relative;">
             <div class="model-card-header">
                 <div class="model-avatar" style="background:${avatarColor};color:#fff;">${initials}</div>
                 <div class="model-card-info">
@@ -1604,7 +1607,7 @@
                 ${thinkingTag}
                 ${actionLink}
             </div>
-            ${priorityHtml}
+            ${priorityBadge}
         </div>`;
     }
 
@@ -1713,13 +1716,42 @@
         container.innerHTML = "";
         priorityModels.forEach((mid, idx) => {
             const m = allModels.find(x => x.id === mid);
-            if (!m) return;
+            const label = m ? (m.name.length > 16 ? m.name.substring(0,14) + '...' : m.name) : mid;
             const chip = document.createElement("div");
             chip.className = "priority-chip";
-            chip.innerHTML = `<span class="priority-chip-num">${idx+1}</span>${escapeHtml(m.name)}`;
-            chip.onclick = () => selectModel(mid);
+            chip.innerHTML = `<span style="font-weight:700;">${idx+1}.</span> ${escapeHtml(label)} <span class="priority-chip-remove" onclick="event.stopPropagation();toggleModelPriority('${mid}')">&times;</span>`;
+            chip.title = `Приоритет #${idx+1}: ${m ? m.name : mid}\nКликните × чтобы убрать`;
             container.appendChild(chip);
         });
+    }
+
+    // Галочка приоритета — правый клик или клик на кружок на карточке модели
+    function toggleModelPriority(modelId) {
+        const idx = priorityModels.indexOf(modelId);
+        if (idx >= 0) {
+            // Убираем из приоритета
+            priorityModels.splice(idx, 1);
+            showToast(`Модель убрана из приоритета`, "info");
+        } else {
+            // Добавляем в конец приоритета
+            if (priorityModels.length >= 5) {
+                showToast("Максимум 5 приоритетных моделей", "error");
+                return;
+            }
+            priorityModels.push(modelId);
+            const m = allModels.find(x => x.id === modelId);
+            const name = m ? m.name : modelId;
+            showToast(`⚡ Приоритет #${priorityModels.length}: ${name}`, "success");
+        }
+        renderModels();
+        renderPriorityBar();
+        // Авто-сохранение в проект
+        if (currentProjectId) {
+            fetch('/api/v1/projects/models', {
+                method: 'PUT', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ project_id: currentProjectId, model_ids: priorityModels })
+            }).catch(() => {});
+        }
     }
 
     function selectModel(modelId) {
