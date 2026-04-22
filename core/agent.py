@@ -1,4 +1,6 @@
 import os
+import sys
+import platform
 import time
 import glob as glob_mod
 import litellm
@@ -9,6 +11,28 @@ from core.context_compressor import ContextCompressor
 from core.action_logger import get_logger
 
 litellm.suppress_debug_info = True
+
+
+def get_platform_info() -> str:
+    """Определить платформу и доступный shell для инструкций AI."""
+    system = platform.system().lower()
+    if system == "windows":
+        return ("СЕРВЕР: Windows. Shell: PowerShell (или cmd).\n"
+                "- Используй PowerShell-синтаксис для файловых операций\n"
+                "- Используй пути с обратными слешами или прямыми: C:\\Projects\\...\n"
+                "- Пакетные менеджеры: npm, pip, python, git")
+    elif system == "linux":
+        return ("СЕРВЕР: Linux. Shell: bash.\n"
+                "- НЕ используй PowerShell команды (powershell, Get-Content, etc.) — они не работают!\n"
+                "- Используй bash: cat, ls, grep, find, sed, awk\n"
+                "- Пути: /home/user/project/...\n"
+                "- Пакетные менеджеры: npm, pip3, python3, git")
+    elif system == "darwin":
+        return ("СЕРВЕР: macOS. Shell: zsh.\n"
+                "- Используй bash/zsh синтаксис\n"
+                "- Пути: /Users/user/project/...\n"
+                "- Пакетные менеджеры: npm, pip3, python3, brew, git")
+    return "СЕРВЕР: неизвестная ОС. Используй стандартные bash-команды."
 logger = get_logger()
 
 # ═══════════════════════════════════════════════════════
@@ -150,6 +174,8 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 - execute_command(command) — выполнить shell-команду (git, npm, pip, python и т.д.)
 - git_commit_push(message) — закоммитить и запушить на GitHub
 
+{platform_info}
+
 Правила:
 - ИСПОЛЬЗУЙ ИНСТРУМЕНТЫ для работы с файлами — читай, создавай, редактируй файлы через tools
 - НЕ проси пользователя скопировать код — пиши прямо в файлы через write_file
@@ -271,6 +297,10 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             command = arguments.get("command", "")
             if not command.strip():
                 return "Ошибка: пустая команда"
+            # Проверяем cwd для git и других команд, требующих директорию
+            exec_cwd = project_path
+            if not exec_cwd and any(cmd in command.lower() for cmd in ["git ", "git\n", "npm ", "pip ", "python "]):
+                return f"Ошибка: нет пути к проекту (project_path is None). Команда '{command[:50]}' требует рабочую директорию. Откройте проект перед выполнением."
             logger.log(f"tool: execute_command '{command[:100]}'", level="info", source="agent")
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
             result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=60)
@@ -358,7 +388,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     if model is None:
         model = CONFIG["llm"].get("default_model")
     if system_prompt is None:
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="", project_context="", compressed_context="")
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(repo_map="", ideas_context="", project_context="", compressed_context="", platform_info=get_platform_info())
 
     model, api_key, api_base, is_thinking = _resolve_model(model)
 
@@ -599,6 +629,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         ideas_context="",
         project_context=project_context_text,
         compressed_context="",
+        platform_info=get_platform_info(),
     )
     if compressed_context_text:
         system_prompt = compressor.build_compressed_system_prompt(system_prompt, compressed_context_text)

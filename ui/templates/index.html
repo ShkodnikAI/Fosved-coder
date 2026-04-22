@@ -118,6 +118,7 @@
                 <div class="color-legend-item"><span class="color-legend-dot" style="background:#C8A97E;"></span>Платные</div>
                 <div class="color-legend-item"><span class="color-legend-dot" style="background:#f0a030;"></span>Abacus.AI</div>
                 <div class="color-legend-item"><span class="color-legend-dot" style="background:#e06070;"></span>Локальные</div>
+                <div class="color-legend-item"><span class="color-legend-dot" style="background:var(--blue);"></span>Бесплатные</div>
                 <div class="color-legend-item"><span class="color-legend-dot" style="background:#569cd6;"></span>Кастомные</div>
             </div>
         </div>
@@ -1542,7 +1543,7 @@
         if (m.status === 'rate_limited') return '<span class="model-status-badge badge-warn">LIMIT</span>';
         if (m.status === 'invalid') return '<span class="model-status-badge badge-error">ERR</span>';
         if (m.status === 'available') return '<span class="model-status-badge badge-ok">OK</span>';
-        if (m.status === 'no_key') return '<span class="model-status-badge badge-none">NO KEY</span>';
+        if (m.status === 'no_key') return '<span class="model-status-badge badge-none">🔑 KEY</span>';
         return '<span class="model-status-badge badge-none">—</span>';
     }
 

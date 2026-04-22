@@ -18,7 +18,7 @@ import re
 import os
 import asyncio
 from datetime import datetime, timezone
-from core.agent import stream_llm_response, _get_priority_models
+from core.agent import stream_llm_response, _get_priority_models, get_platform_info
 from core.memory import get_project, get_history, save_message, CONFIG
 from core.executor import CommandExecutor
 from core.action_logger import get_logger
@@ -71,6 +71,8 @@ AUTO_PLAN_PROMPT = """Ты автоматический агент разраб�
   ]
 }}
 
+{platform_info}
+
 Правила:
 - Каждый шаг должен быть максимально конкретным и атомарным
 - Создавай полные файлы целиком, а не фрагменты
@@ -119,6 +121,7 @@ async def generate_plan(prompt: str, project_id, repo_map: str | None, websocket
     system_prompt = AUTO_PLAN_PROMPT.format(
         project_context=project_context,
         repo_map=repo_map_text,
+        platform_info=get_platform_info(),
     )
 
     # Ask AI for plan
