@@ -1072,10 +1072,15 @@
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 setWaitingAI(false);
                 addMessage("error", data.content);
+                addLogEntryToPanel({level: 'error', source: 'ws', action: data.content, time: new Date().toLocaleTimeString()});
                 showToast(data.content, "error");
                 currentAiDiv = null; currentAiText = "";
             } else if (data.type === "system") {
                 addMessage("system", data.content);
+                // Короткие системные сообщения тоже в лог
+                if (data.content && data.content.length < 200) {
+                    addLogEntryToPanel({level: 'info', source: 'system', action: data.content, time: new Date().toLocaleTimeString()});
+                }
             } else if (data.type === "typing") {
                 // Show typing indicator with model name
                 setWaitingAI(true);
@@ -1090,6 +1095,7 @@
                 chatBox.scrollTop = chatBox.scrollHeight;
             } else if (data.type === "command_result") {
                 addMessage("terminal", data.content);
+                addLogEntryToPanel({level: 'info', source: 'terminal', action: data.content.substring(0, 300), time: new Date().toLocaleTimeString()});
             } else if (data.type === "auto_step") {
                 autoModeRunning = true;
                 addAutoStepMessage(data.content || "Авто-шаг выполнен", "step");

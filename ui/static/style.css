@@ -1675,6 +1675,19 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
 .auto-log-entry.auto-log-file {
     color: var(--blue);
 }
+.auto-log-entry.auto-log-command {
+    color: var(--text-primary);
+    background: rgba(100,149,237,0.04);
+    border-left: 2px solid var(--blue);
+}
+.auto-log-entry.auto-log-info {
+    color: var(--text-primary);
+}
+.auto-log-entry.auto-log-done {
+    color: var(--green);
+    border-top: 1px dashed rgba(78,201,176,0.2);
+    margin-top: 2px;
+}
 .auto-log-icon {
     flex-shrink: 0;
     font-size: 11px;

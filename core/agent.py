@@ -5,6 +5,7 @@ import time
 import glob as glob_mod
 import litellm
 import json
+from datetime import datetime, timezone
 from core.memory import CONFIG, save_message, get_history, get_project
 from core.keys_manager import keys_manager
 from core.context_compressor import ContextCompressor
@@ -34,6 +35,24 @@ def get_platform_info() -> str:
                 "- Пакетные менеджеры: npm, pip3, python3, brew, git")
     return "СЕРВЕР: неизвестная ОС. Используй стандартные bash-команды."
 logger = get_logger()
+
+
+def _now():
+    """Current UTC time as HH:MM:SS string."""
+    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+
+async def _send_log(websocket, content: str, level: str = "info"):
+    """Send auto_log message to frontend log panel."""
+    try:
+        await websocket.send_json({
+            "type": "auto_log",
+            "content": content,
+            "level": level,
+            "time": _now(),
+        })
+    except Exception:
+        pass
 
 # ═══════════════════════════════════════════════════════
 # TOOL DEFINITIONS для litellm function calling
@@ -211,6 +230,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 content = content[:30000] + "\n\n... (файл обрезан, всего " + str(len(content)) + " символов)"
             logger.log(f"tool: read_file {path}", level="info", source="agent")
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": path}, "status": "done"})
+            await _send_log(websocket, f"📖 Читаю: {path} ({len(content)} симв.)", "info")
             return content
 
         elif name == "write_file":
@@ -227,6 +247,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 f.write(content)
             logger.log(f"tool: write_file {path} ({len(content)} chars)", level="info", source="agent")
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": path, "size": len(content)}, "status": "done"})
+            await _send_log(websocket, f"💾 Записываю: {path} ({len(content)} симв.)", "file")
             return f"Файл {path} сохранён ({len(content)} символов)"
 
         elif name == "list_files":
@@ -256,6 +277,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             result = "\n".join(entries) if entries else "(пустая директория)"
             logger.log(f"tool: list_files {rel_path} ({len(entries)} entries)", level="info", source="agent")
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": rel_path}, "status": "done"})
+            await _send_log(websocket, f"📁 Список файлов: {rel_path} ({len(entries)} элементов)", "info")
             return result
 
         elif name == "search_files":
@@ -291,6 +313,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 result = f"Найдено {len(results)} совпадений:\n" + "\n".join(results[:30])
             logger.log(f"tool: search_files '{pattern}' -> {len(results)} results", level="info", source="agent")
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"pattern": pattern}, "status": "done"})
+            await _send_log(websocket, f"🔍 Поиск '{pattern}': {len(results)} совпадений", "info")
             return result
 
         elif name == "execute_command":
@@ -303,6 +326,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 return f"Ошибка: нет пути к проекту (project_path is None). Команда '{command[:50]}' требует рабочую директорию. Откройте проект перед выполнением."
             logger.log(f"tool: execute_command '{command[:100]}'", level="info", source="agent")
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
+            await _send_log(websocket, f"⚡ Выполняю: $ {command[:120]}", "command")
             result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=60)
             output = ""
             if result.get("stdout"):
@@ -314,6 +338,12 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             exit_code = result.get("exit_code", -1)
             status = "OK" if exit_code == 0 else f"exit code {exit_code}"
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"command": command}, "status": "done", "exit_code": exit_code})
+            log_level = "success" if exit_code == 0 else "error"
+            log_text = f"Команда завершена ({status})" if exit_code == 0 else f"Команда: {status}"
+            if output:
+                preview = output.strip().split('\n')[0][:100]
+                log_text += f" → {preview}"
+            await _send_log(websocket, log_text, log_level)
             return f"[{status}]\n{output}"
 
         elif name == "git_commit_push":
@@ -322,6 +352,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 return "Ошибка: нет пути к проекту"
             logger.log(f"tool: git_commit_push '{message}'", level="info", source="agent")
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"message": message}, "status": "running"})
+            await _send_log(websocket, f"🚀 Git commit: {message}", "command")
             # Stage all
             r1 = await executor.execute("git add -A", cwd=project_path, need_approval=False)
             # Commit
@@ -332,6 +363,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             r3 = await executor.execute("git push", cwd=project_path, need_approval=False, timeout=30)
             push_out = r3.get("stdout", "") + r3.get("stderr", "")
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"message": message}, "status": "done"})
+            await _send_log(websocket, f"🚀 Push: {push_out.strip()[:100]}", "success")
             return f"Commit: {commit_out.strip()}\nPush: {push_out.strip()}"
 
         else:
@@ -340,6 +372,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
     except Exception as e:
         logger.log(f"tool_error: {name} -> {str(e)[:200]}", level="error", source="agent")
         await websocket.send_json({"type": "tool_call", "tool": name, "status": "error", "error": str(e)[:200]})
+        await _send_log(websocket, f"❌ Ошибка {name}: {str(e)[:150]}", "error")
         return f"Ошибка выполнения {name}: {str(e)[:500]}"
 
 
@@ -395,9 +428,11 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     if not api_key:
         logger.log(f"no_api_key: {model}", level="error", source="agent")
         await websocket.send_json({"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках."})
+        await _send_log(websocket, f"❌ Нет API ключа для {model}", "error")
         return None
 
     print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, thinking={is_thinking}, project={project_path}")
+    await _send_log(websocket, f"🧠 Модель: {model}", "info")
 
     # Extended Thinking: уведомить клиента и настроить параметры
     if is_thinking:
@@ -500,6 +535,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             duration = (time.time() - start_time) * 1000
             tokens = len(full_response) // 4
             logger.ai_response(model=model, tokens=tokens, success=True, duration_ms=duration)
+            await _send_log(websocket, f"✅ Ответ от {model}: {len(full_response)} симв., {(duration/1000):.1f}с", "success")
             return full_response
 
         except Exception as e:
@@ -517,10 +553,12 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                 error_msg = f"Ошибка ИИ: {error_msg}"
             logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
             await websocket.send_json({"type": "error", "content": error_msg})
+            await _send_log(websocket, f"❌ {model}: {error_msg}", "error")
             return None
 
     # Max iterations reached
     await websocket.send_json({"type": "done"})
+    await _send_log(websocket, f"⚠️ Достигнут лимит {max_tool_iterations} итераций tool calling", "warning")
     return full_response
 
 
@@ -657,6 +695,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     if not models_to_try:
         await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
+        await _send_log(websocket, "❌ Нет доступных моделей", "error")
         return
 
     # Try each model
@@ -681,6 +720,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             m_info = next((m for m in all_models if m["id"] == model_to_try), None)
             model_name = m_info["name"] if m_info else model_to_try
             await websocket.send_json({"type": "info", "content": f"Переключаюсь на {model_name} (попытка {i+1})..."})
+            await _send_log(websocket, f"🔄 Переключаюсь на {model_name} (попытка {i+1})", "warning")
 
         ai_response = await stream_llm_response(
             prompt, history, websocket,
@@ -694,5 +734,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         await save_message(project_id, "ai", ai_response)
     elif tried_count == 0:
         await websocket.send_json({"type": "error", "content": "Нет модели с API ключом."})
+        await _send_log(websocket, "❌ Нет модели с API ключом", "error")
     else:
         await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили."})
+        await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
