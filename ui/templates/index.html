@@ -1674,16 +1674,27 @@
             otherPaid.forEach(m => { html += buildModelCard(m, 'paid'); });
         }
 
-        // ═══ 2. ЛОКАЛЬНЫЕ И КАСТОМНЫЕ ═══
+        // ═══ 2. БЕСПЛАТНЫЕ (через OpenRouter :free) ═══
+        const freeModels = allModels.filter(m => m.type === 'free');
+        if (freeModels.length) {
+            const hasORKey = allModels.some(m => m.provider === 'openrouter' && (m.status === 'valid' || m.status === 'rate_limited'));
+            html += '<div class="model-section-label" style="color:var(--green);">🆓 БЕСПЛАТНЫЕ (OpenRouter)</div>';
+            if (!hasORKey) {
+                html += '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0 6px 4px;">Нужен ключ OpenRouter — нажмите 🔑 ниже</div>';
+            }
+            freeModels.forEach(m => { html += buildModelCard(m, 'free'); });
+        }
+
+        // ═══ 3. ЛОКАЛЬНЫЕ И КАСТОМНЫЕ ═══
         const localOrCustom = local.concat(custom);
         if (localOrCustom.length) {
-            html += '<div class="model-section-label" style="color:#e06070;">ЛОКАЛЬНЫЕ И КАСТОМНЫЕ</div>';
+            html += '<div class="model-section-label" style="color:#e06070;">LOCAL & CUSTOM</div>';
             local.forEach(m => { html += buildModelCard(m, 'local'); });
             custom.forEach(m => { html += buildModelCard(m, 'custom'); });
         }
 
         // Если совсем пусто
-        if (!abacusModels.length && !otherPaid.length && !local.length && !custom.length) {
+        if (!abacusModels.length && !otherPaid.length && !freeModels.length && !local.length && !custom.length) {
             html = '<div class="model-empty">Нет моделей. Настройте ключи или подключите локальные.</div>';
         }
 

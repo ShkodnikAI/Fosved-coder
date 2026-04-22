@@ -44,7 +44,17 @@ PROVIDER_DEFS = {
             "gpt-4o-mini",
         ],
     },
-
+    "openrouter": {
+        "name": "OpenRouter",
+        "litellm_prefix": "openrouter",
+        "api_base": "https://openrouter.ai/api/v1",
+        "suggested_models": [
+            "anthropic/claude-opus-4-7",
+            "anthropic/claude-sonnet-4-6",
+            "openai/gpt-4.1",
+            "google/gemini-2.5-flash-preview",
+        ],
+    },
     "grok": {
         "name": "Grok (xAI)",
         "litellm_prefix": "xai",
@@ -219,6 +229,7 @@ LEGACY_KEYS_FILE = "data/keys.json"
 
 # Mapping: env var name -> provider_id
 ENV_KEY_MAP = {
+    "OPENROUTER_API_KEY": "openrouter",
     "ANTHROPIC_API_KEY": "claude",
     "OPENAI_API_KEY": "openai",
     "XAI_API_KEY": "grok",
@@ -313,9 +324,8 @@ class KeysManager:
                 # Определяем реальный провайдер по формату ключа
                 real_provider = prov_id
                 if prov_id == "custom" or prov_id not in PROVIDER_DEFS:
-                    # Пропускаем неизвестные форматы ключей
                     if api_key.startswith("sk-or-v1"):
-                        continue  # OpenRouter удалён
+                        real_provider = "openrouter"
                     elif api_key.startswith("sk-ant-"):
                         real_provider = "claude"
                     elif api_key.startswith("sk-proj-") or api_key.startswith("sk-"):
