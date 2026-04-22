@@ -55,11 +55,10 @@ header {
     flex-shrink: 0;
     padding: 0 20px;
 }
-.logo { position: absolute; left: 20px; }
-.logo img { height: 32px; filter: var(--logo-filter); }
+.header-left { position: absolute; left: 12px; display: flex; align-items: center; flex-shrink: 0; }
 .header-center { display: flex; align-items: center; gap: 10px; position: absolute; left: 50%; transform: translateX(-50%); }
 .header-center .btn-add { flex-shrink: 0; }
-.header-title { font-size: 18px; font-weight: 600; letter-spacing: 2px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.header-title { font-size: 18px; font-weight: 700; letter-spacing: 3px; color: #D4A853; text-shadow: 0 0 12px rgba(212,168,83,0.4), 0 0 24px rgba(212,168,83,0.15); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .header-actions { position: absolute; right: 20px; flex-shrink: 0; display: flex; gap: 6px; }
 
 /* ─── MAIN LAYOUT ─── */
@@ -135,28 +134,28 @@ header {
 }
 .btn-add:hover { background: var(--accent-hover); }
 
-/* ─── DEBUG TEST BUTTON (большая красная кнопка) ─── */
+/* ─── DEBUG TEST BUTTON (красная кнопка в левом углу) ─── */
 .btn-debug-test {
     position: relative;
     background: linear-gradient(135deg, #8B0000, #DC143C);
     color: #fff;
-    border: 3px solid #FF4444;
-    padding: 8px 24px;
+    border: 2px solid #FF4444;
+    padding: 6px 18px;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 900;
-    letter-spacing: 3px;
+    letter-spacing: 2px;
     text-transform: uppercase;
     transition: all 0.3s ease;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     box-shadow: 0 4px 16px rgba(220, 20, 60, 0.5), inset 0 1px 0 rgba(255,255,255,0.2), 0 0 30px rgba(220, 20, 60, 0.15);
-    min-width: 120px;
+    min-width: 100px;
     justify-content: center;
-    height: 44px;
+    height: 38px;
     z-index: 10;
 }
 .btn-debug-test:hover {
@@ -173,7 +172,7 @@ header {
     border-color: #FF8A80;
     animation: debug-pulse 1.2s ease-in-out infinite;
     box-shadow: 0 0 30px rgba(255, 23, 68, 0.6), 0 0 60px rgba(255, 23, 68, 0.2);
-    height: 44px;
+    height: 38px;
 }
 .btn-debug-test.debug-active:hover {
     background: linear-gradient(135deg, #D50000, #FF1744);
@@ -585,7 +584,7 @@ header {
 .chat-box {
     flex: 1;
     overflow-y: auto;
-    padding: 30px 15%;
+    padding: 30px 20%;
     display: flex;
     flex-direction: column;
     gap: 20px;
@@ -797,7 +796,7 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
 }
 
 /* ─── INPUT AREA ─── */
-.input-area { padding: 20px 15%; background: var(--bg-primary); }
+.input-area { padding: 20px 20%; background: var(--bg-primary); }
 .input-wrapper {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -837,6 +836,121 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
     font-size: 14px;
 }
 .btn-send:hover { background: var(--accent-hover); }
+
+/* ─── RETRY BUTTON ─── */
+.btn-retry {
+    background: rgba(244, 67, 54, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+.btn-retry:hover {
+    background: rgba(244, 67, 54, 0.25);
+    border-color: rgba(244, 67, 54, 0.5);
+    transform: translateY(-1px);
+}
+.btn-retry:active {
+    transform: translateY(0);
+}
+
+/* ─── AUTO STEP MESSAGES (интерактивный лог в чате) ─── */
+.auto-step-msg {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 16px;
+    border-left: 3px solid var(--blue);
+    background: rgba(86, 156, 214, 0.05);
+    border-radius: 0 6px 6px 0;
+    margin: 2px 0;
+    animation: autoStepFadeIn 0.3s ease;
+}
+.auto-step-msg .auto-step-icon {
+    flex-shrink: 0;
+    font-size: 16px;
+    line-height: 1.4;
+    margin-top: 1px;
+}
+.auto-step-msg .auto-step-content {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+/* Типы авто-шагов */
+.auto-step-step {
+    border-left-color: var(--blue);
+    background: rgba(86, 156, 214, 0.06);
+}
+.auto-step-step .auto-step-icon {
+    animation: autoStepSpin 2s linear infinite;
+}
+
+.auto-step-done {
+    border-left-color: var(--green);
+    background: rgba(78, 201, 176, 0.08);
+}
+.auto-step-done .auto-step-content {
+    color: var(--green);
+    font-weight: 500;
+}
+
+.auto-step-warning {
+    border-left-color: var(--amber);
+    background: rgba(220, 220, 170, 0.06);
+}
+.auto-step-warning .auto-step-content {
+    color: var(--amber);
+}
+
+.auto-step-error {
+    border-left-color: var(--red);
+    background: rgba(244, 67, 54, 0.08);
+}
+.auto-step-error .auto-step-content {
+    color: var(--red);
+    font-weight: 500;
+}
+
+/* Кнопка повтора внутри сообщения об ошибке */
+.auto-retry-btn {
+    flex-shrink: 0;
+    background: rgba(244, 67, 54, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    align-self: center;
+}
+.auto-retry-btn:hover {
+    background: rgba(244, 67, 54, 0.3);
+    border-color: var(--red);
+}
+
+@keyframes autoStepFadeIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+@keyframes autoStepSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
 
 .file-label {
     cursor: pointer;
@@ -2078,7 +2192,7 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
     .form-row-2col { flex-direction: column; gap: 0; }
 
     .header-title { font-size: 14px; letter-spacing: 1px; }
-    .logo { left: 10px; }
+    .header-left { left: 8px; }
     .header-actions { right: 10px; }
 
     .bottom-bar { height: 42px; }

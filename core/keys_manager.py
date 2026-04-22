@@ -51,12 +51,6 @@ PROVIDER_DEFS = {
         "api_base": "https://api.x.ai/v1",
         "suggested_models": ["grok-3", "grok-3-mini"],
     },
-    "minimax": {
-        "name": "MiniMax",
-        "litellm_prefix": "minimax",
-        "api_base": "https://api.minimax.chat/v1",
-        "suggested_models": ["minimax-abab6.5s-chat"],
-    },
     "gemini": {
         "name": "Google AI (Gemini)",
         "litellm_prefix": "gemini",
@@ -64,17 +58,46 @@ PROVIDER_DEFS = {
         "suggested_models": [
             "gemini-2.5-pro",
             "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
             "gemini-2.0-flash",
         ],
     },
-    "deepseek": {
-        "name": "DeepSeek",
-        "litellm_prefix": "deepseek",
-        "api_base": "https://api.deepseek.com",
+    "groq": {
+        "name": "Groq (FREE tier)",
+        "litellm_prefix": "openai",
+        "api_base": "https://api.groq.com/openai/v1",
         "suggested_models": [
-            "deepseek-chat",
-            "deepseek-reasoner",
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "gpt-oss-120b",
+            "qwen3-32b",
+            "llama-4-scout-17b-16e-instruct",
         ],
+        "is_free": True,
+        "free_tier_info": "Бесплатно навсегда. ~30 RPM, 100K-500K токенов/день. 315+ TPS.",
+    },
+    "cerebras": {
+        "name": "Cerebras (FREE tier)",
+        "litellm_prefix": "openai",
+        "api_base": "https://api.cerebras.ai/v1",
+        "suggested_models": [
+            "llama-3.3-70b",
+            "llama-3.1-8b",
+            "qwen3-235b-a22b",
+        ],
+        "is_free": True,
+        "free_tier_info": "Бесплатно навсегда. ~1M токенов/день. 1000+ TPS.",
+    },
+    "sambanova": {
+        "name": "SambaNova (FREE tier)",
+        "litellm_prefix": "openai",
+        "api_base": "https://api.sambanova.ai/v1",
+        "suggested_models": [
+            "Meta-Llama-3.3-70B-Instruct",
+            "Qwen2.5-72B-Instruct",
+        ],
+        "is_free": True,
+        "free_tier_info": "Бесплатно навсегда. 294 TPS. Llama 3.3 70B + Qwen.",
     },
     "zai": {
         "name": "Z.AI (GLM)",
@@ -110,8 +133,6 @@ PROVIDER_DEFS = {
             "gemini-3-pro", "gemini-2.5-pro", "gemini-2.5-flash",
             # --- xAI Grok ---
             "grok-4.2", "grok-4.1-fast", "grok-4", "grok-code-fast",
-            # --- DeepSeek ---
-            "deepseek-v3.2", "deepseek-v3.1", "deepseek-R1",
             # --- Qwen ---
             "qwen3-235b-a22b", "qwen3-max", "qwen3-coder", "qwq-32b",
             # --- Meta Llama ---
@@ -126,20 +147,43 @@ PROVIDER_DEFS = {
         # Модели с поддержкой extended thinking (добавляется суффикс -thinking)
         "thinking_models": [
             "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
-            "deepseek-R1", "o3", "o3-pro",
+            "o3", "o3-pro",
         ],
         # Категории моделей для UI
         "model_categories": {
             "smart_routing": {"models": ["route-llm"], "label": "Умная маршрутизация"},
-            "coding": {"models": ["gpt-5.3-codex", "grok-code-fast", "qwen3-coder", "deepseek-v3.2", "claude-sonnet-4-6"], "label": "Код"},
-            "reasoning": {"models": ["claude-opus-4-7", "o3-pro", "o3", "deepseek-R1", "gemini-3.1-pro"], "label": "Рассуждения"},
+            "coding": {"models": ["gpt-5.3-codex", "grok-code-fast", "qwen3-coder", "claude-sonnet-4-6"], "label": "Код"},
+            "reasoning": {"models": ["claude-opus-4-7", "o3-pro", "o3", "gemini-3.1-pro"], "label": "Рассуждения"},
             "fast": {"models": ["gpt-4.1-nano", "claude-haiku-4-5", "gemini-3.1-flash-lite", "grok-4.1-fast", "o4-mini"], "label": "Быстрые"},
         },
     },
 }
 
-# Бесплатные модели — больше не используются (OpenRouter удалён)
-FREE_MODELS = []
+# Бесплатные модели (через OpenRouter) — требуют OPENROUTER_API_KEY
+# Обновлено 2026-04-22: актуальный список free-моделей
+FREE_MODELS = [
+    # --- ЛУЧШИЕ ДЛЯ КОДА ---
+    {"id": "devstral-2512-free", "name": "Devstral 2 (123B)", "model": "mistralai/devstral-2512:free", "provider": "openrouter", "tags": ["coding"]},
+    {"id": "qwen3-coder-480b-free", "name": "Qwen3 Coder 480B", "model": "qwen/qwen3-coder-480b-a35b-07-25:free", "provider": "openrouter", "tags": ["coding"]},
+    {"id": "gpt-oss-120b-free", "name": "OpenAI GPT-OSS 120B", "model": "openai/gpt-oss-120b:free", "provider": "openrouter", "tags": ["coding"]},
+    {"id": "nemotron-super-120b-free", "name": "Nemotron 3 Super 120B", "model": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter", "tags": ["coding"]},
+    # --- РАССУЖДЕНИЯ / GENERAL ---
+    {"id": "hermes-3-405b-free", "name": "Hermes 3 Llama 405B", "model": "nousresearch/hermes-3-llama-3.1-405b:free", "provider": "openrouter"},
+    {"id": "llama-3.3-70b-free", "name": "Llama 3.3 70B", "model": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"},
+    {"id": "qwen3-next-80b-free", "name": "Qwen3-Next 80B", "model": "qwen/qwen3-next-80b-a3b-instruct-2509:free", "provider": "openrouter"},
+    {"id": "nemotron-nano-30b-free", "name": "Nemotron 3 Nano 30B", "model": "nvidia/nemotron-3-nano-30b-a3b:free", "provider": "openrouter"},
+    {"id": "ling-2.6-flash-free", "name": "Ling 2.6 Flash 196B", "model": "inclusionai/ling-2.6-flash:free", "provider": "openrouter"},
+    {"id": "arcee-trinity-free", "name": "Arcee Trinity Large", "model": "arcee-ai/trinity-large-preview:free", "provider": "openrouter"},
+    # --- МУЛЬТИМОДАЛЬНЫЕ ---
+    {"id": "gemma-4-31b-free", "name": "Gemma 4 31B", "model": "google/gemma-4-31b-it:free", "provider": "openrouter"},
+    {"id": "gemma-4-26b-free", "name": "Gemma 4 26B", "model": "google/gemma-4-26b-a4b-it:free", "provider": "openrouter"},
+    {"id": "gemma-3-27b-free", "name": "Gemma 3 27B", "model": "google/gemma-3-27b-it:free", "provider": "openrouter"},
+    # --- МАЛЕНЬКИЕ / БЫСТРЫЕ ---
+    {"id": "nemotron-nano-9b-free", "name": "Nemotron Nano 9B", "model": "nvidia/nemotron-nano-9b-v2:free", "provider": "openrouter"},
+    {"id": "gpt-oss-20b-free", "name": "GPT-OSS 20B", "model": "openai/gpt-oss-20b:free", "provider": "openrouter"},
+    {"id": "qwen3-8b-free", "name": "Qwen3 8B", "model": "qwen/qwen3-8b:free", "provider": "openrouter"},
+    {"id": "glm-4.5-air-free", "name": "GLM 4.5 Air", "model": "z-ai/glm-4.5-air:free", "provider": "openrouter"},
+]
 
 # Локальные провайдеры по умолчанию
 LOCAL_PROVIDERS = {
@@ -180,8 +224,9 @@ ENV_KEY_MAP = {
     "XAI_API_KEY": "grok",
     "GEMINI_API_KEY": "gemini",
     "GOOGLE_API_KEY": "gemini",
-    "MINIMAX_API_KEY": "minimax",
-    "DEEPSEEK_API_KEY": "deepseek",
+    "GROQ_API_KEY": "groq",
+    "CEREBRAS_API_KEY": "cerebras",
+    "SAMBANOVA_API_KEY": "sambanova",
     "ZAI_API_KEY": "zai",
     "ABACUS_API_KEY": "abacus",
 }
@@ -256,8 +301,7 @@ class KeysManager:
                 "openai": "openai",
                 "grok": "grok",
                 "gemini": "gemini",
-                "deepseek": "deepseek",
-                "minimax": "minimax",
+                "openrouter": "openrouter",
             }
 
             migrated = 0
@@ -383,11 +427,12 @@ class KeysManager:
         litellm_model = f"{provider['litellm_prefix']}/{test_model}"
 
         # For standard providers, let litellm handle the URL natively.
-        # Only pass api_base for custom providers or explicit overrides.
+        # Only pass api_base for custom providers, free-tier providers, or explicit overrides.
         is_custom = provider.get("is_custom", False)
+        is_free_tier = provider.get("is_free", False)
         default_base = provider["api_base"]
         explicit_base = api_base or default_base
-        use_base = explicit_base if (is_custom or explicit_base != default_base) else None
+        use_base = explicit_base if (is_custom or is_free_tier or explicit_base != default_base) else None
 
         try:
             kwargs = {

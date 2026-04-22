@@ -37,7 +37,13 @@
 
     <!-- HEADER -->
     <header>
-        <div class="logo"><img src="https://z-cdn-media.chatglm.cn/files/aad38a03-a896-4e99-96a9-69372b91084b.jpg?auth_key=1876148891-a0e5423e9d3d49c8ac35cbcf3dc1fc64-0-9dd38e9bbc11d8836da531dcd7230db3" alt="Logo"></div>
+        <div class="header-left">
+            <button class="btn-debug-test" id="btn-debug-test" onclick="toggleDebugMode()" title="Нажми = логирование. Ещё раз = пуш логов на GitHub">
+                <span class="debug-dot" id="debug-dot"></span>
+                <span id="debug-btn-label">ТЕСТ</span>
+                <span class="debug-timer" id="debug-timer"></span>
+            </button>
+        </div>
         <div class="header-center">
             <div class="header-title" id="current-project-name">FOSVED CODER</div>
             <div class="progress-bar-mini" id="header-progress" style="display:none">
@@ -46,11 +52,6 @@
             </div>
         </div>
         <div class="header-actions">
-            <button class="btn-debug-test" id="btn-debug-test" onclick="toggleDebugMode()" title="Нажми = логирование. Ещё раз = пуш логов на GitHub">
-                <span class="debug-dot" id="debug-dot"></span>
-                <span id="debug-btn-label">ТЕСТ</span>
-                <span class="debug-timer" id="debug-timer"></span>
-            </button>
             <button class="btn-add" onclick="showHelp()" title="Помощь" data-hint="Справка, горячие клавиши и список команд">❓</button>
             <button class="btn-add" onclick="clearChat()" title="Очистить" data-hint="Очистить историю чата текущего проекта">🗑</button>
         </div>
@@ -146,6 +147,7 @@
                             <span id="file-preview" style="display:none;font-size:12px;color:var(--green);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
                             <button id="file-remove" onclick="removeAttachedFile()" style="display:none;background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:0 4px;" title="Убрать файл">✕</button>
                         </div>
+                        <button id="retry-btn" class="btn-retry" onclick="retryLastMessage()" title="Повторить последнее сообщение" style="display:none;">🔄 Повторить</button>
                         <button class="btn-send" onclick="sendMessage()">Отправить ➤</button>
                     </div>
                 </div>
@@ -561,6 +563,9 @@
     let workMode = "manual";  // "manual" or "auto"
     let debugMode = false;  // debug-режим (кнопка ТЕСТ)
     let debugStartTime = null;
+    let lastSentMessage = null;  // для кнопки «Повторить»
+    let lastSentPayload = null;  // полный payload последнего сообщения
+    let autoModeRunning = false; // флаг: авто-режим сейчас выполняется
 
     // ═══════════════════════════════════════════════════════
     // DEBUG MODE (красная кнопка ТЕСТ — тотальное логирование)
@@ -1023,11 +1028,17 @@
             } else if (data.type === "command_result") {
                 addMessage("terminal", data.content);
             } else if (data.type === "auto_step") {
-                addMessage("system", data.content || "Авто-шаг выполнен");
+                autoModeRunning = true;
+                addAutoStepMessage(data.content || "Авто-шаг выполнен", "step");
             } else if (data.type === "auto_done") {
-                addMessage("system", data.content || "Автоматическое выполнение завершено");
+                autoModeRunning = false;
+                const hasErrors = data.content && data.content.includes("ошибк");
+                addAutoStepMessage(data.content || "Автоматическое выполнение завершено", hasErrors ? "warning" : "done");
+                setWaitingAI(false);
             } else if (data.type === "auto_error") {
-                addMessage("error", data.content);
+                autoModeRunning = false;
+                addAutoStepMessage(data.content, "error", true);
+                setWaitingAI(false);
                 showToast(data.content, "error");
             } else if (data.type === "idea_result") {
                 addMessage("idea", data.content);
@@ -1079,6 +1090,30 @@
             hideLoadingScreen();
         }
     }, 15000);
+
+    // ═══════════════════════════════════════════════════════
+    // AUTO STEP MESSAGES (интерактивный лог в чате)
+    // ═══════════════════════════════════════════════════════
+    function addAutoStepMessage(text, type, showRetry) {
+        const div = document.createElement("div");
+        div.className = "msg auto-step-msg auto-step-" + type;
+
+        const icons = { step: '⚙️', done: '✅', warning: '⚠️', error: '❌' };
+        const icon = icons[type] || '⚙️';
+
+        let retryBtn = '';
+        if (showRetry && lastSentMessage) {
+            retryBtn = '<button class="auto-retry-btn" onclick="retryLastMessage()" title="Повторить последнее сообщение">🔄 Повторить</button>';
+        }
+
+        div.innerHTML =
+            '<div class="auto-step-icon">' + icon + '</div>' +
+            '<div class="auto-step-content">' + escapeHtml(text) + '</div>' +
+            retryBtn;
+
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
 
     // ═══════════════════════════════════════════════════════
     // Messages
@@ -1290,8 +1325,10 @@
         const input = document.getElementById('user-input');
         const progress = document.getElementById('header-progress');
         const fill = document.getElementById('header-progress-fill');
+        const retryBtn = document.getElementById('retry-btn');
         if (state) {
             input.classList.add('input-waiting');
+            if (retryBtn) retryBtn.style.display = 'none';
             progress.style.display = 'flex';
             fill.style.width = '0%';
             document.getElementById('header-progress-text').textContent = '...';
@@ -1309,7 +1346,13 @@
             clearInterval(waitTimer);
             fill.style.width = '100%';
             document.getElementById('header-progress-text').textContent = 'OK';
-            setTimeout(() => { progress.style.display = 'none'; }, 800);
+            setTimeout(() => {
+                progress.style.display = 'none';
+                // Показываем кнопку повтора после завершения, если есть что повторять
+                if (retryBtn && lastSentMessage && !autoModeRunning) {
+                    retryBtn.style.display = 'inline-flex';
+                }
+            }, 800);
         }
     }
 
@@ -1335,6 +1378,10 @@
         if (attachedFile) payload.file_content = attachedFile.content;
         wsSend(payload);
 
+        // Сохраняем для повтора
+        lastSentMessage = text;
+        lastSentPayload = { ...payload };
+
         input.value = ""; attachedFile = null;
         document.getElementById("file-input").value = "";
         input.style.height = "auto";
@@ -1343,6 +1390,30 @@
         const fr = document.getElementById("file-remove");
         if (fp) fp.style.display = "none";
         if (fr) fr.style.display = "none";
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // RETRY BUTTON (Повторить последнее сообщение)
+    // ═══════════════════════════════════════════════════════
+    function retryLastMessage() {
+        if (!lastSentPayload) {
+            showToast("Нет предыдущего сообщения для повтора", "warning");
+            return;
+        }
+        if (!activeModelId && priorityModels.length) {
+            activeModelId = priorityModels[0];
+        }
+        if (!activeModelId) { showToast("Сначала выберите модель ИИ", "error"); return; }
+
+        // Добавляем визуальную отметку в чат
+        addMessage("user", "🔄 [Повтор] " + (lastSentMessage || ''));
+        setWaitingAI(true);
+
+        let payload = { ...lastSentPayload, model: activeModelId };
+        if (priorityModels.length) {
+            payload.priority_models = priorityModels;
+        }
+        wsSend(payload);
     }
 
     function handleKeyDown(e) {
@@ -2366,12 +2437,15 @@
                 const statusLabel = {valid:"Активен", rate_limited:"Лимит", invalid:"Ошибка", not_configured:"Не настроен"}[status] || status;
                 const statusCls = {valid:"st-valid", rate_limited:"st-limited", invalid:"st-invalid", not_configured:"st-none"}[status] || "";
                 const keyMasked = cfg.has_key ? "●●●●●●●●" : "";
-                html += `<div class="key-card">
+                const freeBadge = pdef.is_free ? '<span style="background:var(--green);color:#000;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:6px;">FREE</span>' : '';
+                const freeInfo = pdef.free_tier_info ? `<div style="font-size:11px;color:var(--green);margin-top:4px;opacity:0.85;">${pdef.free_tier_info}</div>` : '';
+                html += `<div class="key-card" style="${pdef.is_free ? 'border-color:rgba(78,201,176,0.3);' : ''}">
                     <div class="key-card-header">
-                        <span class="key-provider-name">${pdef.name}</span>
+                        <span class="key-provider-name">${pdef.name}${freeBadge}</span>
                         <span class="key-status ${statusCls}">${statusLabel}</span>
                     </div>
                     ${cfg.has_key ? `<div class="key-value">Ключ: ${keyMasked} (${cfg.models_count||0} моделей)</div>` : ''}
+                    ${freeInfo}
                     <div class="key-actions">
                         ${cfg.has_key ? `<button class="btn-small btn-danger" onclick="removeKey('${pid}')">Удалить</button>` : `<button class="btn-small" onclick="showAddKeyForm('${pid}','${pdef.name}')">Добавить</button>`}
                         ${cfg.has_key ? `<button class="btn-small btn-outline" onclick="revalidateKey('${pid}')">Проверить</button>` : ''}
