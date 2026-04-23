@@ -147,7 +147,6 @@ PROVIDER_DEFS = {
 # Обновлено 2026-04-22: актуальный список free-моделей
 FREE_MODELS = [
     # --- ЛУЧШИЕ ДЛЯ КОДА ---
-    {"id": "devstral-2512-free", "name": "Devstral 2 (123B)", "model": "mistralai/devstral-2512:free", "provider": "openrouter", "tags": ["coding"]},
     {"id": "qwen3-coder-480b-free", "name": "Qwen3 Coder 480B", "model": "qwen/qwen3-coder-480b-a35b-07-25:free", "provider": "openrouter", "tags": ["coding"]},
     {"id": "gpt-oss-120b-free", "name": "OpenAI GPT-OSS 120B", "model": "openai/gpt-oss-120b:free", "provider": "openrouter", "tags": ["coding"]},
     {"id": "nemotron-super-120b-free", "name": "Nemotron 3 Super 120B", "model": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter", "tags": ["coding"]},

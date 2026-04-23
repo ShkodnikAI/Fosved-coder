@@ -622,10 +622,12 @@
             const startMs = Date.now();
             const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '?');
             const method = (args[1]?.method || 'GET').toUpperCase();
+            // НЕ логируем собственные запросы к debug endpoints — это предотвращает рекурсивный цикл
+            const isDebugEndpoint = url.includes('/api/v1/debug/');
             try {
                 const resp = await origFetch.apply(this, args);
                 const durationMs = Date.now() - startMs;
-                if (debugMode) {
+                if (debugMode && !isDebugEndpoint) {
                     const entry = {
                         type: "fetch",
                         message: `${method} ${url} → ${resp.status}`,
@@ -639,7 +641,7 @@
                 return resp;
             } catch (err) {
                 const durationMs = Date.now() - startMs;
-                if (debugMode) {
+                if (debugMode && !isDebugEndpoint) {
                     sendClientLog({
                         type: "fetch_error",
                         message: `${method} ${url} — FAILED: ${err.message}`,
@@ -2831,10 +2833,9 @@
             stepBadge = '<span class="auto-log-step">' + step + '/' + total + '</span>';
         }
 
-        // Маркер результата: ✅ для success, 🐛 для error
+        // Маркер результата: ✅ для success (ошибки НЕ маркируем BUG — они могут быть сетевыми, а не багами)
         let resultMark = '';
         if (level === 'success') resultMark = '<span class="log-result-mark mark-ok">OK</span>';
-        if (level === 'error') resultMark = '<span class="log-result-mark mark-bug">BUG</span>';
 
         entry.innerHTML =
             '<span class="auto-log-icon" style="color:' + iconData.color + '">' + iconData.icon + '</span>' +
