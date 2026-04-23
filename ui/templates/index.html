@@ -1065,8 +1065,8 @@
             } else if (data.type === "error") {
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 setWaitingAI(false);
-                // Only route to log panel — no duplicate chat message or toast
-                addLogEntryToPanel({level: 'error', source: 'ws', action: data.content, time: new Date().toLocaleTimeString()});
+                // No addLogEntryToPanel here — backend also sends auto_log which handles log panel
+                // No addMessage or showToast — log panel is the single source of error display
                 currentAiDiv = null; currentAiText = "";
             } else if (data.type === "system") {
                 addMessage("system", data.content);
@@ -1175,8 +1175,7 @@
         chatBox.appendChild(div);
         chatBox.scrollTop = chatBox.scrollHeight;
 
-        // Also write to log panel
-        addLogEntryToPanel({level: type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info', source: 'auto', action: text, time: new Date().toLocaleTimeString()});
+        // No addLogEntryToPanel here — backend sends auto_log which handles log panel
     }
 
     // ═══════════════════════════════════════════════════════
