@@ -120,6 +120,9 @@ class GitHubTokenRequest(BaseModel):
 class ToggleGitHubRequest(BaseModel):
     enabled: bool
 
+class ToggleProviderRequest(BaseModel):
+    enabled: bool
+
 class CreateProjectRequest(BaseModel):
     name: str
     description: str = ""
@@ -291,6 +294,17 @@ async def toggle_github(req: ToggleGitHubRequest):
     except Exception: pass
     result = keys_manager.toggle_github(req.enabled)
     return result
+
+@router.put("/keys/{provider_id}/toggle")
+async def toggle_provider(provider_id: str, req: ToggleProviderRequest):
+    """Включение/отключение провайдера (модели скрываются из списка)."""
+    try: action_logger.log("TOGGLE_PROVIDER", source="api", details={"provider_id": provider_id, "enabled": req.enabled})
+    except Exception: pass
+    result = keys_manager.toggle_provider(provider_id, req.enabled)
+    if not result["success"]:
+        raise HTTPException(404, result["error"])
+    return result
+
 
 @router.get("/models")
 async def get_all_models():

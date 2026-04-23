@@ -104,7 +104,7 @@
             <div style="display:flex; gap:4px; padding:8px 15px; border-top:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0;">
                 <button class="btn-add" onclick="scanLocalModels('ollama')" title="Ollama" data-hint="Найти локальные модели Ollama на этом устройстве" style="flex:1; font-size:11px; padding:4px 6px;">🔍 Ollama</button>
                 <button class="btn-add" onclick="scanLocalModels('lmstudio')" title="LM Studio" data-hint="Найти локальные модели LM Studio на этом устройстве" style="flex:1; font-size:11px; padding:4px 6px;">🔍 LM</button>
-                <button class="btn-add" onclick="showKeysModal()" data-hint="Управление API ключами — Claude, OpenAI, Gemini, Grok, Abacus.AI" style="flex:1; font-size:11px; padding:4px 6px;">🔑</button>
+                <button class="btn-add" onclick="showKeysModal()" data-hint="Управление API ключами — Claude, OpenAI, Gemini, Kimi, Abacus.AI и др." style="flex:1; font-size:11px; padding:4px 6px;">🔑</button>
                 <button class="btn-add" onclick="refreshModels()" data-hint="Обновить список моделей и проверить статусы" style="flex:1; font-size:11px; padding:4px 6px;">🔄</button>
                 <button class="btn-add" onclick="showStats()" data-hint="Статистика использования моделей и роутинга" style="flex:1; font-size:11px; padding:4px 6px;">📊</button>
             </div>
@@ -2436,20 +2436,21 @@
             for (const [pid, pdef] of Object.entries(providers)) {
                 const cfg = configured[pid] || {};
                 const status = cfg.status || "not_configured";
+                const isEnabled = cfg.enabled !== false;
                 const statusLabel = {valid:"Активен", rate_limited:"Лимит", invalid:"Ошибка", not_configured:"Не настроен"}[status] || status;
                 const statusCls = {valid:"st-valid", rate_limited:"st-limited", invalid:"st-invalid", not_configured:"st-none"}[status] || "";
                 const keyMasked = cfg.has_key ? "●●●●●●●●" : "";
-                const freeBadge = pdef.is_free ? '<span style="background:var(--green);color:#000;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:6px;">FREE</span>' : '';
-                const freeInfo = pdef.free_tier_info ? `<div style="font-size:11px;color:var(--green);margin-top:4px;opacity:0.85;">${pdef.free_tier_info}</div>` : '';
-                html += `<div class="key-card" style="${pdef.is_free ? 'border-color:rgba(78,201,176,0.3);' : ''}">
+                const disabledStyle = !isEnabled ? 'opacity:0.45;filter:grayscale(0.5);' : '';
+                const disabledBadge = !isEnabled ? '<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:6px;">OFF</span>' : '';
+                html += `<div class="key-card" style="${disabledStyle}">
                     <div class="key-card-header">
-                        <span class="key-provider-name">${pdef.name}${freeBadge}</span>
-                        <span class="key-status ${statusCls}">${statusLabel}</span>
+                        <span class="key-provider-name">${pdef.name}${disabledBadge}</span>
+                        <span class="key-status ${statusCls}">${isEnabled ? statusLabel : 'Отключён'}</span>
                     </div>
                     ${cfg.has_key ? `<div class="key-value">Ключ: ${keyMasked} (${cfg.models_count||0} моделей)</div>` : ''}
-                    ${freeInfo}
                     <div class="key-actions">
-                        ${cfg.has_key ? `<button class="btn-small btn-danger" onclick="removeKey('${pid}')">Удалить</button>` : `<button class="btn-small" onclick="showAddKeyForm('${pid}','${pdef.name}')">Добавить</button>`}
+                        ${cfg.has_key ? `<button class="btn-small btn-outline" onclick="toggleProvider('${pid}',${!isEnabled})" style="font-size:11px;">${isEnabled ? '⏸ Выкл' : '▶ Вкл'}</button>` : `<button class="btn-small" onclick="showAddKeyForm('${pid}','${pdef.name}')">Добавить</button>`}
+                        ${cfg.has_key ? `<button class="btn-small btn-danger" onclick="removeKey('${pid}')">Удалить</button>` : ''}
                         ${cfg.has_key ? `<button class="btn-small btn-outline" onclick="revalidateKey('${pid}')">Проверить</button>` : ''}
                     </div>
                 </div>`;
@@ -2528,6 +2529,10 @@
 
     async function revalidateKey(providerId) {
         try { await fetch(`/api/v1/models/validate/${providerId}`,{method:"POST"}); await loadModels(); showKeysModal(); showToast("Ключ проверен", "success"); } catch(e) { showToast("Ошибка: "+e, "error"); }
+    }
+
+    async function toggleProvider(providerId, enabled) {
+        try { await fetch(`/api/v1/keys/${providerId}/toggle`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})}); await loadModels(); showKeysModal(); showToast(enabled ? "Провайдер включён" : "Провайдер отключён", "success"); } catch(e) { showToast("Ошибка: "+e, "error"); }
     }
 
     function showAddGithubToken() {

@@ -72,42 +72,16 @@ PROVIDER_DEFS = {
             "gemini-2.0-flash",
         ],
     },
-    "groq": {
-        "name": "Groq (FREE tier)",
+    "kimi": {
+        "name": "Kimi (Moonshot AI)",
         "litellm_prefix": "openai",
-        "api_base": "https://api.groq.com/openai/v1",
+        "api_base": "https://api.moonshot.cn/v1",
         "suggested_models": [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "gpt-oss-120b",
-            "qwen3-32b",
-            "llama-4-scout-17b-16e-instruct",
+            "kimi-k2-0711",
+            "moonshot-v1-128k",
+            "moonshot-v1-32k",
+            "moonshot-v1-8k",
         ],
-        "is_free": True,
-        "free_tier_info": "Бесплатно навсегда. ~30 RPM, 100K-500K токенов/день. 315+ TPS.",
-    },
-    "cerebras": {
-        "name": "Cerebras (FREE tier)",
-        "litellm_prefix": "openai",
-        "api_base": "https://api.cerebras.ai/v1",
-        "suggested_models": [
-            "llama-3.3-70b",
-            "llama-3.1-8b",
-            "qwen3-235b-a22b",
-        ],
-        "is_free": True,
-        "free_tier_info": "Бесплатно навсегда. ~1M токенов/день. 1000+ TPS.",
-    },
-    "sambanova": {
-        "name": "SambaNova (FREE tier)",
-        "litellm_prefix": "openai",
-        "api_base": "https://api.sambanova.ai/v1",
-        "suggested_models": [
-            "Meta-Llama-3.3-70B-Instruct",
-            "Qwen2.5-72B-Instruct",
-        ],
-        "is_free": True,
-        "free_tier_info": "Бесплатно навсегда. 294 TPS. Llama 3.3 70B + Qwen.",
     },
     "zai": {
         "name": "Z.AI (GLM)",
@@ -235,9 +209,7 @@ ENV_KEY_MAP = {
     "XAI_API_KEY": "grok",
     "GEMINI_API_KEY": "gemini",
     "GOOGLE_API_KEY": "gemini",
-    "GROQ_API_KEY": "groq",
-    "CEREBRAS_API_KEY": "cerebras",
-    "SAMBANOVA_API_KEY": "sambanova",
+    "MOONSHOT_API_KEY": "kimi",
     "ZAI_API_KEY": "zai",
     "ABACUS_API_KEY": "abacus",
 }
@@ -380,13 +352,17 @@ class KeysManager:
             existing = self.providers.get(provider_id, {})
             existing_key = existing.get("api_key", "")
             if api_key != existing_key or existing.get("status") in ("invalid", "not_configured", ""):
-                self.providers[provider_id] = {
+                new_cfg = {
                     "api_key": api_key,
                     "api_base": provider_def["api_base"],
                     "litellm_prefix": provider_def["litellm_prefix"],
                     "models": existing.get("models") or provider_def["suggested_models"],
                     "status": "valid",  # Assume valid, startup_validation will re-check
                 }
+                # Preserve enabled state from existing config
+                if existing.get("enabled") is False:
+                    new_cfg["enabled"] = False
+                self.providers[provider_id] = new_cfg
                 env_loaded += 1
         if env_loaded:
             print(f"  [keys] Loaded {env_loaded} API key(s) from environment variables")
@@ -402,8 +378,15 @@ class KeysManager:
             keys_dir = os.path.dirname(KEYS_FILE)
             if keys_dir:
                 os.makedirs(keys_dir, exist_ok=True)
+            # Clean up: remove "enabled" key if it's True (default), keep only explicit False
+            clean_providers = {}
+            for pid, cfg in self.providers.items():
+                clean_cfg = dict(cfg)
+                if clean_cfg.get("enabled", True) is True:
+                    clean_cfg.pop("enabled", None)
+                clean_providers[pid] = clean_cfg
             data = {
-                "providers": self.providers,
+                "providers": clean_providers,
                 "local_models": self.local_models,
                 "custom_models": self.custom_models,
                 "github": {
@@ -914,8 +897,12 @@ class KeysManager:
         """
         models = []
 
-        # 1. Платные модели из настроенных провайдеров (с валидными ключами)
+        # 1. Платные модели из настроенных провайдеров (с валидными ключами и включённых)
         for provider_id, config in self.providers.items():
+            if not config.get("enabled", True):
+                continue  # Пропускаем отключённые провайдеры
+            if config.get("status") in ("invalid",) and not config.get("api_key"):
+                continue  # Пропускаем невалидные без ключа
             provider_def = PROVIDER_DEFS.get(provider_id, {})
             prefix = config.get("litellm_prefix", provider_id)
             status = config.get("status", "not_configured")
@@ -1110,6 +1097,14 @@ class KeysManager:
 
         return None
 
+    def toggle_provider(self, provider_id: str, enabled: bool) -> dict:
+        """Включить/выключить провайдер (модели скрываются из списка)."""
+        if provider_id not in self.providers:
+            return {"success": False, "error": f"Провайдер {provider_id} не настроен"}
+        self.providers[provider_id]["enabled"] = enabled
+        self._save_keys()
+        return {"success": True, "provider": provider_id, "enabled": enabled}
+
     def get_provider_status(self) -> dict:
         """Статус всех провайдеров."""
         result = {}
@@ -1120,6 +1115,7 @@ class KeysManager:
                 "status": config.get("status", "not_configured"),
                 "models_count": len(config.get("models", [])),
                 "has_key": bool(config.get("api_key")),
+                "enabled": config.get("enabled", True),
             }
         return result
 
