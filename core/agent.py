@@ -447,6 +447,10 @@ async def stream_llm_response(prompt: str, history: list, websocket,
         api_messages.append({"role": mapped_role, "content": msg.get("content", "")})
     messages = [{"role": "system", "content": system_prompt}] + api_messages + [{"role": "user", "content": prompt}]
 
+    # Anthropic Claude 4+ не поддерживает temperature — убираем для этих моделей
+    anthropic_no_temp_models = ("claude-opus-4-", "claude-sonnet-4-")
+    skip_temperature = any(m in model.lower() for m in anthropic_no_temp_models)
+
     start_time = time.time()
     full_response = ""
     max_tool_iterations = 10  # Prevent infinite loops
@@ -456,9 +460,10 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             kwargs = {
                 "model": model,
                 "messages": messages,
-                "temperature": CONFIG["llm"].get("temperature", 0.2),
                 "max_tokens": CONFIG["llm"].get("max_tokens", 16384) if is_thinking else CONFIG["llm"].get("max_tokens", 4096),
             }
+            if not skip_temperature:
+                kwargs["temperature"] = CONFIG["llm"].get("temperature", 0.2)
             if api_key:
                 kwargs["api_key"] = api_key
             if api_base and not api_base.startswith("https://api.anthropic.com") and not api_base.startswith("https://api.openai.com/v1") and not api_base.startswith("https://api.x.ai/v1"):

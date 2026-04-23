@@ -50,6 +50,10 @@
                 <div class="progress-fill" id="header-progress-fill"></div>
                 <span class="progress-text" id="header-progress-text">0%</span>
             </div>
+            <div class="header-model-badge" id="header-model-badge" style="display:none">
+                <span class="header-model-dot" id="header-model-dot"></span>
+                <span id="header-model-name"></span>
+            </div>
         </div>
         <div class="header-actions">
             <button class="btn-add" onclick="toggleLogSidebar()" title="Лог" data-hint="Показать/скрыть панель логов">📋</button>
@@ -772,19 +776,20 @@
                 addLogEntryToPanel(entry);
             }
 
-            // Добавляем JS ошибки
-            if (clientErrors.length > 0 && container) {
+            // Добавляем клиентские логи (только ошибки — js_error, fetch_error, console_error)
+            const realErrors = clientErrors.filter(e => e.type === 'js_error' || e.type === 'fetch_error' || e.type === 'console_error');
+            if (realErrors.length > 0 && container) {
                 const sep2 = document.createElement('div');
                 sep2.style.cssText = 'padding:6px 8px;font-size:11px;color:var(--red);font-weight:700;border-left:2px solid var(--red);border-bottom:1px solid var(--border);margin:4px 0;';
-                sep2.innerHTML = `═══ JS ОШИБКИ (${clientErrors.length}) ═══`;
+                sep2.innerHTML = `═══ JS ОШИБКИ (${realErrors.length}) ═══`;
                 container.appendChild(sep2);
-                for (const err of clientErrors) {
+                for (const err of realErrors) {
                     addLogEntryToPanel({level: 'error', source: 'js', action: err.message || err, time: err.time || ''});
                 }
             }
 
             const totalEntries = entries.length + clientErrors.length;
-            const errorsCount = entries.filter(e => e.level === 'error').length + clientErrors.length;
+            const errorsCount = entries.filter(e => e.level === 'error').length + realErrors.length;
             const label2 = document.getElementById('log-count-label');
             if (label2) label2.textContent = `${container ? container.querySelectorAll('[data-level]').length : totalEntries} записей`;
 
@@ -1064,11 +1069,14 @@
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 setWaitingAI(false);
                 currentAiDiv = null; currentAiText = "";
+                // Скрываем индикатор модели в header через 3с
+                setTimeout(() => { updateHeaderModelBadge(null); }, 3000);
                 // Auto-increment project progress after successful AI response
                 if (currentProjectId) autoIncrementProgress();
             } else if (data.type === "error") {
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 setWaitingAI(false);
+                updateHeaderModelBadge(null);
                 // No addLogEntryToPanel here — backend also sends auto_log which handles log panel
                 // No addMessage or showToast — log panel is the single source of error display
                 currentAiDiv = null; currentAiText = "";
@@ -1090,6 +1098,8 @@
                     (shortName ? ' (' + escapeHtml(shortName) + ')' : '') + '...</span>';
                 chatBox.appendChild(currentTypingDiv);
                 chatBox.scrollTop = chatBox.scrollHeight;
+                // Показываем модель в header
+                if (shortName) updateHeaderModelBadge(shortName, 'thinking');
             } else if (data.type === "command_result") {
                 addMessage("terminal", data.content);
                 addLogEntryToPanel({level: 'info', source: 'terminal', action: data.content.substring(0, 300), time: new Date().toLocaleTimeString()});
@@ -1833,6 +1843,21 @@
             }
         }
         indicator.style.display = 'none';
+    }
+
+    function updateHeaderModelBadge(modelName, state) {
+        const badge = document.getElementById('header-model-badge');
+        const nameSpan = document.getElementById('header-model-name');
+        const dot = document.getElementById('header-model-dot');
+        if (!badge || !nameSpan || !dot) return;
+        if (!modelName) {
+            badge.style.display = 'none';
+            return;
+        }
+        const short = modelName.length > 25 ? modelName.substring(0, 23) + '…' : modelName;
+        nameSpan.textContent = short;
+        dot.className = 'header-model-dot' + (state === 'thinking' ? ' thinking' : '');
+        badge.style.display = 'inline-flex';
     }
 
     function showAddModelMenu(e) {
@@ -2855,7 +2880,7 @@
         info:    { icon: '◉', color: 'var(--blue)' },
         success: { icon: '✅', color: 'var(--green)' },
         warning: { icon: '⚠', color: 'var(--amber)' },
-        error:   { icon: '🐛', color: 'var(--red)' },
+        error:   { icon: '❌', color: 'var(--red)' },
         command: { icon: '▸', color: 'var(--text-secondary)' },
         file:    { icon: '📄', color: '#569cd6' },
         done:    { icon: '■', color: 'var(--green)' },
