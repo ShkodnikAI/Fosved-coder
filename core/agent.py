@@ -704,6 +704,24 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         await _send_log(websocket, "❌ Нет доступных моделей", "error")
         return
 
+    # Автоперевалидация rate_limited провайдеров перед первой попыткой
+    validated_providers = set()
+    for m_id in models_to_try:
+        if "__" in m_id:
+            pid = m_id.split("__")[0]
+        elif m_id.startswith("local_") or m_id.startswith("custom_"):
+            continue
+        else:
+            # bare model name — skip
+            continue
+        if pid not in validated_providers:
+            config = keys_manager.providers.get(pid, {})
+            if config.get("status") == "rate_limited":
+                new_status = await keys_manager.ensure_provider_active(pid)
+                if new_status == "valid":
+                    await _send_log(websocket, f"✓ {pid} перевалидирован и активен", "success")
+            validated_providers.add(pid)
+
     # Try each model
     ai_response = None
     tried_count = 0

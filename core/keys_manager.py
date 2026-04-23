@@ -462,9 +462,10 @@ class KeysManager:
                 # 404 может означать что модель не найдена, а не что ключ неверный
                 return {"status": "valid", "error": "Модель может быть недоступна"}
             elif "connection" in error_str or "connect" in error_str:
-                return {"status": "invalid", "error": f"Не удалось подключиться к {provider.get('name', provider_id)}"}
+                return {"status": "rate_limited", "error": f"Не удалось подключиться к {provider.get('name', provider_id)} — будет перевалидирован"}
             else:
-                return {"status": "invalid", "error": f"Ошибка: {str(e)[:150]}"}
+                # Неизвестная ошибка — не убиваем ключ, даём шанс (rate_limited = временный статус)
+                return {"status": "rate_limited", "error": f"Временная ошибка: {str(e)[:150]}"}
 
     async def validate_github_token(self, token: str) -> dict:
         """Валидация GitHub токена через /user endpoint."""
@@ -565,6 +566,14 @@ class KeysManager:
         self.github_token = token
         self.github_enabled = enabled
         self._save_keys()
+
+    def toggle_provider(self, provider_id: str, enabled: bool) -> dict:
+        """Включение/отключение провайдера (модели скрываются из списка)."""
+        if provider_id not in self.providers:
+            return {"success": False, "error": f"Провайдер {provider_id} не найден"}
+        self.providers[provider_id]["enabled"] = enabled
+        self._save_keys()
+        return {"success": True, "provider": provider_id, "enabled": enabled}
 
     def toggle_github(self, enabled: bool) -> dict:
         self.github_enabled = enabled and bool(self.github_token)
@@ -862,6 +871,21 @@ class KeysManager:
                 continue
 
             validation = await self.validate_key(provider_id, api_key, test_model)
+
+            # Смягчение: при startup не убиваем ключи за временные ошибки
+            # (то же что в add_key — но startup_validation этого не делала)
+            if validation["status"] == "invalid":
+                err_lower = validation.get("error", "").lower()
+                if ("не удалось подключиться" in err_lower or "connection" in err_lower
+                        or "timeout" in err_lower or "временная" in err_lower):
+                    validation["status"] = "rate_limited"
+                elif not ("Неверный" in validation.get("error", "")
+                          or "unauthorized" in err_lower
+                          or "401" in err_lower
+                          or "authentication" in err_lower):
+                    # Неизвестная ошибка (не auth) — не помечаем как invalid
+                    validation["status"] = "rate_limited"
+
             self.providers[provider_id]["status"] = validation["status"]
             results[provider_id] = {"status": validation["status"], "models": config.get("models", [])}
 
@@ -882,6 +906,42 @@ class KeysManager:
         self._save_keys()
         results["local"] = local_results
         return results
+
+    # ─── Auto-Revalidation ──────────────────────────────────
+
+    async def ensure_provider_active(self, provider_id: str) -> str:
+        """
+        Автоперевалидация rate_limited провайдера перед использованием.
+        Returns: обновлённый статус ("valid", "rate_limited", "invalid").
+        Не блокирует — если validation не удалась, возвращает текущий статус.
+        """
+        config = self.providers.get(provider_id)
+        if not config:
+            return "not_configured"
+        status = config.get("status", "")
+        if status != "rate_limited":
+            return status  # Уже valid или invalid — ничего не делаем
+
+        api_key = config.get("api_key", "")
+        test_model = config.get("models", [None])[0] if config.get("models") else None
+        if not api_key or not test_model:
+            return status
+
+        try:
+            validation = await self.validate_key(provider_id, api_key, test_model)
+            new_status = validation["status"]
+            if new_status == "valid":
+                print(f"  [keys] Автоперевалидация: {provider_id} → valid")
+                try:
+                    logger.log("auto_revalidated", level="success", source="keys_manager",
+                               details={"provider": provider_id})
+                except Exception:
+                    pass
+            self.providers[provider_id]["status"] = new_status
+            self._save_keys()
+            return new_status
+        except Exception:
+            return status  # При ошибке валидации — оставляем текущий статус
 
     # ─── Model Access ────────────────────────────────────────
 
