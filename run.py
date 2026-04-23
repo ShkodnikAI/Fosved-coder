@@ -46,9 +46,20 @@ async def lifespan(app: FastAPI):
         print(f"  URL: {safe_url}")
     print(f"  {'=' * 44}\n")
     await init_db()
+
+    # CRITICAL: Восстановить ключи из БД если keys.yaml пустой (Render ephemeral FS)
+    if keys_manager._db_restore_pending:
+        print("  keys.yaml пуст — восстанавливаем ключи из базы данных...")
+        restored = await keys_manager.restore_from_db()
+        if restored:
+            print(f"  Ключи восстановлены из БД\n")
+
     # Validate all API keys on startup
     print("  Проверка API-ключей...")
     results = await keys_manager.startup_validation()
+
+    # Sync keys to DB after validation (для персистентности)
+    await keys_manager.sync_to_db()
     for pid, info in results.items():
         if pid == "local" and isinstance(info, dict):
             # info — dict of {model_id: {status, name}}

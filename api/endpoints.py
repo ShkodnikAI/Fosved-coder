@@ -262,6 +262,7 @@ async def add_key(req: AddKeyRequest):
         raise HTTPException(400, result["error"])
     try: action_logger.log("ADD_KEY", source="api", level="success", details={"provider": req.provider})
     except Exception: pass
+    await keys_manager.sync_to_db()
     return result
 
 @router.delete("/keys/{provider_id}")
@@ -272,6 +273,7 @@ async def remove_key(provider_id: str):
     if keys_manager.remove_key(provider_id):
         try: action_logger.log("REMOVE_KEY", source="api", level="success", details={"provider_id": provider_id})
         except Exception: pass
+        await keys_manager.sync_to_db()
         return {"success": True, "provider": provider_id}
     try: action_logger.log("REMOVE_KEY", source="api", level="error", error=f"Provider {provider_id} not found", details={"provider_id": provider_id})
     except Exception: pass
@@ -307,6 +309,7 @@ async def set_github_token(req: GitHubTokenRequest):
     keys_manager.set_github_token(req.token, req.enabled)
     try: action_logger.log("SET_GITHUB_TOKEN", source="api", level="success", details={"user": validation.get("user"), "enabled": req.enabled})
     except Exception: pass
+    await keys_manager.sync_to_db()
     return {"success": True, "user": validation["user"]}
 
 @router.put("/keys/github/toggle")
@@ -315,6 +318,7 @@ async def toggle_github(req: ToggleGitHubRequest):
     try: action_logger.log("TOGGLE_GITHUB", source="api", details={"enabled": req.enabled})
     except Exception: pass
     result = keys_manager.toggle_github(req.enabled)
+    await keys_manager.sync_to_db()
     return result
 
 @router.get("/keys/expo")
@@ -332,6 +336,7 @@ async def set_expo_token(req: ExpoTokenRequest):
     keys_manager.set_expo_token(req.token, req.enabled)
     try: action_logger.log("SET_EXPO_TOKEN", source="api", level="success", details={"enabled": req.enabled})
     except Exception: pass
+    await keys_manager.sync_to_db()
     return {"success": True}
 
 @router.put("/keys/expo/toggle")
@@ -340,6 +345,7 @@ async def toggle_expo(req: ToggleExpoRequest):
     try: action_logger.log("TOGGLE_EXPO", source="api", details={"enabled": req.enabled})
     except Exception: pass
     result = keys_manager.toggle_expo(req.enabled)
+    await keys_manager.sync_to_db()
     return result
 
 @router.put("/keys/{provider_id}/toggle")
@@ -350,6 +356,7 @@ async def toggle_provider(provider_id: str, req: ToggleProviderRequest):
     result = keys_manager.toggle_provider(provider_id, req.enabled)
     if not result["success"]:
         raise HTTPException(404, result["error"])
+    await keys_manager.sync_to_db()
     return result
 
 
@@ -434,6 +441,10 @@ async def generate_draft_prompt(draft_id: int):
         "tech_requirements": "Технические требования",
         "design": "Дизайн и UI/UX",
         "extras": "Дополнительные требования",
+        "platforms": "Платформы",
+        "native_modules": "Нативные модули",
+        "state_mgmt": "Управление состоянием",
+        "rendering": "Рендеринг",
     }
     for step_id, label in step_labels.items():
         answer = answers.get(step_id, "").strip()

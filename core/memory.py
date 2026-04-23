@@ -215,6 +215,13 @@ class PromptDraft(Base):
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
+class SystemSetting(Base):
+    """Системные настройки — персистентное хранилище ключей и конфигов в БД."""
+    __tablename__ = "system_settings"
+    key: Mapped[str] = mapped_column(primary_key=True)  # уникальный ключ
+    value: Mapped[str] = mapped_column(Text, default="")  # JSON или текст
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
 # ═══════════════════════════════════════════════════════════════
 # INIT
 # ═══════════════════════════════════════════════════════════════
@@ -624,6 +631,29 @@ async def delete_prompt_draft(draft_id: int) -> bool:
                 await session.delete(draft)
                 return True
             return False
+
+# ═══════════════════════════════════════════════════════════════
+# SYSTEM SETTINGS (Персистентное хранилище в БД)
+# ═══════════════════════════════════════════════════════════════
+
+async def get_system_setting(key: str) -> str | None:
+    """Получить значение системной настройки."""
+    async with async_session() as session:
+        result = await session.execute(select(SystemSetting).where(SystemSetting.key == key))
+        setting = result.scalar_one_or_none()
+        return setting.value if setting else None
+
+async def set_system_setting(key: str, value: str):
+    """Сохранить системную настройку (upsert)."""
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(select(SystemSetting).where(SystemSetting.key == key))
+            setting = result.scalar_one_or_none()
+            if setting:
+                setting.value = value
+                setting.updated_at = datetime.utcnow()
+            else:
+                session.add(SystemSetting(key=key, value=value))
 
 # ═══════════════════════════════════════════════════════════════
 # CHAT HISTORY CRUD

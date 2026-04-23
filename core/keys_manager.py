@@ -231,6 +231,7 @@ class KeysManager:
         self.github_user: str = ""
         self.expo_token: str = ""
         self.expo_enabled: bool = False
+        self._db_restore_pending: bool = False  # Флаг восстановления из БД
         self._load_keys()
 
     # ─── Storage ─────────────────────────────────────────────
@@ -263,6 +264,13 @@ class KeysManager:
 
         # Load API keys from environment variables (Render, Railway, etc.)
         self._load_env_keys()
+
+        # CRITICAL: Если keys.yaml был пустой (Render ephemeral FS),
+        # восстанавливаем ключи из БД (PostgreSQL персистентна)
+        if not loaded or not self.providers:
+            self._db_restore_pending = True  # Флаг: нужно восстановить из БД после init_db()
+        else:
+            self._db_restore_pending = False
 
     def _try_load_legacy_json(self):
         """Загрузить и мигрировать старый data/keys.json (legacy формат)."""
@@ -409,6 +417,9 @@ class KeysManager:
             }
             with open(KEYS_FILE, "w", encoding="utf-8") as f:
                 yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
+            # Персистентное сохранение в БД (на случай если FS эфемерная — Render)
+            self._db_save_pending = yaml.dump(data, default_flow_style=False, allow_unicode=True)
         except Exception as e:
             print(f"  [keys_manager] Warning: could not save keys to {KEYS_FILE}: {e}")
             try:
@@ -618,6 +629,73 @@ class KeysManager:
             "enabled": self.expo_enabled,
             "has_token": bool(self.expo_token),
         }
+
+    # ─── DB Persistence (Render / ephemeral FS) ────────────
+
+    def _db_save_pending(self, yaml_content: str):
+        """Пометить что нужно сохранить в БД (вызывается после _save_keys)."""
+        # Это свойство-триггер, реальное сохранение происходит в sync_to_db()
+        self.__db_pending_yaml = yaml_content
+
+    async def sync_to_db(self):
+        """Сохранить текущее состояние ключей в БД (вызывать из async context)."""
+        try:
+            from core.memory import get_system_setting, set_system_setting
+            # Сохраняем отложенные данные или текущее состояние
+            yaml_content = getattr(self, '__db_pending_yaml', None)
+            if yaml_content:
+                await set_system_setting("keys_yaml_backup", yaml_content)
+                self.__db_pending_yaml = None
+                print(f"  [keys] Keys synced to database backup")
+        except Exception as e:
+            print(f"  [keys] Warning: could not sync keys to DB: {e}")
+
+    async def restore_from_db(self):
+        """Восстановить ключи из БД (если keys.yaml пустой)."""
+        try:
+            from core.memory import get_system_setting
+            yaml_content = await get_system_setting("keys_yaml_backup")
+            if not yaml_content:
+                print(f"  [keys] No DB backup found — skipping restore")
+                return False
+
+            data = yaml.safe_load(yaml_content)
+            if not data:
+                return False
+
+            # Восстанавливаем провайдеры (не перезаписывая env-loaded)
+            db_providers = data.get("providers", {})
+            if db_providers and not self.providers:
+                self.providers = db_providers
+                print(f"  [keys] Restored {len(db_providers)} provider(s) from database")
+
+            # GitHub
+            db_github = data.get("github", {})
+            if db_github.get("token") and not self.github_token:
+                self.github_token = db_github["token"]
+                self.github_enabled = db_github.get("enabled", True)
+                self.github_user = db_github.get("user", "")
+                print(f"  [keys] Restored GitHub token from database")
+
+            # Expo
+            db_expo = data.get("expo", {})
+            if db_expo.get("token") and not self.expo_token:
+                self.expo_token = db_expo["token"]
+                self.expo_enabled = db_expo.get("enabled", True)
+                os.environ["EXPO_TOKEN"] = self.expo_token
+                print(f"  [keys] Restored Expo token from database")
+
+            # Local/custom models
+            if not self.local_models:
+                self.local_models = data.get("local_models", [])
+            if not self.custom_models:
+                self.custom_models = data.get("custom_models", [])
+
+            self._save_keys()
+            return True
+        except Exception as e:
+            print(f"  [keys] Warning: could not restore keys from DB: {e}")
+            return False
 
     # ─── Local Models ────────────────────────────────────────
 
