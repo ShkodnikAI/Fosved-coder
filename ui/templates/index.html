@@ -45,7 +45,7 @@
             </button>
         </div>
         <div class="header-center">
-            <div class="header-title" id="current-project-name">FOSVED CODER</div>
+            <div class="header-title no-project" id="current-project-name">FOSVED CODER<span class="header-title-progress-bg" id="title-progress-bg"></span></div>
             <div class="progress-bar-mini" id="header-progress" style="display:none">
                 <div class="progress-fill" id="header-progress-fill"></div>
                 <span class="progress-text" id="header-progress-text">0%</span>
@@ -1064,6 +1064,8 @@
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 setWaitingAI(false);
                 currentAiDiv = null; currentAiText = "";
+                // Auto-increment project progress after successful AI response
+                if (currentProjectId) autoIncrementProgress();
             } else if (data.type === "error") {
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
                 setWaitingAI(false);
@@ -2131,18 +2133,18 @@
         document.querySelectorAll(".project-item").forEach(el => el.classList.remove("active"));
         element.classList.add("active");
         const name = projectId ? element.querySelector(".project-name").textContent.replace("📁 ","") : "Общий контекст";
-        document.getElementById("current-project-name").textContent = name === "Общий контекст" ? "FOSVED CODER" : name;
+        const titleEl = document.getElementById("current-project-name");
+        // Keep the progress-bg span, only update text node
+        const progressBg = document.getElementById("title-progress-bg");
+        titleEl.textContent = name === "Общий контекст" ? "FOSVED CODER" : name;
+        titleEl.appendChild(progressBg);
 
-        const progressBar = document.getElementById("header-progress");
+        // Apply progress color effect to title
+        updateTitleProgress(projectId);
+
         if (projectId) {
             try {
                 const p = allProjects.find(pr => pr.id === projectId);
-                if (p && p.progress > 0) {
-                    progressBar.style.display = "flex";
-                    document.getElementById("header-progress-fill").style.width = p.progress + "%";
-                    document.getElementById("header-progress-text").textContent = p.progress + "%";
-                } else { progressBar.style.display = "none"; }
-
                 if (p && p.selected_models) {
                     try {
                         const models = JSON.parse(p.selected_models);
@@ -2156,9 +2158,8 @@
                         } else { priorityModels = []; renderModels(); }
                     } catch(e) { priorityModels = []; renderModels(); }
                 } else { priorityModels = []; renderModels(); }
-            } catch(e) { progressBar.style.display = "none"; }
+            } catch(e) {}
         } else {
-            progressBar.style.display = "none";
             priorityModels = [];
             renderModels();
         }
@@ -2166,6 +2167,91 @@
         renderBottomBar();
         renderProjectModels();
         addMessage("system", "Контекст: " + name);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TITLE PROGRESS EFFECT — project name color fills with amber
+    // ═══════════════════════════════════════════════════════
+    function updateTitleProgress(projectId, forceProgress) {
+        const titleEl = document.getElementById("current-project-name");
+        const progressBg = document.getElementById("title-progress-bg");
+        if (!titleEl || !progressBg) return;
+
+        if (!projectId) {
+            // No project selected — default amber glow
+            titleEl.className = 'header-title no-project';
+            progressBg.style.width = '0%';
+            progressBg.classList.remove('visible');
+            return;
+        }
+
+        // Get progress value
+        let progress = forceProgress;
+        if (progress === undefined || progress === null) {
+            const p = allProjects.find(pr => pr.id === projectId);
+            progress = p ? (p.progress || 0) : 0;
+        }
+        progress = Math.max(0, Math.min(100, progress));
+
+        // Update text color class
+        if (progress > 0) {
+            titleEl.className = 'header-title has-progress';
+            progressBg.style.width = progress + '%';
+            progressBg.classList.add('visible');
+        } else {
+            // Dark/dim appearance for 0% progress
+            titleEl.className = 'header-title';
+            titleEl.style.color = 'rgba(255,255,255,0.3)';
+            titleEl.style.textShadow = 'none';
+            progressBg.style.width = '0%';
+            progressBg.classList.remove('visible');
+            // Brief flash then settle to dim
+            setTimeout(() => {
+                if (titleEl.className === 'header-title') {
+                    titleEl.style.color = 'rgba(255,255,255,0.25)';
+                }
+            }, 300);
+        }
+        // Clear inline styles when has-progress is set (CSS class handles it)
+        if (progress > 0) {
+            titleEl.style.color = '';
+            titleEl.style.textShadow = '';
+        }
+    }
+
+    // Auto-increment project progress based on AI interactions
+    async function autoIncrementProgress() {
+        if (!currentProjectId) return;
+        const p = allProjects.find(pr => pr.id === currentProjectId);
+        if (!p) return;
+        const current = p.progress || 0;
+        if (current >= 100) return;
+
+        // Increment based on current level (slower as it gets higher)
+        let delta = 3;
+        if (current >= 30) delta = 2;
+        if (current >= 60) delta = 1;
+        if (current >= 85) delta = 0;
+
+        if (delta > 0) {
+            const newProgress = Math.min(100, current + delta);
+            p.progress = newProgress;
+            try {
+                await fetch(`/api/v1/projects/${currentProjectId}/progress`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ progress: newProgress })
+                });
+            } catch(e) {}
+            updateTitleProgress(currentProjectId, newProgress);
+            // Also update the sidebar progress if visible
+            const progressBar = document.getElementById("header-progress");
+            if (newProgress > 0 && progressBar) {
+                progressBar.style.display = 'flex';
+                document.getElementById("header-progress-fill").style.width = newProgress + '%';
+                document.getElementById("header-progress-text").textContent = newProgress + '%';
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════

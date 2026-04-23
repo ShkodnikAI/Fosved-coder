@@ -497,6 +497,16 @@ async def update_progress(req: UpdateProgressRequest):
     except Exception: pass
     raise HTTPException(404, "Проект не найден")
 
+@router.put("/projects/{project_id}/progress")
+async def update_progress_by_id(project_id: int, body: dict = Body(default={})):
+    """Update project progress by ID in URL path."""
+    progress = body.get("progress", 0)
+    try: action_logger.log("UPDATE_PROGRESS", source="api", project_id=project_id, details={"progress": progress})
+    except Exception: pass
+    if await update_project_progress(project_id, progress):
+        return {"success": True, "progress": progress}
+    raise HTTPException(404, "Проект не найден")
+
 @router.put("/projects/models")
 async def update_models(req: UpdateModelsRequest):
     try: action_logger.log("UPDATE_MODELS", source="api", project_id=req.project_id, details={"model_ids": req.model_ids})
