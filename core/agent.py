@@ -416,7 +416,8 @@ def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
 
 async def stream_llm_response(prompt: str, history: list, websocket,
                               model: str = None, system_prompt: str = None,
-                              project_path: str | None = None, use_tools: bool = True):
+                              project_path: str | None = None, use_tools: bool = True,
+                              _error_info: dict = None):
     """Stream AI response with tool calling support. Loops until no more tool calls."""
     if model is None:
         model = CONFIG["llm"].get("default_model")
@@ -474,7 +475,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             except Exception as tool_err:
                 err_str = str(tool_err)
                 # If tools not supported, retry without tools
-                if "tools" in err_str.lower() or "function" in err_str.lower() or "parameter" in err_str.lower():
+                if "tools" in err_str.lower() or "tool use" in err_str.lower() or "function" in err_str.lower() or "parameter" in err_str.lower():
                     print(f"  [agent] Tools not supported by {model}, retrying without tools")
                     use_tools = False
                     kwargs.pop("tools", None)
@@ -545,6 +546,8 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                 error_msg = "Ошибка 401: Неверный API ключ."
             elif "429" in error_msg:
                 error_msg = "Ошибка 429: Лимит запросов исчерпан."
+            elif "402" in error_msg or "insufficient credits" in error_msg.lower():
+                error_msg = "Ошибка 402: Недостаточно кредитов."
             elif "500" in error_msg:
                 error_msg = "Ошибка 500: Сервер ИИ недоступен."
             elif "timeout" in error_msg.lower():
@@ -554,6 +557,9 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
             await websocket.send_json({"type": "error", "content": error_msg})
             await _send_log(websocket, f"❌ {model}: {error_msg}", "error")
+            # Signal 402 to caller for provider skipping in fallback
+            if _error_info is not None and ("402" in error_msg or "insufficient credits" in error_msg.lower()):
+                _error_info["no_credits"] = True
             return None
 
     # Max iterations reached
@@ -701,6 +707,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     # Try each model
     ai_response = None
     tried_count = 0
+    no_credits_providers = set()  # providers that returned 402 — skip remaining models from them
 
     for i, model_to_try in enumerate(models_to_try):
         model_config = keys_manager.get_model_config(model_to_try)
@@ -711,6 +718,12 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if not has_key and not is_local:
             continue
 
+        # Skip models from providers with no credits (402)
+        model_provider = model_config.get("provider", "")
+        if model_provider in no_credits_providers:
+            print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} has no credits")
+            continue
+
         tried_count += 1
         print(f"  [agent] trying model #{i}: {model_to_try}")
 
@@ -719,14 +732,19 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if i > 0:
             m_info = next((m for m in all_models if m["id"] == model_to_try), None)
             model_name = m_info["name"] if m_info else model_to_try
-            await websocket.send_json({"type": "info", "content": f"Переключаюсь на {model_name} (попытка {i+1})..."})
-            await _send_log(websocket, f"🔄 Переключаюсь на {model_name} (попытка {i+1})", "warning")
+            await websocket.send_json({"type": "info", "content": f"Переключаюсь на {model_name} (попытка {tried_count})..."})
+            await _send_log(websocket, f"🔄 Переключаюсь на {model_name} (попытка {tried_count})", "warning")
 
+        error_info = {}
         ai_response = await stream_llm_response(
             prompt, history, websocket,
             model=model_to_try, system_prompt=system_prompt,
-            project_path=project_path, use_tools=True
+            project_path=project_path, use_tools=True,
+            _error_info=error_info
         )
+        if error_info.get("no_credits") and model_provider:
+            no_credits_providers.add(model_provider)
+            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
         if ai_response is not None:
             break
 
