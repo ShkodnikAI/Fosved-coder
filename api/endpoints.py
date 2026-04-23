@@ -22,6 +22,8 @@ from core.memory import (
     get_all_ideas, delete_idea, get_message_count,
     save_routing_stat, get_routing_stats, get_history, save_message,
     save_project_archive, get_all_archives, get_archive,
+    create_prompt_draft, get_prompt_draft, list_prompt_drafts,
+    update_prompt_draft, delete_prompt_draft,
 )
 from core.keys_manager import keys_manager, PROVIDER_DEFS, LOCAL_PROVIDERS
 from core.action_logger import get_logger
@@ -205,6 +207,19 @@ class DiscoverLocalModelsRequest(BaseModel):
     provider_key: str  # ollama, lmstudio, vllm, llamacpp, custom_local
     base_url: str = ""
 
+class CreateDraftRequest(BaseModel):
+    title: str = "Новый проект"
+    template: str = ""
+
+class UpdateDraftRequest(BaseModel):
+    title: str = ""
+    template: str = ""
+    answers: dict = {}
+    generated_prompt: str = ""
+    discussion: list = []
+    current_step: int = -1  # -1 = don't change
+    status: str = ""  # draft | ready | converted
+
 
 # ═══════════════════════════════════════════════════════════════
 # KEYS & MODELS
@@ -336,6 +351,146 @@ async def toggle_provider(provider_id: str, req: ToggleProviderRequest):
     if not result["success"]:
         raise HTTPException(404, result["error"])
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# PROMPT DRAFTS (Анкеты — подготовка к созданию проекта)
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/drafts")
+async def get_drafts():
+    """Список всех черновиков анкет."""
+    try: action_logger.api_call("GET", "/api/v1/drafts")
+    except Exception: pass
+    drafts = await list_prompt_drafts()
+    return {"drafts": drafts, "count": len(drafts)}
+
+@router.post("/drafts")
+async def create_draft(req: CreateDraftRequest):
+    """Создать новый черновик анкеты."""
+    try: action_logger.log("CREATE_DRAFT", source="api", details={"title": req.title, "template": req.template})
+    except Exception: pass
+    draft = await create_prompt_draft(title=req.title or "Новый проект", template=req.template)
+    return draft
+
+@router.get("/drafts/{draft_id}")
+async def get_draft(draft_id: int):
+    """Получить полный черновик по ID."""
+    try: action_logger.api_call("GET", f"/api/v1/drafts/{draft_id}")
+    except Exception: pass
+    draft = await get_prompt_draft(draft_id)
+    if not draft:
+        raise HTTPException(404, "Черновик не найден")
+    return draft
+
+@router.put("/drafts/{draft_id}")
+async def update_draft(draft_id: int, req: UpdateDraftRequest):
+    """Обновить черновик анкеты."""
+    try: action_logger.log("UPDATE_DRAFT", source="api", details={"draft_id": draft_id})
+    except Exception: pass
+    kwargs = {}
+    if req.title: kwargs["title"] = req.title
+    if req.template: kwargs["template"] = req.template
+    if req.answers: kwargs["answers"] = req.answers
+    if req.generated_prompt: kwargs["generated_prompt"] = req.generated_prompt
+    if req.discussion: kwargs["discussion"] = req.discussion
+    if req.current_step >= 0: kwargs["current_step"] = req.current_step
+    if req.status: kwargs["status"] = req.status
+    draft = await update_prompt_draft(draft_id, **kwargs)
+    if not draft:
+        raise HTTPException(404, "Черновик не найден")
+    return draft
+
+@router.delete("/drafts/{draft_id}")
+async def remove_draft(draft_id: int):
+    """Удалить черновик."""
+    try: action_logger.log("DELETE_DRAFT", source="api", details={"draft_id": draft_id})
+    except Exception: pass
+    if not await delete_prompt_draft(draft_id):
+        raise HTTPException(404, "Черновик не найден")
+    return {"success": True, "draft_id": draft_id}
+
+@router.post("/drafts/{draft_id}/generate-prompt")
+async def generate_draft_prompt(draft_id: int):
+    """Сгенерировать финальный промпт из ответов анкеты (через ИИ)."""
+    try: action_logger.log("GENERATE_PROMPT", source="api", details={"draft_id": draft_id})
+    except Exception: pass
+    draft = await get_prompt_draft(draft_id)
+    if not draft:
+        raise HTTPException(404, "Черновик не найден")
+    answers = draft.get("answers", {})
+    template = draft.get("template", "")
+    title = draft.get("title", "")
+
+    # Составляем промпт из ответов
+    sections = []
+    step_labels = {
+        "idea": "Идея проекта",
+        "audience": "Целевая аудитория",
+        "features": "Ключевой функционал",
+        "environment": "Среда и деплой",
+        "repository": "Репозиторий и Git",
+        "references": "Примеры и референсы",
+        "tech_requirements": "Технические требования",
+        "design": "Дизайн и UI/UX",
+        "extras": "Дополнительные требования",
+    }
+    for step_id, label in step_labels.items():
+        answer = answers.get(step_id, "").strip()
+        if answer:
+            sections.append(f"## {label}\n{answer}")
+
+    prompt_parts = []
+    if title:
+        prompt_parts.append(f"# Проект: {title}")
+    if template:
+        prompt_parts.append(f"**Шаблон:** {template}")
+    if sections:
+        prompt_parts.append("\n\n".join(sections))
+
+    generated = "\n\n".join(prompt_parts)
+
+    # Сохраняем сгенерированный промпт
+    await update_prompt_draft(draft_id, generated_prompt=generated, status="ready")
+    return {"success": True, "generated_prompt": generated, "status": "ready"}
+
+@router.post("/drafts/{draft_id}/convert-to-project")
+async def convert_draft_to_project(draft_id: int):
+    """Конвертировать черновик анкеты в проект."""
+    try: action_logger.log("CONVERT_DRAFT_TO_PROJECT", source="api", details={"draft_id": draft_id})
+    except Exception: pass
+    draft = await get_prompt_draft(draft_id)
+    if not draft:
+        raise HTTPException(404, "Черновик не найден")
+
+    title = draft.get("title", "Без названия")
+    template = draft.get("template", "")
+    generated = draft.get("generated_prompt", "")
+    answers = draft.get("answers", {})
+
+    # Извлекаем данные из ответов анкеты
+    ideas = answers.get("references", "") or answers.get("extras", "")
+    github_repo = answers.get("repository", "") or ""
+
+    # Создаём проект
+    projects_dir = CONFIG["system"]["projects_dir"]
+    project_path = f"{projects_dir}/{title.replace(' ', '_').lower()}"
+    result = await create_project(
+        title, project_path,
+        description=answers.get("idea", ""),
+        base_prompt=generated,
+        ideas=ideas,
+        github_repo=github_repo,
+        template=template or None,
+    )
+
+    if not result:
+        raise HTTPException(400, "Проект с таким именем уже существует")
+
+    # Помечаем черновик как конвертированный
+    await update_prompt_draft(draft_id, status="converted")
+
+    return {"success": True, "project": result, "draft_id": draft_id}
 
 
 @router.get("/models")

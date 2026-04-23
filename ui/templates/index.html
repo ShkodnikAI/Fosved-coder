@@ -78,6 +78,17 @@
                 </div>
             </div>
 
+            <!-- Подготовка (промпт-анкеты, черновики) -->
+            <div class="sidebar-section" id="drafts-section" style="flex:0 0 auto; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0; max-height:140px; border-bottom:1px solid var(--border);">
+                <div class="section-header" data-hint="Промпт-анкета: пошаговая подготовка проекта перед созданием. Успех на 80% зависит от правильной постановки задачи.">
+                    <h3 style="color:var(--amber);">Подготовка</h3>
+                    <button class="btn-add" onclick="createNewDraft()" title="Новая анкета" style="font-size:14px; padding:2px 8px; line-height:1;">+</button>
+                </div>
+                <div id="drafts-list" style="flex:1; overflow-y:auto;">
+                    <div style="color:var(--text-secondary); font-size:11px; padding:4px 8px;">Нет черновиков</div>
+                </div>
+            </div>
+
             <!-- AI Models (gets most of the space) -->
             <div class="sidebar-section" style="flex:3; display:flex; flex-direction:column; overflow:hidden; border-bottom:none; padding-bottom:0;">
                 <div class="section-header" data-hint="Выбирайте модели ИИ для чата. Кликните на модель, чтобы сделать её активной.">
@@ -93,9 +104,6 @@
                 <div id="models-list" style="flex:1; overflow-y:auto; margin-right:-4px; padding-right:4px;">
                     <div class="model-card loading">Загрузка...</div>
                 </div>
-
-                <!-- Add model button -->
-                <button class="add-model-btn" onclick="showAddModelMenu(event)">+ Добавить модель вручную</button>
             </div>
 
             <!-- Project Models (shown when project is active) -->
@@ -106,9 +114,7 @@
 
             <!-- Bottom buttons (compact) -->
             <div style="display:flex; gap:4px; padding:8px 15px; border-top:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0;">
-                <button class="btn-add" onclick="scanLocalModels('ollama')" title="Ollama" data-hint="Найти локальные модели Ollama на этом устройстве" style="flex:1; font-size:11px; padding:4px 6px;">🔍 Ollama</button>
-                <button class="btn-add" onclick="scanLocalModels('lmstudio')" title="LM Studio" data-hint="Найти локальные модели LM Studio на этом устройстве" style="flex:1; font-size:11px; padding:4px 6px;">🔍 LM</button>
-                <button class="btn-add" onclick="showKeysModal()" data-hint="Управление API ключами — Claude, OpenAI, Gemini, Kimi, Abacus.AI и др." style="flex:1; font-size:11px; padding:4px 6px;">🔑</button>
+                <button class="btn-add" onclick="showKeysModal()" data-hint="Управление ключами, токенами, моделями — Claude, OpenAI, Gemini, Expo и др." style="flex:2; font-size:11px; padding:4px 6px;">🔑 Ключи</button>
                 <button class="btn-add" onclick="refreshModels()" data-hint="Обновить список моделей и проверить статусы" style="flex:1; font-size:11px; padding:4px 6px;">🔄</button>
                 <button class="btn-add" onclick="showStats()" data-hint="Статистика использования моделей и роутинга" style="flex:1; font-size:11px; padding:4px 6px;">📊</button>
             </div>
@@ -138,7 +144,7 @@
             </div>
             <div class="input-area">
                 <div class="input-wrapper">
-                    <textarea id="user-input" placeholder="Опишите задачу для ИИ..." rows="1" onkeydown="handleKeyDown(event)"></textarea>
+                    <textarea id="user-input" placeholder="Опишите задачу для ИИ..." rows="4" onkeydown="handleKeyDown(event)" style="min-height:90px;"></textarea>
                     <div class="input-actions">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label class="file-label">📎 Прикрепить файл
@@ -1035,6 +1041,7 @@
             addMessage("system", "Fosved Coder готов. Выберите модель и начните работу.");
             loadModels();
             loadProjects();
+            loadDrafts();
             // Start heartbeat
             wsHeartbeatInterval = setInterval(() => {
                 if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2599,6 +2606,15 @@
                 </div>
             </div></div>`;
 
+            html += `<div class="keys-section"><h3>Модели</h3>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <button class="btn-small btn-outline" onclick="scanLocalModels('ollama'); closeGenericModal();" style="padding:8px; font-size:12px; text-align:left;">🔍 Найти модели Ollama</button>
+                    <button class="btn-small btn-outline" onclick="scanLocalModels('lmstudio'); closeGenericModal();" style="padding:8px; font-size:12px; text-align:left;">🔍 Найти модели LM Studio</button>
+                    <button class="btn-small btn-outline" onclick="showAddLocalModelModal(); closeGenericModal();" style="padding:8px; font-size:12px; text-align:left;">+ Добавить локальную модель вручную</button>
+                    <button class="btn-small btn-outline" onclick="showAddCustomModelModal(); closeGenericModal();" style="padding:8px; font-size:12px; text-align:left;">+ Подключить модель по URL</button>
+                </div>
+            </div>`;
+
             openGenericModal("Управление ключами", html);
         } catch(e) { openGenericModal("Ошибка", "Не удалось загрузить данные ключей."); }
     }
@@ -2709,6 +2725,306 @@
 
     async function toggleExpo(enabled) {
         try { await fetch("/api/v1/keys/expo/toggle",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})}); showKeysModal(); } catch(e) { showToast("Ошибка: "+e, "error"); }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // PROMPT DRAFTS (Анкета — подготовка проекта)
+    // ═══════════════════════════════════════════════════════
+
+    let allDrafts = [];
+
+    // Шаги анкеты (общие для всех шаблонов)
+    const QUESTIONNAIRE_STEPS = [
+        {id: "template", label: "Шаблон проекта", type: "select", hint: "Выберите технологию. Это определит дальнейшие вопросы.",
+         options: [
+             {value: "fastapi", label: "FastAPI — Python API backend"},
+             {value: "flask", label: "Flask — Python веб-фреймворк"},
+             {value: "react", label: "React — SPA frontend"},
+             {value: "nextjs", label: "Next.js — React SSR фреймворк"},
+             {value: "expo", label: "Expo — мобильное приложение"},
+             {value: "python-cli", label: "Python CLI — консольная утилита"},
+         ]},
+        {id: "idea", label: "Идея проекта", type: "textarea", hint: "Что именно вы хотите создать? Опишите основную концепцию, проблему, которую решаете, и желаемый результат. Чем подробнее — тем лучше."},
+        {id: "audience", label: "Целевая аудитория", type: "textarea", hint: "Кто будет использовать этот продукт? Опишите пользователей: технический уровень, возраст, контекст использования."},
+        {id: "features", label: "Ключевой функционал", type: "textarea", hint: "Перечислите 3-7 главных функций/фич. Что пользователь обязательно должен уметь делать?"},
+        {id: "environment", label: "Среда и деплой", type: "textarea", hint: "Где будет работать? (локально / сервер / Render / Railway / Vercel / Docker). Какие сервисы используются? (БД, кэш, очередь, S3)"},
+        {id: "repository", label: "Репозиторий и Git", type: "text", hint: "Ссылка на GitHub репозиторий (если есть) или укажите 'создать новый'."},
+        {id: "references", label: "Примеры и референсы", type: "textarea", hint: "Ссылки на аналогичные проекты, скриншоты, документацию. Всё что поможет ИИ лучше понять что нужно."},
+        {id: "tech_requirements", label: "Технические требования", type: "textarea", hint: "Языки, библиотеки, БД (PostgreSQL/MySQL/MongoDB), авторизация (JWT/OAuth), API стиль (REST/GraphQL), и т.д."},
+        {id: "design", label: "Дизайн и UI/UX", type: "textarea", hint: "Цветовая схема, стиль (минималистичный/корпоративный/игровой), адаптивность, тёмная/светлая тема."},
+        {id: "extras", label: "Дополнительные требования", type: "textarea", hint: "Всё что не вошло в предыдущие пункты: лимиты, производительность, безопасность, локализация, тесты, CI/CD."},
+    ];
+
+    // Шаблон-специфичные вопросы (добавляются после общих)
+    const TEMPLATE_EXTRA_STEPS = {
+        "expo": [
+            {id: "platforms", label: "Платформы", type: "text", hint: "iOS, Android, Web — какие платформы нужны?"},
+            {id: "native_modules", label: "Нативные модули", type: "textarea", hint: "Нужны ли нативные модули? (камера, геолокация, push, биометрия, Bluetooth)"},
+        ],
+        "react": [
+            {id: "state_mgmt", label: "Управление состоянием", type: "text", hint: "Redux, Zustand, Context API, MobX?"},
+        ],
+        "nextjs": [
+            {id: "rendering", label: "Рендеринг", type: "text", hint: "SSR, SSG, ISR, CSR — какой стиль рендеринга?"},
+        ],
+    };
+
+    async function loadDrafts() {
+        try {
+            const resp = await fetch("/api/v1/drafts");
+            const data = await resp.json();
+            allDrafts = data.drafts || [];
+            renderDraftsList();
+        } catch(e) { console.error("Failed to load drafts:", e); }
+    }
+
+    function renderDraftsList() {
+        const container = document.getElementById("drafts-list");
+        if (!allDrafts.length) {
+            container.innerHTML = '<div style="color:var(--text-secondary); font-size:11px; padding:4px 8px;">Нет черновиков</div>';
+            return;
+        }
+        let html = '';
+        for (const d of allDrafts) {
+            const statusBadge = d.status === 'ready'
+                ? '<span style="color:var(--green); font-size:10px; margin-left:4px;">Готов</span>'
+                : `<span style="color:var(--text-secondary); font-size:10px; margin-left:4px;">${d.current_step}/${QUESTIONNAIRE_STEPS.length}</span>`;
+            const tplBadge = d.template ? `<span style="color:var(--blue); font-size:9px; background:var(--bg-secondary); padding:1px 4px; border-radius:3px; margin-left:4px;">${d.template}</span>` : '';
+            html += `<div class="project-item" onclick="openDraftWizard(${d.id})" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
+                    <span style="color:var(--amber); margin-right:4px;">📝</span>${escapeHtml(d.title)}${tplBadge}${statusBadge}
+                </div>
+                <button onclick="event.stopPropagation(); deleteDraft(${d.id})" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:12px; padding:0 4px; opacity:0.5;" title="Удалить">✕</button>
+            </div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    async function createNewDraft() {
+        try {
+            const resp = await fetch("/api/v1/drafts", {
+                method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({title: "Новый проект", template: ""})
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                allDrafts.unshift(data);
+                renderDraftsList();
+                openDraftWizard(data.id);
+                showToast("Черновик создан", "success");
+            }
+        } catch(e) { showToast("Ошибка: " + e, "error"); }
+    }
+
+    async function deleteDraft(draftId) {
+        if (!confirm("Удалить черновик?")) return;
+        try {
+            await fetch(`/api/v1/drafts/${draftId}`, {method: "DELETE"});
+            allDrafts = allDrafts.filter(d => d.id !== draftId);
+            renderDraftsList();
+            showToast("Черновик удалён", "success");
+        } catch(e) { showToast("Ошибка: " + e, "error"); }
+    }
+
+    // Текущий открытый черновик
+    let currentDraft = null;
+    let currentDraftStep = 0;
+
+    async function openDraftWizard(draftId) {
+        try {
+            const resp = await fetch(`/api/v1/drafts/${draftId}`);
+            const data = await resp.json();
+            if (!resp.ok) { showToast("Черновик не найден", "error"); return; }
+            currentDraft = data;
+            currentDraftStep = data.current_step || 0;
+            renderDraftWizard();
+        } catch(e) { showToast("Ошибка загрузки", "error"); }
+    }
+
+    function getStepsForDraft() {
+        const base = [...QUESTIONNAIRE_STEPS];
+        if (currentDraft && currentDraft.template && TEMPLATE_EXTRA_STEPS[currentDraft.template]) {
+            base.push(...TEMPLATE_EXTRA_STEPS[currentDraft.template]);
+        }
+        return base;
+    }
+
+    function renderDraftWizard() {
+        if (!currentDraft) return;
+        const steps = getStepsForDraft();
+        const step = steps[currentDraftStep] || steps[0];
+        const answers = currentDraft.answers || {};
+        const totalSteps = steps.length;
+
+        // Прогресс бар
+        let progressHtml = '<div style="display:flex; gap:3px; margin-bottom:16px;">';
+        for (let i = 0; i < totalSteps; i++) {
+            const done = answers[steps[i].id] ? 'var(--green)' : 'var(--border)';
+            const active = i === currentDraftStep ? 'var(--amber)' : done;
+            progressHtml += `<div style="flex:1; height:3px; border-radius:2px; background:${active};"></div>`;
+        }
+        progressHtml += '</div>';
+
+        // Шаг и навигация
+        let navHtml = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <button class="btn-small btn-outline" onclick="prevDraftStep()" ${currentDraftStep === 0 ? 'disabled style="opacity:0.3"' : ''}>← Назад</button>
+            <span style="color:var(--text-secondary); font-size:11px;">Шаг ${currentDraftStep + 1} / ${totalSteps}</span>
+            ${currentDraftStep < totalSteps - 1
+                ? '<button class="btn-small" onclick="nextDraftStep()">Далее →</button>'
+                : '<button class="btn-small" style="background:var(--green);" onclick="finishDraft()">Собрать промпт ✓</button>'}
+        </div>`;
+
+        // Заголовок шага
+        let stepHtml = `<div style="margin-bottom:4px;">
+            <h3 style="color:var(--amber); font-size:14px; margin:0;">${step.label}</h3>
+            <div style="color:var(--text-secondary); font-size:11px; margin-top:2px;">${step.hint}</div>
+        </div>`;
+
+        // Поле ввода
+        let inputHtml = '';
+        const val = answers[step.id] || '';
+        if (step.type === "select") {
+            inputHtml = `<select id="draft-step-input" style="width:100%; padding:8px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; font-size:13px; margin-top:8px;">
+                <option value="">— Не выбрано —</option>`;
+            for (const opt of (step.options || [])) {
+                inputHtml += `<option value="${opt.value}" ${val === opt.value ? 'selected' : ''}>${opt.label}</option>`;
+            }
+            inputHtml += '</select>';
+        } else if (step.type === "textarea") {
+            inputHtml = `<textarea id="draft-step-input" placeholder="${step.hint}" rows="5" style="width:100%; padding:8px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; font-size:13px; resize:vertical; margin-top:8px;">${escapeHtml(val)}</textarea>`;
+        } else {
+            inputHtml = `<input type="text" id="draft-step-input" value="${escapeHtml(val)}" placeholder="${step.hint}" style="width:100%; padding:8px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; font-size:13px; margin-top:8px;">`;
+        }
+
+        // Кнопки действий (внизу)
+        let actionsHtml = `<div style="display:flex; gap:8px; margin-top:16px; padding-top:12px; border-top:1px solid var(--border);">
+            <button class="btn-small btn-outline" onclick="saveDraftStep()">Сохранить</button>
+            <button class="btn-small btn-outline" onclick="closeDraftWizard()">Закрыть</button>
+            <div style="flex:1;"></div>
+            ${currentDraft.status === 'ready' ? `<button class="btn-small" style="background:var(--green);" onclick="convertDraftToProject()">Создать проект ➤</button>` : ''}
+        </div>`;
+
+        // Сгенерированный промпт (если готов)
+        let promptHtml = '';
+        if (currentDraft.generated_prompt) {
+            promptHtml = `<div style="margin-top:12px; padding:10px; background:var(--bg-secondary); border-radius:6px; border:1px solid var(--green);">
+                <div style="font-size:11px; color:var(--green); margin-bottom:6px; font-weight:600;">Сгенерированный промпт:</div>
+                <pre style="white-space:pre-wrap; font-size:11px; color:var(--text-primary); max-height:200px; overflow-y:auto; margin:0;">${escapeHtml(currentDraft.generated_prompt)}</pre>
+            </div>`;
+        }
+
+        const body = progressHtml + navHtml + stepHtml + inputHtml + actionsHtml + promptHtml;
+        openGenericModal(`📝 ${escapeHtml(currentDraft.title)}`, body);
+
+        // Автосохранение при изменении
+        setTimeout(() => {
+            const input = document.getElementById("draft-step-input");
+            if (input) {
+                input.addEventListener('change', () => saveDraftStep(true));
+                input.focus();
+            }
+        }, 100);
+    }
+
+    async function saveDraftStep(silent = false) {
+        if (!currentDraft) return;
+        const input = document.getElementById("draft-step-input");
+        if (!input) return;
+        const steps = getStepsForDraft();
+        const step = steps[currentDraftStep];
+        if (!step) return;
+
+        currentDraft.answers[step.id] = input.value;
+        // Если это выбор шаблона — обновляем template
+        if (step.id === "template") {
+            currentDraft.template = input.value;
+        }
+
+        try {
+            const resp = await fetch(`/api/v1/drafts/${currentDraft.id}`, {
+                method: "PUT", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    title: currentDraft.title,
+                    template: currentDraft.template,
+                    answers: currentDraft.answers,
+                    current_step: currentDraftStep,
+                })
+            });
+            const data = await resp.json();
+            currentDraft = data;
+            // Обновляем в списке
+            const idx = allDrafts.findIndex(d => d.id === currentDraft.id);
+            if (idx >= 0) allDrafts[idx] = {...allDrafts[idx], title: currentDraft.title, template: currentDraft.template, current_step: currentDraftStep, status: currentDraft.status};
+            renderDraftsList();
+            if (!silent) showToast("Сохранено", "success");
+        } catch(e) { if (!silent) showToast("Ошибка сохранения", "error"); }
+    }
+
+    function nextDraftStep() {
+        if (!currentDraft) return;
+        const steps = getStepsForDraft();
+        if (currentDraftStep < steps.length - 1) {
+            saveDraftStep(true);
+            currentDraftStep++;
+            renderDraftWizard();
+        }
+    }
+
+    function prevDraftStep() {
+        if (!currentDraft) return;
+        if (currentDraftStep > 0) {
+            saveDraftStep(true);
+            currentDraftStep--;
+            renderDraftWizard();
+        }
+    }
+
+    function closeDraftWizard() {
+        saveDraftStep(true);
+        currentDraft = null;
+        closeGenericModal();
+    }
+
+    async function finishDraft() {
+        if (!currentDraft) return;
+        await saveDraftStep(true);
+        try {
+            showToast("Генерируем промпт...", "info");
+            const resp = await fetch(`/api/v1/drafts/${currentDraft.id}/generate-prompt`, {method: "POST"});
+            const data = await resp.json();
+            if (data.success) {
+                currentDraft = {...currentDraft, generated_prompt: data.generated_prompt, status: data.status};
+                const idx = allDrafts.findIndex(d => d.id === currentDraft.id);
+                if (idx >= 0) allDrafts[idx].status = data.status;
+                renderDraftsList();
+                renderDraftWizard();
+                showToast("Промпт готов!", "success");
+            }
+        } catch(e) { showToast("Ошибка генерации", "error"); }
+    }
+
+    async function convertDraftToProject() {
+        if (!currentDraft || currentDraft.status !== 'ready') {
+            showToast("Сначала сгенерируйте промпт", "error");
+            return;
+        }
+        if (!confirm(`Создать проект "${currentDraft.title}" из этой анкеты? Черновик будет помечен как конвертированный.`)) return;
+        try {
+            const resp = await fetch(`/api/v1/drafts/${currentDraft.id}/convert-to-project`, {method: "POST"});
+            const data = await resp.json();
+            if (data.success) {
+                // Удаляем черновик из списка
+                allDrafts = allDrafts.filter(d => d.id !== currentDraft.id);
+                renderDraftsList();
+                closeGenericModal();
+                currentDraft = null;
+                // Обновляем проекты
+                await loadProjects();
+                showToast("Проект создан!", "success");
+            } else {
+                showToast(data.detail || "Ошибка", "error");
+            }
+        } catch(e) { showToast("Ошибка: " + e, "error"); }
     }
 
     // ═══════════════════════════════════════════════════════

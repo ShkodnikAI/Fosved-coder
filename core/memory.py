@@ -197,6 +197,24 @@ class ProjectArchive(Base):
     archive_path: Mapped[str] = mapped_column(default="")
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
+class PromptDraft(Base):
+    """Черновик промпта-анкеты — подготовка перед созданием проекта."""
+    __tablename__ = "prompt_drafts"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(default="Новый проект")  # рабочее название/идея
+    template: Mapped[str] = mapped_column(default="")  # fastapi, react, nextjs, expo, flask, python-cli, ""
+    status: Mapped[str] = mapped_column(default="draft")  # draft | ready | converted
+    # JSON: {step_id: answer, ...} — ответы на все шаги анкеты
+    answers: Mapped[str] = mapped_column(Text, default="{}")
+    # Сгенерированный финальный промпт (из ответов анкеты)
+    generated_prompt: Mapped[str] = mapped_column(Text, default="")
+    # JSON: [{role, content, timestamp}, ...] — контекст обсуждения с ИИ
+    discussion: Mapped[str] = mapped_column(Text, default="[]")
+    # Текущий шаг анкеты (0-based)
+    current_step: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
 # ═══════════════════════════════════════════════════════════════
 # INIT
 # ═══════════════════════════════════════════════════════════════
@@ -489,6 +507,121 @@ async def delete_idea(idea_id: int) -> bool:
             idea = result.scalar_one_or_none()
             if idea:
                 await session.delete(idea)
+                return True
+            return False
+
+# ═══════════════════════════════════════════════════════════════
+# PROMPT DRAFTS CRUD (Анкеты — подготовка к созданию проекта)
+# ═══════════════════════════════════════════════════════════════
+
+async def create_prompt_draft(title: str = "Новый проект", template: str = "") -> dict:
+    """Создать новый черновик промпт-анкеты."""
+    import json
+    async with async_session() as session:
+        async with session.begin():
+            draft = PromptDraft(title=title, template=template)
+            session.add(draft)
+            await session.flush()
+            return {
+                "id": draft.id,
+                "title": draft.title,
+                "template": draft.template,
+                "status": draft.status,
+                "answers": draft.answers,
+                "generated_prompt": draft.generated_prompt,
+                "discussion": draft.discussion,
+                "current_step": draft.current_step,
+                "created_at": str(draft.created_at),
+                "updated_at": str(draft.updated_at),
+            }
+
+async def get_prompt_draft(draft_id: int) -> dict | None:
+    """Получить черновик по ID."""
+    import json
+    async with async_session() as session:
+        result = await session.execute(select(PromptDraft).where(PromptDraft.id == draft_id))
+        d = result.scalar_one_or_none()
+        if d:
+            return {
+                "id": d.id,
+                "title": d.title,
+                "template": d.template,
+                "status": d.status,
+                "answers": json.loads(d.answers) if d.answers else {},
+                "generated_prompt": d.generated_prompt or "",
+                "discussion": json.loads(d.discussion) if d.discussion else [],
+                "current_step": d.current_step,
+                "created_at": str(d.created_at),
+                "updated_at": str(d.updated_at),
+            }
+        return None
+
+async def list_prompt_drafts() -> list[dict]:
+    """Список всех черновиков (только draft и ready, без converted)."""
+    import json
+    async with async_session() as session:
+        result = await session.execute(
+            select(PromptDraft).where(PromptDraft.status != "converted").order_by(PromptDraft.updated_at.desc())
+        )
+        return [
+            {
+                "id": d.id,
+                "title": d.title,
+                "template": d.template,
+                "status": d.status,
+                "current_step": d.current_step,
+                "created_at": str(d.created_at),
+                "updated_at": str(d.updated_at),
+            }
+            for d in result.scalars().all()
+        ]
+
+async def update_prompt_draft(draft_id: int, **kwargs) -> dict | None:
+    """Обновить черновик (title, template, answers, generated_prompt, discussion, current_step, status)."""
+    import json
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(select(PromptDraft).where(PromptDraft.id == draft_id))
+            draft = result.scalar_one_or_none()
+            if not draft:
+                return None
+            if "title" in kwargs:
+                draft.title = kwargs["title"]
+            if "template" in kwargs:
+                draft.template = kwargs["template"]
+            if "answers" in kwargs:
+                draft.answers = json.dumps(kwargs["answers"], ensure_ascii=False) if isinstance(kwargs["answers"], dict) else kwargs["answers"]
+            if "generated_prompt" in kwargs:
+                draft.generated_prompt = kwargs["generated_prompt"]
+            if "discussion" in kwargs:
+                draft.discussion = json.dumps(kwargs["discussion"], ensure_ascii=False) if isinstance(kwargs["discussion"], list) else kwargs["discussion"]
+            if "current_step" in kwargs:
+                draft.current_step = kwargs["current_step"]
+            if "status" in kwargs:
+                draft.status = kwargs["status"]
+            draft.updated_at = datetime.utcnow()
+            await session.flush()
+            return {
+                "id": draft.id,
+                "title": draft.title,
+                "template": draft.template,
+                "status": draft.status,
+                "answers": json.loads(draft.answers) if draft.answers else {},
+                "generated_prompt": draft.generated_prompt or "",
+                "discussion": json.loads(draft.discussion) if draft.discussion else [],
+                "current_step": draft.current_step,
+                "created_at": str(draft.created_at),
+                "updated_at": str(draft.updated_at),
+            }
+
+async def delete_prompt_draft(draft_id: int) -> bool:
+    """Удалить черновик."""
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(select(PromptDraft).where(PromptDraft.id == draft_id))
+            draft = result.scalar_one_or_none()
+            if draft:
+                await session.delete(draft)
                 return True
             return False
 
