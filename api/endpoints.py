@@ -117,7 +117,14 @@ class GitHubTokenRequest(BaseModel):
     token: str
     enabled: bool = True
 
+class ExpoTokenRequest(BaseModel):
+    token: str
+    enabled: bool = True
+
 class ToggleGitHubRequest(BaseModel):
+    enabled: bool
+
+class ToggleExpoRequest(BaseModel):
     enabled: bool
 
 class ToggleProviderRequest(BaseModel):
@@ -293,6 +300,31 @@ async def toggle_github(req: ToggleGitHubRequest):
     try: action_logger.log("TOGGLE_GITHUB", source="api", details={"enabled": req.enabled})
     except Exception: pass
     result = keys_manager.toggle_github(req.enabled)
+    return result
+
+@router.get("/keys/expo")
+async def get_expo_status():
+    """Статус Expo интеграции."""
+    try: action_logger.api_call("GET", "/api/v1/keys/expo")
+    except Exception: pass
+    return keys_manager.get_expo_status()
+
+@router.post("/keys/expo")
+async def set_expo_token(req: ExpoTokenRequest):
+    """Установка Expo токена для EAS Build."""
+    try: action_logger.log("SET_EXPO_TOKEN", source="api", details={"enabled": req.enabled})
+    except Exception: pass
+    keys_manager.set_expo_token(req.token, req.enabled)
+    try: action_logger.log("SET_EXPO_TOKEN", source="api", level="success", details={"enabled": req.enabled})
+    except Exception: pass
+    return {"success": True}
+
+@router.put("/keys/expo/toggle")
+async def toggle_expo(req: ToggleExpoRequest):
+    """Включение/отключение Expo интеграции."""
+    try: action_logger.log("TOGGLE_EXPO", source="api", details={"enabled": req.enabled})
+    except Exception: pass
+    result = keys_manager.toggle_expo(req.enabled)
     return result
 
 @router.put("/keys/{provider_id}/toggle")

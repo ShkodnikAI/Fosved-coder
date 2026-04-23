@@ -2539,9 +2539,10 @@
     // ═══════════════════════════════════════════════════════
     async function showKeysModal() {
         try {
-            const [provResp, ghResp] = await Promise.all([fetch("/api/v1/keys/providers"), fetch("/api/v1/keys/github")]);
+            const [provResp, ghResp, expoResp] = await Promise.all([fetch("/api/v1/keys/providers"), fetch("/api/v1/keys/github"), fetch("/api/v1/keys/expo")]);
             const provData = await provResp.json();
             const ghData = await ghResp.json();
+            const expoData = await expoResp.json();
             const providers = provData.providers || {};
             const configured = provData.configured || {};
 
@@ -2580,6 +2581,20 @@
                     ${ghData.has_token ?
                         `<button class="btn-small btn-outline" onclick="toggleGitHub(${!ghData.enabled})">${ghData.enabled?'Отключить':'Включить'}</button><button class="btn-small btn-danger" onclick="showAddGithubToken()">Заменить</button>` :
                         `<button class="btn-small" onclick="showAddGithubToken()">Добавить токен</button>`
+                    }
+                </div>
+            </div></div>`;
+
+            html += `<div class="keys-section"><h3>Expo (EAS Build)</h3><div class="key-card">
+                <div class="key-card-header">
+                    <span class="key-provider-name">Expo Token</span>
+                    <span class="key-status ${expoData.has_token?(expoData.enabled?'st-valid':'st-none'):'st-none'}">${expoData.has_token?(expoData.enabled?'Активен':'Отключён'):'Не настроен'}</span>
+                </div>
+                ${expoData.has_token ? '<div class="key-value">Токен: ●●●●●●●●</div>' : ''}
+                <div class="key-actions">
+                    ${expoData.has_token ?
+                        `<button class="btn-small btn-outline" onclick="toggleExpo(${!expoData.enabled})">${expoData.enabled?'Отключить':'Включить'}</button><button class="btn-small btn-danger" onclick="showAddExpoToken()">Заменить</button>` :
+                        `<button class="btn-small" onclick="showAddExpoToken()">Добавить токен</button>`
                     }
                 </div>
             </div></div>`;
@@ -2670,6 +2685,30 @@
 
     async function toggleGitHub(enabled) {
         try { await fetch("/api/v1/keys/github/toggle",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})}); showKeysModal(); } catch(e) { showToast("Ошибка: "+e, "error"); }
+    }
+
+    function showAddExpoToken() {
+        openGenericModal("Expo Token", `<div class="keys-section"><div class="key-form">
+            <label class="key-label">Expo Access Token (для EAS Build)</label>
+            <input type="password" id="expo-token" class="key-input" placeholder="Expo token...">
+            <div class="key-form-actions">
+                <button class="btn-small btn-outline" onclick="showKeysModal()">Отмена</button>
+                <button class="btn-small" onclick="saveExpoToken()">Сохранить</button>
+            </div>
+        </div></div>`);
+    }
+
+    async function saveExpoToken() {
+        const token = document.getElementById("expo-token").value.trim();
+        if (!token) { showToast("Введите токен", "error"); return; }
+        try {
+            const resp = await fetch("/api/v1/keys/expo", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({token,enabled:true})});
+            if (resp.ok) { showKeysModal(); showToast("Токен Expo сохранён", "success"); } else { const err=await resp.json(); showToast("Ошибка: "+(err.detail||"Неизвестная ошибка"), "error"); }
+        } catch(e) { showToast("Ошибка: "+e, "error"); }
+    }
+
+    async function toggleExpo(enabled) {
+        try { await fetch("/api/v1/keys/expo/toggle",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})}); showKeysModal(); } catch(e) { showToast("Ошибка: "+e, "error"); }
     }
 
     // ═══════════════════════════════════════════════════════

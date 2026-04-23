@@ -229,6 +229,8 @@ class KeysManager:
         self.github_token: str = ""
         self.github_enabled: bool = False
         self.github_user: str = ""
+        self.expo_token: str = ""
+        self.expo_enabled: bool = False
         self._load_keys()
 
     # ─── Storage ─────────────────────────────────────────────
@@ -246,6 +248,9 @@ class KeysManager:
                 self.github_token = github.get("token", "")
                 self.github_enabled = github.get("enabled", False)
                 self.github_user = github.get("user", "")
+                expo = data.get("expo", {})
+                self.expo_token = expo.get("token", "")
+                self.expo_enabled = expo.get("enabled", False)
                 loaded = True
             except Exception:
                 self.providers = {}
@@ -366,6 +371,14 @@ class KeysManager:
         if gh_token and not self.github_token:
             self.github_token = gh_token
             self.github_enabled = True
+        # Expo token from env
+        expo_token = os.environ.get("EXPO_TOKEN", "")
+        if expo_token and not self.expo_token:
+            self.expo_token = expo_token
+            self.expo_enabled = True
+        # Ensure EXPO_TOKEN is in os.environ for subprocess access
+        if self.expo_token:
+            os.environ["EXPO_TOKEN"] = self.expo_token
 
     def _save_keys(self):
         try:
@@ -388,6 +401,10 @@ class KeysManager:
                     "token": self.github_token,
                     "enabled": self.github_enabled,
                     "user": self.github_user,
+                },
+                "expo": {
+                    "token": self.expo_token,
+                    "enabled": self.expo_enabled,
                 },
             }
             with open(KEYS_FILE, "w", encoding="utf-8") as f:
@@ -579,6 +596,28 @@ class KeysManager:
         self.github_enabled = enabled and bool(self.github_token)
         self._save_keys()
         return {"enabled": self.github_enabled, "has_token": bool(self.github_token)}
+
+    def set_expo_token(self, token: str, enabled: bool = True):
+        self.expo_token = token
+        self.expo_enabled = enabled
+        # Also set in os.environ so EAS Build subprocess can access it
+        if token:
+            os.environ["EXPO_TOKEN"] = token
+        else:
+            os.environ.pop("EXPO_TOKEN", None)
+        self._save_keys()
+
+    def toggle_expo(self, enabled: bool) -> dict:
+        self.expo_enabled = enabled and bool(self.expo_token)
+        self._save_keys()
+        return {"enabled": self.expo_enabled, "has_token": bool(self.expo_token)}
+
+    def get_expo_status(self) -> dict:
+        return {
+            "token": self.expo_token[:8] + "..." if self.expo_token else "",
+            "enabled": self.expo_enabled,
+            "has_token": bool(self.expo_token),
+        }
 
     # ─── Local Models ────────────────────────────────────────
 
