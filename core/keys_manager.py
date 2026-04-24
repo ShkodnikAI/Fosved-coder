@@ -419,7 +419,7 @@ class KeysManager:
                 yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
 
             # Персистентное сохранение в БД (на случай если FS эфемерная — Render)
-            self._db_save_pending = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+            self._save_db_pending_yaml(yaml.dump(data, default_flow_style=False, allow_unicode=True))
         except Exception as e:
             print(f"  [keys_manager] Warning: could not save keys to {KEYS_FILE}: {e}")
             try:
@@ -632,7 +632,7 @@ class KeysManager:
 
     # ─── DB Persistence (Render / ephemeral FS) ────────────
 
-    def _db_save_pending(self, yaml_content: str):
+    def _save_db_pending_yaml(self, yaml_content: str):
         """Пометить что нужно сохранить в БД (вызывается после _save_keys)."""
         # Это свойство-триггер, реальное сохранение происходит в sync_to_db()
         self.__db_pending_yaml = yaml_content
