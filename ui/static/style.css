@@ -1739,6 +1739,39 @@ pre:hover .copy-btn, pre:hover .code-btn-bar { opacity: 1; }
     margin-top: 2px;
 }
 
+/* ─── TOOL CALL entries in log panel ─── */
+.auto-log-tool .auto-log-tool-status {
+    flex-shrink: 0;
+    font-size: 11px;
+    min-width: 16px;
+    text-align: center;
+}
+.auto-log-entry.auto-log-tool {
+    border-left: 2px solid var(--blue);
+    background: rgba(86,156,214,0.04);
+}
+.auto-log-entry.auto-log-tool.auto-log-success {
+    border-left-color: var(--green);
+    background: rgba(78,201,176,0.04);
+}
+.auto-log-entry.auto-log-tool.auto-log-error {
+    border-left-color: var(--red);
+    background: rgba(244,71,71,0.06);
+}
+.auto-log-entry.auto-log-tool.auto-log-warning {
+    border-left-color: var(--amber);
+    background: rgba(220,220,170,0.04);
+}
+.auto-log-entry.auto-log-tool .auto-log-text b {
+    color: var(--blue);
+}
+.auto-log-entry.auto-log-tool.auto-log-success .auto-log-text b {
+    color: var(--green);
+}
+.auto-log-entry.auto-log-tool.auto-log-error .auto-log-text b {
+    color: var(--red);
+}
+
 /* ─── RESULT MARKERS (OK / BUG) ─── */
 .log-result-mark {
     font-size: 9px;

@@ -1108,8 +1108,8 @@
                 // Показываем модель в header
                 if (shortName) updateHeaderModelBadge(shortName, 'thinking');
             } else if (data.type === "command_result") {
-                addMessage("terminal", data.content);
-                addLogEntryToPanel({level: 'info', source: 'terminal', action: data.content.substring(0, 300), time: new Date().toLocaleTimeString()});
+                // Только в правую панель логов, не в чат
+                addLogEntryToPanel({level: 'info', source: 'terminal', action: data.content.substring(0, 500), time: new Date().toLocaleTimeString()});
             } else if (data.type === "auto_step") {
                 autoModeRunning = true;
                 addAutoStepMessage(data.content || "Авто-шаг выполнен", "step");
@@ -1177,26 +1177,50 @@
     // AUTO STEP MESSAGES (интерактивный лог в чате)
     // ═══════════════════════════════════════════════════════
     function addAutoStepMessage(text, type, showRetry) {
-        const div = document.createElement("div");
-        div.className = "msg auto-step-msg auto-step-" + type;
+        // Всё направляем в правую панель логов вместо чата
+        const container = document.getElementById('auto-log-entries');
+        if (!container) return;
 
-        const icons = { step: '⚙️', done: '✅', warning: '⚠️', error: '❌' };
-        const icon = icons[type] || '⚙️';
+        // Автооткрытие панели если скрыта
+        if (!autoLogPanelVisible) openAutoLogPanel();
+
+        const levelMap = { step: 'info', done: 'success', warning: 'warning', error: 'error' };
+        const level = levelMap[type] || 'info';
+        const iconMap = { step: '⚙️', done: '✅', warning: '⚠️', error: '❌' };
+        const icon = iconMap[type] || '⚙️';
+        const time = new Date().toLocaleTimeString();
+
+        const entry = document.createElement('div');
+        entry.className = 'auto-log-entry auto-log-' + level;
+        entry.dataset.level = level;
 
         let retryBtn = '';
         if (showRetry && lastSentMessage) {
-            retryBtn = '<button class="auto-retry-btn" onclick="retryLastMessage()" title="Повторить последнее сообщение">🔄 Повторить</button>';
+            retryBtn = '<button style="background:var(--red);color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;margin-left:4px;" onclick="retryLastMessage()" title="Повторить">🔄</button>';
         }
 
-        div.innerHTML =
-            '<div class="auto-step-icon">' + icon + '</div>' +
-            '<div class="auto-step-content">' + escapeHtml(text) + '</div>' +
+        entry.innerHTML =
+            '<span class="auto-log-icon" style="color:var(--amber)">' + icon + '</span>' +
+            '<span class="auto-log-time">' + time + '</span>' +
+            '<span class="auto-log-text" style="font-weight:500;">' + escapeHtml(text) + '</span>' +
             retryBtn;
 
-        chatBox.appendChild(div);
-        chatBox.scrollTop = chatBox.scrollHeight;
+        // Apply current filter
+        if (currentLogFilter !== 'all' && level !== currentLogFilter) {
+            entry.style.display = 'none';
+        }
 
-        // No addLogEntryToPanel here — backend sends auto_log which handles log panel
+        container.appendChild(entry);
+        container.scrollTop = container.scrollHeight;
+
+        autoLogCount++;
+        updateAutoLogBadge();
+
+        const countLabel = document.getElementById('log-count-label');
+        if (countLabel) {
+            const total = container.querySelectorAll('[data-level]').length;
+            countLabel.textContent = total + ' записей';
+        }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -1358,43 +1382,101 @@
         else if (tool === 'git_commit_push' && args.message) detail = args.message;
         else if (args.path) detail = args.path;
 
+        // Всё направляем в правую панель логов вместо чата
+        const container = document.getElementById('auto-log-entries');
+        if (!container) return;
+
+        // Автооткрытие панели если скрыта
+        if (!autoLogPanelVisible) openAutoLogPanel();
+
+        const time = new Date().toLocaleTimeString();
+
         if (status === 'running') {
             if (!activeToolDivs[key]) {
-                const div = document.createElement('div');
-                div.className = 'msg tool-call';
-                div.innerHTML = '<div class="tool-call-header"><span class="tool-icon">' + icon + '</span><span class="tool-label">' + label + '</span><span class="tool-detail">' + escapeHtml(detail) + '</span><span class="tool-spinner">⏳</span></div>';
-                chatBox.appendChild(div);
-                activeToolDivs[key] = div;
+                const entry = document.createElement('div');
+                entry.className = 'auto-log-entry auto-log-info auto-log-tool';
+                entry.dataset.level = 'info';
+                entry.dataset.toolKey = key;
+                entry.innerHTML =
+                    '<span class="auto-log-icon" style="color:var(--blue)">' + icon + '</span>' +
+                    '<span class="auto-log-time">' + time + '</span>' +
+                    '<span class="auto-log-tool-status">⏳</span>' +
+                    '<span class="auto-log-text"><b>' + escapeHtml(label) + '</b>' + (detail ? ' <span style="opacity:0.7;font-size:11px;">' + escapeHtml(detail) + '</span>' : '') + '</span>';
+
+                if (currentLogFilter !== 'all' && 'info' !== currentLogFilter) {
+                    entry.style.display = 'none';
+                }
+
+                container.appendChild(entry);
+                container.scrollTop = container.scrollHeight;
+                activeToolDivs[key] = entry;
+                autoLogCount++;
+                updateAutoLogBadge();
             }
-            chatBox.scrollTop = chatBox.scrollHeight;
         } else if (status === 'done') {
-            const div = activeToolDivs[key];
-            if (div) {
+            const entry = activeToolDivs[key];
+            if (entry) {
                 const exitCode = data.exit_code;
                 const statusIcon = (tool === 'execute_command' && exitCode !== undefined) ? (exitCode === 0 ? '✅' : '⚠️') : '✅';
-                const spinner = div.querySelector('.tool-spinner');
-                if (spinner) spinner.textContent = statusIcon;
-                div.classList.add('tool-done');
+                const statusEl = entry.querySelector('.auto-log-tool-status');
+                if (statusEl) statusEl.textContent = statusIcon;
+
+                if (exitCode !== undefined && exitCode !== 0) {
+                    entry.className = 'auto-log-entry auto-log-warning auto-log-tool';
+                    entry.dataset.level = 'warning';
+                } else {
+                    entry.className = 'auto-log-entry auto-log-success auto-log-tool';
+                    entry.dataset.level = 'success';
+                }
                 activeToolDivs[key] = null;
-                // Напоминание после write_file: файл на сервере, нужен git push
+
+                // write_file hint в лог-панель вместо чата
                 if (tool === 'write_file') {
-                    const hint = document.createElement('div');
-                    hint.className = 'msg sync-hint';
-                    hint.innerHTML = '📁 Файл сохранён на <b>сервере</b>. Чтобы сохранить в GitHub — попросите ассистента выполнить <b>git_commit_push</b>, или сделайте <code>git pull</code> локально.';
-                    chatBox.appendChild(hint);
-                    chatBox.scrollTop = chatBox.scrollHeight;
+                    const hintEntry = document.createElement('div');
+                    hintEntry.className = 'auto-log-entry auto-log-info';
+                    hintEntry.dataset.level = 'info';
+                    hintEntry.innerHTML =
+                        '<span class="auto-log-icon" style="color:var(--amber)">📁</span>' +
+                        '<span class="auto-log-time">' + time + '</span>' +
+                        '<span class="auto-log-text" style="opacity:0.7;font-size:11px;">Файл сохранён на сервере. Для GitHub: git_commit_push</span>';
+                    if (currentLogFilter !== 'all' && 'info' !== currentLogFilter) {
+                        hintEntry.style.display = 'none';
+                    }
+                    container.appendChild(hintEntry);
+                    container.scrollTop = container.scrollHeight;
+                    autoLogCount++;
+                }
+
+                if (currentLogFilter !== 'all') {
+                    const newLevel = entry.dataset.level;
+                    entry.style.display = newLevel === currentLogFilter ? '' : 'none';
+                }
+
+                const countLabel = document.getElementById('log-count-label');
+                if (countLabel) {
+                    const total = container.querySelectorAll('[data-level]').length;
+                    countLabel.textContent = total + ' записей';
                 }
             }
-            chatBox.scrollTop = chatBox.scrollHeight;
         } else if (status === 'error') {
-            const div = activeToolDivs[key];
-            if (div) {
-                const spinner = div.querySelector('.tool-spinner');
-                if (spinner) spinner.textContent = '❌';
-                div.classList.add('tool-error');
+            const entry = activeToolDivs[key];
+            if (entry) {
+                const statusEl = entry.querySelector('.auto-log-tool-status');
+                if (statusEl) statusEl.textContent = '❌';
+                entry.className = 'auto-log-entry auto-log-error auto-log-tool';
+                entry.dataset.level = 'error';
                 activeToolDivs[key] = null;
+
+                if (currentLogFilter !== 'all' && 'error' !== currentLogFilter) {
+                    entry.style.display = 'none';
+                }
+
+                const countLabel = document.getElementById('log-count-label');
+                if (countLabel) {
+                    const total = container.querySelectorAll('[data-level]').length;
+                    countLabel.textContent = total + ' записей';
+                }
             }
-            chatBox.scrollTop = chatBox.scrollHeight;
         }
     }
 
