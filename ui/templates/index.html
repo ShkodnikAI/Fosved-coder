@@ -1165,8 +1165,13 @@
     // Override ws.send and ws.send usage
     wsConnect();
 
-    // Принудительно показать панель логов при загрузке
-    openAutoLogPanel();
+    // Принудительно показать панель логов при загрузке (без зависимости от let-переменных ниже)
+    (function() {
+        const ls = document.getElementById('log-sidebar');
+        const lh = document.getElementById('log-resize-handle');
+        if (ls) { ls.style.display = 'flex'; }
+        if (lh) { lh.style.display = 'block'; }
+    })();
 
     // Safety: hide loading screen after 15 seconds
     setTimeout(() => {
