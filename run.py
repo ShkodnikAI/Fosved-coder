@@ -1,5 +1,9 @@
+import os
+import re
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile
+import shlex
+import asyncio
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
@@ -105,15 +109,40 @@ async def get_index():
 
 app.mount("/static", StaticFiles(directory="ui/static"), name="static")
 
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+WS_RECEIVE_TIMEOUT = 600  # seconds — drop idle WS connections
+WS_MAX_MESSAGE_BYTES = 2 * 1024 * 1024  # 2 MB per message
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._\- ]")
+
+
+def _sanitize_filename(name: str | None) -> str:
+    """Strip path components and dangerous chars from a user-supplied filename."""
+    base = os.path.basename(name or "upload")
+    base = _SAFE_FILENAME_RE.sub("_", base).strip().strip(".") or "upload"
+    return base[:200]
+
+
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """Upload a file and return its contents as text."""
-    content_bytes = await file.read()
+    """Upload a file and return its contents as text. Limited to MAX_UPLOAD_BYTES."""
+    # Stream-read with size cap to avoid OOM on huge uploads.
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"Файл превышает лимит {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+        chunks.append(chunk)
+    content_bytes = b"".join(chunks)
+    safe_name = _sanitize_filename(file.filename)
     try:
         text_content = content_bytes.decode("utf-8")
     except UnicodeDecodeError:
-        text_content = f"[Binary file: {file.filename}, {len(content_bytes)} bytes]"
-    return {"filename": file.filename, "content": text_content, "size": len(content_bytes)}
+        text_content = f"[Binary file: {safe_name}, {len(content_bytes)} bytes]"
+    return {"filename": safe_name, "content": text_content, "size": len(content_bytes)}
 
 
 @app.websocket("/ws")
@@ -128,7 +157,19 @@ async def websocket_chat(websocket: WebSocket):
 
     try:
         while True:
-            data = await websocket.receive_text()
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_RECEIVE_TIMEOUT)
+            except asyncio.TimeoutError:
+                # Idle: send a ping; if peer is gone, the next iteration will raise
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    raise WebSocketDisconnect()
+                continue
+
+            if len(data) > WS_MAX_MESSAGE_BYTES:
+                await websocket.send_json({"type": "error", "content": f"Сообщение превышает лимит {WS_MAX_MESSAGE_BYTES // (1024 * 1024)} MB"})
+                continue
 
             # Handle slash commands
             if data.startswith("/"):
@@ -365,8 +406,8 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         msg = args.strip() or "sync"
         # git add -A
         await executor.execute("git add -A", cwd=project_path)
-        # git commit (с --allow-empty чтобы не падал)
-        commit_result = await executor.execute(f'git commit -m "{msg}" --allow-empty', cwd=project_path)
+        # git commit (shlex.quote prevents shell injection from message)
+        commit_result = await executor.execute(f"git commit -m {shlex.quote(msg)} --allow-empty", cwd=project_path)
         commit_out = (commit_result.get("stdout", "") + commit_result.get("stderr", "")).strip()
         if "nothing to commit" in commit_out.lower():
             await websocket.send_json({"type": "system", "content": "📤 Quick Push: нет изменений для коммита"})
@@ -487,7 +528,6 @@ async def websocket_executor(websocket: WebSocket):
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 8000))
     print("  +========================================+")
     print("  |   Fosved Coder v2.0                  |")

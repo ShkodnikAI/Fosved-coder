@@ -58,45 +58,6 @@ class ActionLogger:
         except Exception:
             self._file = None
 
-    def log(self, action: str, level: str = "info", source: str = "",
-            project_id: int = None, details: dict = None, error: str = None):
-        """Записать событие в лог.
-
-        Args:
-            action: описание действия (например: "ws_chat_message", "api_apk_build", "error_model_timeout")
-            level: info | success | warning | error | debug
-            source: источник — "ws", "api", "agent", "auto_agent", "executor", "system"
-            project_id: ID текущего проекта (если есть)
-            details: доп. данные (dict)
-            error: текст ошибки (если есть)
-        """
-        entry = {
-            "ts": datetime.now().isoformat(timespec="milliseconds"),
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "session": self._session_id,
-            "action": action,
-            "level": level,
-            "source": source,
-            "project_id": project_id,
-            "details": details or {},
-        }
-        if error:
-            entry["error"] = str(error)[:500]
-
-        # В память
-        self._entries.append(entry)
-
-        # В файл (append line)
-        if self._file:
-            try:
-                self._file.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                self._file.flush()
-            except Exception:
-                pass
-
-        # Проверить размер файла
-        self._rotate_if_needed()
-
     def _rotate_if_needed(self):
         if not self._file or not os.path.exists(LOG_FILE):
             return
@@ -206,6 +167,13 @@ class ActionLogger:
 
     def start_debug_session(self) -> dict:
         """Включить debug-режим. Возвращает информацию о сессии."""
+        # Close any previous debug file to avoid leaking the fd on re-start
+        if self._debug_file:
+            try:
+                self._debug_file.close()
+            except Exception:
+                pass
+            self._debug_file = None
         self._debug_mode = True
         self._debug_start_ts = datetime.now().isoformat(timespec="milliseconds")
         self._debug_entries = []

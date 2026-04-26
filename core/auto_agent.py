@@ -16,9 +16,10 @@ Workflow:
 import json
 import re
 import os
+import shlex
 import asyncio
 from datetime import datetime, timezone
-from core.agent import stream_llm_response, _get_priority_models, get_platform_info
+from core.agent import stream_llm_response, _get_priority_models, get_platform_info, _safe_join
 from core.memory import get_project, get_history, save_message, CONFIG
 from core.executor import CommandExecutor
 from core.action_logger import get_logger
@@ -193,7 +194,13 @@ async def execute_step(step: dict, project_path: str | None, websocket, step_num
                 await send_auto_log(websocket, "Ошибка: не указан file_path", "error", step_num, total_steps)
                 return False
 
-            full_path = os.path.join(project_path, file_path) if project_path else file_path
+            if not project_path:
+                await send_auto_log(websocket, "Ошибка: нет project_path", "error", step_num, total_steps)
+                return False
+            full_path = _safe_join(project_path, file_path)
+            if not full_path:
+                await send_auto_log(websocket, f"Отказ: путь вне проекта: {file_path}", "error", step_num, total_steps)
+                return False
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -215,7 +222,13 @@ async def execute_step(step: dict, project_path: str | None, websocket, step_num
                 await send_auto_log(websocket, "Ошибка: не указан file_path", "error", step_num, total_steps)
                 return False
 
-            full_path = os.path.join(project_path, file_path) if project_path else file_path
+            if not project_path:
+                await send_auto_log(websocket, "Ошибка: нет project_path", "error", step_num, total_steps)
+                return False
+            full_path = _safe_join(project_path, file_path)
+            if not full_path:
+                await send_auto_log(websocket, f"Отказ: путь вне проекта: {file_path}", "error", step_num, total_steps)
+                return False
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -278,8 +291,8 @@ async def execute_step(step: dict, project_path: str | None, websocket, step_num
             await send_auto_log(websocket, f"Git commit: {msg}", "command", step_num, total_steps)
             # git add -A
             await executor.execute("git add -A", cwd=project_path, timeout=10)
-            # git commit
-            result = await executor.execute(f'git commit -m "{msg}" --allow-empty', cwd=project_path, timeout=15)
+            # git commit (shlex.quote prevents shell injection through commit message)
+            result = await executor.execute(f"git commit -m {shlex.quote(msg)} --allow-empty", cwd=project_path, timeout=15)
             output = result.get("stdout", "") or result.get("stderr", "")
             if "nothing to commit" in output.lower():
                 await websocket.send_json({"type": "auto_step", "content": f"  Git: нет изменений для коммита"})

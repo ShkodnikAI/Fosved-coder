@@ -2,10 +2,26 @@ import asyncio
 import re
 import sys
 import os
+import shlex
 from datetime import datetime
 
 from core.action_logger import get_logger
 logger = get_logger()
+
+
+async def _kill_process_safely(process):
+    """Kill subprocess and wait for it to exit. Never raises."""
+    if process is None:
+        return
+    try:
+        if process.returncode is None:
+            process.kill()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=2)
+            except asyncio.TimeoutError:
+                pass
+    except Exception:
+        pass
 
 
 class CommandExecutor:
@@ -99,6 +115,7 @@ class CommandExecutor:
             await self._git_checkpoint(cwd)
 
         # Execute the command
+        process = None
         try:
             process = await asyncio.create_subprocess_shell(
                 cmd,
@@ -112,7 +129,7 @@ class CommandExecutor:
                     process.communicate(), timeout=timeout or self.COMMAND_TIMEOUT
                 )
             except asyncio.TimeoutError:
-                process.kill()
+                await _kill_process_safely(process)
                 try:
                     logger.log(f"exec_timeout: {cmd[:200]}", level="error", source="executor",
                                details={"timeout": timeout or self.COMMAND_TIMEOUT, "cwd": cwd},
@@ -164,6 +181,8 @@ class CommandExecutor:
                 "success": False,
                 "cmd": cmd,
             }
+        finally:
+            await _kill_process_safely(process)
 
     async def execute_approved(self, cmd: str, request_id: str, cwd: str | None = None) -> dict:
         """Execute a previously approved critical command"""
@@ -181,6 +200,7 @@ class CommandExecutor:
             yield f"[БЛОКИРОВАНО] Критическая команда: {pattern}. Используйте approval workflow."
             return
 
+        process = None
         try:
             process = await asyncio.create_subprocess_shell(
                 cmd,
@@ -189,18 +209,24 @@ class CommandExecutor:
                 cwd=cwd,
             )
 
-            while True:
-                chunk = await process.stdout.read(1024)
-                if not chunk:
-                    break
-                text = chunk.decode("utf-8", errors="replace")
-                yield text
+            try:
+                while True:
+                    chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=self.COMMAND_TIMEOUT)
+                    if not chunk:
+                        break
+                    text = chunk.decode("utf-8", errors="replace")
+                    yield text
+            except asyncio.TimeoutError:
+                yield f"\n[ТАЙМАУТ {self.COMMAND_TIMEOUT}с]"
+                return
 
             await process.wait()
             yield f"\n[Exit code: {process.returncode}]"
 
         except Exception as e:
             yield f"[ОШИБКА] {e}"
+        finally:
+            await _kill_process_safely(process)
 
     async def _git_checkpoint(self, cwd: str | None):
         """Create a git checkpoint before dangerous operations"""
@@ -221,11 +247,15 @@ class CommandExecutor:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             commit_msg = f"[auto-checkpoint] before critical command at {timestamp}"
 
-            await asyncio.create_subprocess_shell(
-                f'git add -A && git commit -m "{commit_msg}" --allow-empty',
+            cp = await asyncio.create_subprocess_shell(
+                f"git add -A && git commit -m {shlex.quote(commit_msg)} --allow-empty",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
             )
+            try:
+                await asyncio.wait_for(cp.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                await _kill_process_safely(cp)
         except Exception:
             pass  # Don't fail if checkpoint fails

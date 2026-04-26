@@ -232,7 +232,15 @@ class KeysManager:
         self.expo_token: str = ""
         self.expo_enabled: bool = False
         self._db_restore_pending: bool = False  # Флаг восстановления из БД
+        # Serializes mutations to providers/_db_pending_yaml across coroutines.
+        # Lazily created to avoid binding to a loop that hasn't started yet.
+        self._lock: asyncio.Lock | None = None
         self._load_keys()
+
+    def _get_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     # ─── Storage ─────────────────────────────────────────────
 
@@ -639,63 +647,65 @@ class KeysManager:
 
     async def sync_to_db(self):
         """Сохранить текущее состояние ключей в БД (вызывать из async context)."""
-        try:
-            from core.memory import get_system_setting, set_system_setting
-            # Сохраняем отложенные данные или текущее состояние
-            yaml_content = getattr(self, '__db_pending_yaml', None)
-            if yaml_content:
-                await set_system_setting("keys_yaml_backup", yaml_content)
-                self.__db_pending_yaml = None
-                print(f"  [keys] Keys synced to database backup")
-        except Exception as e:
-            print(f"  [keys] Warning: could not sync keys to DB: {e}")
+        async with self._get_lock():
+            try:
+                from core.memory import get_system_setting, set_system_setting
+                # Сохраняем отложенные данные или текущее состояние
+                yaml_content = getattr(self, '__db_pending_yaml', None)
+                if yaml_content:
+                    await set_system_setting("keys_yaml_backup", yaml_content)
+                    self.__db_pending_yaml = None
+                    print(f"  [keys] Keys synced to database backup")
+            except Exception as e:
+                print(f"  [keys] Warning: could not sync keys to DB: {e}")
 
     async def restore_from_db(self):
         """Восстановить ключи из БД (если keys.yaml пустой)."""
-        try:
-            from core.memory import get_system_setting
-            yaml_content = await get_system_setting("keys_yaml_backup")
-            if not yaml_content:
-                print(f"  [keys] No DB backup found — skipping restore")
+        async with self._get_lock():
+            try:
+                from core.memory import get_system_setting
+                yaml_content = await get_system_setting("keys_yaml_backup")
+                if not yaml_content:
+                    print(f"  [keys] No DB backup found — skipping restore")
+                    return False
+
+                data = yaml.safe_load(yaml_content)
+                if not data:
+                    return False
+
+                # Восстанавливаем провайдеры (не перезаписывая env-loaded)
+                db_providers = data.get("providers", {})
+                if db_providers and not self.providers:
+                    self.providers = db_providers
+                    print(f"  [keys] Restored {len(db_providers)} provider(s) from database")
+
+                # GitHub
+                db_github = data.get("github", {})
+                if db_github.get("token") and not self.github_token:
+                    self.github_token = db_github["token"]
+                    self.github_enabled = db_github.get("enabled", True)
+                    self.github_user = db_github.get("user", "")
+                    print(f"  [keys] Restored GitHub token from database")
+
+                # Expo
+                db_expo = data.get("expo", {})
+                if db_expo.get("token") and not self.expo_token:
+                    self.expo_token = db_expo["token"]
+                    self.expo_enabled = db_expo.get("enabled", True)
+                    os.environ["EXPO_TOKEN"] = self.expo_token
+                    print(f"  [keys] Restored Expo token from database")
+
+                # Local/custom models
+                if not self.local_models:
+                    self.local_models = data.get("local_models", [])
+                if not self.custom_models:
+                    self.custom_models = data.get("custom_models", [])
+
+                self._save_keys()
+                return True
+            except Exception as e:
+                print(f"  [keys] Warning: could not restore keys from DB: {e}")
                 return False
-
-            data = yaml.safe_load(yaml_content)
-            if not data:
-                return False
-
-            # Восстанавливаем провайдеры (не перезаписывая env-loaded)
-            db_providers = data.get("providers", {})
-            if db_providers and not self.providers:
-                self.providers = db_providers
-                print(f"  [keys] Restored {len(db_providers)} provider(s) from database")
-
-            # GitHub
-            db_github = data.get("github", {})
-            if db_github.get("token") and not self.github_token:
-                self.github_token = db_github["token"]
-                self.github_enabled = db_github.get("enabled", True)
-                self.github_user = db_github.get("user", "")
-                print(f"  [keys] Restored GitHub token from database")
-
-            # Expo
-            db_expo = data.get("expo", {})
-            if db_expo.get("token") and not self.expo_token:
-                self.expo_token = db_expo["token"]
-                self.expo_enabled = db_expo.get("enabled", True)
-                os.environ["EXPO_TOKEN"] = self.expo_token
-                print(f"  [keys] Restored Expo token from database")
-
-            # Local/custom models
-            if not self.local_models:
-                self.local_models = data.get("local_models", [])
-            if not self.custom_models:
-                self.custom_models = data.get("custom_models", [])
-
-            self._save_keys()
-            return True
-        except Exception as e:
-            print(f"  [keys] Warning: could not restore keys from DB: {e}")
-            return False
 
     # ─── Local Models ────────────────────────────────────────
 

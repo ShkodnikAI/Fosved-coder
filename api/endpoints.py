@@ -1580,12 +1580,14 @@ async def get_stats():
 async def get_config():
     try: action_logger.api_call("GET", "/api/v1/config")
     except Exception: pass
+    api_key = CONFIG["llm"].get("api_key", "")
     return {
         "llm": {
             "default_model": CONFIG["llm"].get("default_model", "not set"),
             "router_model": CONFIG["llm"].get("router_model", "not set"),
             "api_base": CONFIG["llm"].get("api_base", "not set"),
-            "api_key": CONFIG["llm"].get("api_key", "")[:12] + "..." if CONFIG["llm"].get("api_key") else "not set",
+            # Never expose any portion of the key — caller may not be authenticated.
+            "api_key": "configured" if api_key else "not set",
         }
     }
 

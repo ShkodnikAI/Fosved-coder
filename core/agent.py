@@ -5,6 +5,7 @@ import time
 import glob as glob_mod
 import litellm
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 from core.memory import CONFIG, save_message, get_history, get_project
 from core.keys_manager import keys_manager
@@ -12,6 +13,23 @@ from core.context_compressor import ContextCompressor
 from core.action_logger import get_logger
 
 litellm.suppress_debug_info = True
+
+
+def _safe_join(base: str, rel: str) -> str | None:
+    """Resolve `rel` under `base` and reject anything escaping the project dir.
+
+    Returns absolute path on success, None on traversal/symlink-escape attempts.
+    """
+    if not base or rel is None:
+        return None
+    try:
+        base_real = Path(base).resolve()
+        # `..` and absolute paths are normalized away by resolve()
+        target = (base_real / rel).resolve()
+        target.relative_to(base_real)
+        return str(target)
+    except (ValueError, OSError):
+        return None
 
 
 def get_platform_info() -> str:
@@ -220,9 +238,16 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             path = arguments.get("path", "")
             if not project_path:
                 return "Ошибка: нет пути к проекту"
-            full_path = os.path.join(project_path, path)
+            full_path = _safe_join(project_path, path)
+            if not full_path:
+                return f"Ошибка: путь вне проекта: {path}"
             if not os.path.isfile(full_path):
                 return f"Ошибка: файл не найден: {path}"
+            try:
+                if os.path.getsize(full_path) > 5 * 1024 * 1024:
+                    return f"Ошибка: файл слишком большой (>5MB): {path}"
+            except OSError:
+                pass
             with open(full_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
             # Trim if too large
@@ -238,8 +263,9 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             content = arguments.get("content", "")
             if not project_path:
                 return "Ошибка: нет пути к проекту"
-            full_path = os.path.join(project_path, path)
-            # Create dirs
+            full_path = _safe_join(project_path, path)
+            if not full_path:
+                return f"Ошибка: путь вне проекта: {path}"
             dir_path = os.path.dirname(full_path)
             if dir_path and not os.path.exists(dir_path):
                 os.makedirs(dir_path, exist_ok=True)
@@ -254,7 +280,9 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             rel_path = arguments.get("path", ".")
             if not project_path:
                 return "Ошибка: нет пути к проекту"
-            full_path = os.path.join(project_path, rel_path)
+            full_path = _safe_join(project_path, rel_path)
+            if not full_path:
+                return f"Ошибка: путь вне проекта: {rel_path}"
             if not os.path.isdir(full_path):
                 return f"Ошибка: директория не найдена: {rel_path}"
             entries = []

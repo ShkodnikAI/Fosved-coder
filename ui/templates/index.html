@@ -6,6 +6,7 @@
     <title>Fosved Coder</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
@@ -1010,9 +1011,22 @@
     // ═══════════════════════════════════════════════════════
     let wsReconnectAttempts = 0;
     const WS_MAX_RECONNECTS = 5;
+    const WS_PING_INTERVAL_MS = 30000;
+    const WS_PONG_TIMEOUT_MS = 15000;
+    const WS_QUEUE_KEY = "fosved-v2-ws-queue";
     let wsHeartbeatInterval = null;
+    let wsPongDeadline = 0;
     let wsMessageQueue = [];
     let wsIsConnected = false;
+
+    // Restore queue from previous session so messages survive page reloads / disconnects
+    try {
+        const saved = localStorage.getItem(WS_QUEUE_KEY);
+        if (saved) wsMessageQueue = JSON.parse(saved) || [];
+    } catch (e) { wsMessageQueue = []; }
+    function persistWsQueue() {
+        try { localStorage.setItem(WS_QUEUE_KEY, JSON.stringify(wsMessageQueue.slice(-50))); } catch (e) {}
+    }
 
     function hideLoadingScreen() {
         const el = document.getElementById('loading-screen');
@@ -1042,23 +1056,32 @@
             loadModels();
             loadProjects();
             loadDrafts();
-            // Start heartbeat
+            // Start heartbeat with pong-timeout liveness check
+            wsPongDeadline = Date.now() + WS_PING_INTERVAL_MS + WS_PONG_TIMEOUT_MS;
             wsHeartbeatInterval = setInterval(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({type: "ping"}));
+                if (!ws || ws.readyState !== WebSocket.OPEN) return;
+                if (Date.now() > wsPongDeadline) {
+                    // Server stopped responding: force a reconnect
+                    try { ws.close(); } catch (e) {}
+                    return;
                 }
-            }, 30000);
+                ws.send(JSON.stringify({type: "ping"}));
+            }, WS_PING_INTERVAL_MS);
             // Flush queued messages
             while (wsMessageQueue.length > 0) {
                 const msg = wsMessageQueue.shift();
                 ws.send(msg);
             }
+            persistWsQueue();
         };
 
         ws.onmessage = (event) => {
+            // Any inbound message proves the peer is alive — reset pong deadline
+            wsPongDeadline = Date.now() + WS_PING_INTERVAL_MS + WS_PONG_TIMEOUT_MS;
             const data = JSON.parse(event.data);
-            // Handle pong
+            // Handle pong / server-side ping from idle-timeout path
             if (data.type === "pong") return;
+            if (data.type === "ping") { try { ws.send(JSON.stringify({type: "pong"})); } catch(e){} return; }
             if (data.type === "chunk") {
                 // Remove typing indicator on first chunk
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
@@ -1069,11 +1092,10 @@
                     chatBox.appendChild(currentAiDiv);
                 }
                 currentAiText += data.content;
-                currentAiDiv.innerHTML = renderMarkdown(currentAiText);
-                addCopyButtons(currentAiDiv);
-                chatBox.scrollTop = chatBox.scrollHeight;
+                scheduleAiRender();
             } else if (data.type === "done") {
                 if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
+                flushAiRender();
                 setWaitingAI(false);
                 currentAiDiv = null; currentAiText = "";
                 // Скрываем индикатор модели в header через 3с
@@ -1158,6 +1180,7 @@
             ws.send(msg);
         } else {
             wsMessageQueue.push(msg);
+            persistWsQueue();
             if (!wsReconnectAttempts) wsConnect();
         }
     }
@@ -1246,7 +1269,55 @@
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    function renderMarkdown(text) { try { return marked.parse(text); } catch(e) { return text; } }
+    function renderMarkdown(text) {
+        try {
+            const raw = marked.parse(text);
+            if (typeof DOMPurify !== "undefined") {
+                return DOMPurify.sanitize(raw, {
+                    ADD_ATTR: ["target"],
+                    FORBID_TAGS: ["style", "iframe", "object", "embed", "form", "input", "button"],
+                    FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "onfocus", "onblur", "formaction"],
+                });
+            }
+            return raw;
+        } catch (e) { return escapeHtml(text); }
+    }
+
+    // Throttled streaming render: re-parsing markdown on every chunk burns CPU on long answers.
+    // We coalesce updates to ~10fps; flushAiRender forces immediate render at end-of-stream.
+    let _aiRenderPending = false;
+    let _aiRenderLast = 0;
+    const AI_RENDER_INTERVAL_MS = 100;
+    function scheduleAiRender() {
+        if (!currentAiDiv) return;
+        chatBox.scrollTop = chatBox.scrollHeight;
+        const now = Date.now();
+        if (now - _aiRenderLast >= AI_RENDER_INTERVAL_MS) {
+            _aiRenderLast = now;
+            currentAiDiv.innerHTML = renderMarkdown(currentAiText);
+            addCopyButtons(currentAiDiv);
+            return;
+        }
+        if (_aiRenderPending) return;
+        _aiRenderPending = true;
+        setTimeout(() => {
+            _aiRenderPending = false;
+            _aiRenderLast = Date.now();
+            if (currentAiDiv) {
+                currentAiDiv.innerHTML = renderMarkdown(currentAiText);
+                addCopyButtons(currentAiDiv);
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        }, AI_RENDER_INTERVAL_MS);
+    }
+    function flushAiRender() {
+        if (currentAiDiv) {
+            currentAiDiv.innerHTML = renderMarkdown(currentAiText);
+            addCopyButtons(currentAiDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        _aiRenderPending = false;
+    }
 
     function addCopyButtons(container) {
         container.querySelectorAll("pre").forEach(pre => {
@@ -1501,6 +1572,11 @@
         const progress = document.getElementById('header-progress');
         const fill = document.getElementById('header-progress-fill');
         const retryBtn = document.getElementById('retry-btn');
+        // Disable send button while a request is in flight to prevent click-spamming
+        document.querySelectorAll('.btn-send, [data-send-btn]').forEach(b => {
+            b.disabled = !!state;
+            b.classList.toggle('is-loading', !!state);
+        });
         if (state) {
             input.classList.add('input-waiting');
             if (retryBtn) retryBtn.style.display = 'none';
@@ -3276,6 +3352,35 @@
     // UTILITY
     // ═══════════════════════════════════════════════════════
     function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
+
+    // Global ESC handler: closes the topmost active modal.
+    // Each `.modal.active` element gets data-close-fn populated lazily so we can dispatch.
+    document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        const active = document.querySelectorAll(".modal.active");
+        if (!active.length) return;
+        const top = active[active.length - 1];
+        // Find a matching close function by id convention: close<Id>Modal
+        const id = top.id || "";
+        const closers = {
+            "archive-modal": closeArchiveModal,
+            "apk-modal": closeAPKModal,
+            "debug-modal": closeDebugModal,
+            "archive-project-modal": closeArchiveProjectModal,
+            "diff-modal": closeDiffModal,
+            "file-viewer-modal": closeFileViewerModal,
+            "project-modal": closeProjectModal,
+            "generic-modal": () => closeGenericModal(),
+            "refactor-modal": closeRefactorModal,
+        };
+        const fn = closers[id];
+        if (typeof fn === "function") {
+            try { fn(); } catch (err) { top.classList.remove("active"); }
+        } else {
+            top.classList.remove("active");
+        }
+        e.stopPropagation();
+    });
 
     function requireProject() {
         if (!currentProjectId) {

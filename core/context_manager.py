@@ -1,4 +1,5 @@
 import os
+import asyncio
 import hashlib
 from core.memory import CONFIG, save_repo_map, get_repo_map
 
@@ -31,6 +32,17 @@ class ContextManager:
             if cached and cached.get("hash") == current_hash:
                 return cached["content"]
 
+        # Walking large trees + reading files is blocking — run off the event loop
+        repo_map = await asyncio.to_thread(self._build_repo_map_sync, project_path)
+
+        # Save to cache for future requests
+        if project_id:
+            tree_hash = await self._compute_tree_hash(project_path)
+            await save_repo_map(project_id, repo_map, tree_hash)
+
+        return repo_map
+
+    def _build_repo_map_sync(self, project_path: str) -> str:
         lines = []
         file_count = 0
 
@@ -67,14 +79,7 @@ class ContextManager:
         if not lines:
             return "  (empty project or no source files found)"
 
-        repo_map = os.path.basename(project_path) + "/\n" + "\n".join(lines)
-
-        # Save to cache for future requests
-        if project_id:
-            tree_hash = await self._compute_tree_hash(project_path)
-            await save_repo_map(project_id, repo_map, tree_hash)
-
-        return repo_map
+        return os.path.basename(project_path) + "/\n" + "\n".join(lines)
 
     def _extract_signatures(self, filepath: str, ext: str) -> list[str]:
         """Extract function/class/import signatures from a source file."""
@@ -124,6 +129,9 @@ class ContextManager:
 
     async def _compute_tree_hash(self, project_path: str) -> str:
         """Compute MD5 hash of the file tree (names + sizes + mtimes) for cache invalidation."""
+        return await asyncio.to_thread(self._compute_tree_hash_sync, project_path)
+
+    def _compute_tree_hash_sync(self, project_path: str) -> str:
         hasher = hashlib.md5()
         for root, dirs, files in os.walk(project_path):
             dirs[:] = [d for d in dirs if d not in self.IGNORED_DIRS and not d.startswith(".")]
@@ -137,18 +145,23 @@ class ContextManager:
         return hasher.hexdigest()
 
     async def read_file_safe(self, project_path: str, relative_path: str) -> str:
-        """Safely read a file within the project directory (prevents directory traversal)."""
-        # Resolve paths to prevent directory traversal attacks
-        project_path = os.path.normpath(os.path.abspath(project_path))
-        target_path = os.path.normpath(os.path.abspath(os.path.join(project_path, relative_path)))
-
-        if not target_path.startswith(project_path + os.sep) and target_path != project_path:
+        """Safely read a file within the project directory (resists symlink/`..` traversal)."""
+        from pathlib import Path
+        try:
+            base = Path(project_path).resolve()
+            target = (base / relative_path).resolve()
+            target.relative_to(base)
+        except (ValueError, OSError):
             return "Ошибка: путь выходит за пределы проекта"
 
         try:
-            with open(target_path, "r", encoding="utf-8", errors="replace") as f:
-                return f.read()
+            return await asyncio.to_thread(self._read_text, str(target))
         except FileNotFoundError:
             return f"Файл не найден: {relative_path}"
         except Exception as e:
             return f"Ошибка чтения: {e}"
+
+    @staticmethod
+    def _read_text(path: str) -> str:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
