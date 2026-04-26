@@ -2319,7 +2319,7 @@
                 const progressHtml = p.progress > 0 ? `<div class="project-progress"><div class="project-progress-fill" style="width:${p.progress}%"></div><span class="project-progress-text">${p.progress}%</span></div>` : '';
                 const keyShort = p.uuid_key ? p.uuid_key.substring(0, 8) : '';
                 const keyHtml = keyShort ? `<span class="project-uuid" title="${p.uuid_key}">${keyShort}</span>` : '';
-                div.innerHTML = `<div class="project-info"><span class="project-name">📁 ${escapeHtml(p.name)}</span>${keyHtml}${progressHtml}</div><div class="project-actions"><button class="btn-project-action btn-edit" onclick="event.stopPropagation();openProjectModal(${p.id})" title="Редактировать проект">✏️</button><button class="btn-project-action btn-archive" onclick="event.stopPropagation();archiveProjectModal(${p.id},'${escapeHtml(p.name)}')" title="Архивировать">🗃️</button><button class="btn-project-action btn-delete-project" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить проект">✕</button></div>`;
+                div.innerHTML = `<div class="project-info"><span class="project-name">📁 ${escapeHtml(p.name)}</span>${keyHtml}${progressHtml}</div><div class="project-actions"><button class="btn-project-action btn-edit" data-action="edit-project" data-id="${p.id}" title="Редактировать проект">✏️</button><button class="btn-project-action btn-archive" data-action="archive-project" data-id="${p.id}" data-name="${escapeHtml(p.name)}" title="Архивировать">🗃️</button><button class="btn-project-action btn-delete-project" data-action="delete-project" data-id="${p.id}" data-name="${escapeHtml(p.name)}" title="Удалить проект">✕</button></div>`;
                 div.onclick = () => selectProject(p.id, div);
                 list.appendChild(div);
             });
@@ -3353,33 +3353,101 @@
     // ═══════════════════════════════════════════════════════
     function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
 
-    // Global ESC handler: closes the topmost active modal.
-    // Each `.modal.active` element gets data-close-fn populated lazily so we can dispatch.
+    // Delegated click dispatcher for elements with [data-action].
+    // Use data-* attributes + this dispatcher INSTEAD of `onclick="fn('${userInput}')"`,
+    // which is unsafe: HTML attribute parser decodes entities BEFORE JS parses the value,
+    // so escapeHtml() does NOT prevent JS injection in inline event handlers.
+    document.addEventListener("click", (e) => {
+        const el = e.target.closest("[data-action]");
+        if (!el) return;
+        const action = el.dataset.action;
+        const id = el.dataset.id ? Number(el.dataset.id) : null;
+        const name = el.dataset.name || "";
+        const path = el.dataset.path || "";
+        const line = el.dataset.line ? Number(el.dataset.line) : 1;
+        switch (action) {
+            case "edit-project":     e.stopPropagation(); openProjectModal(id); break;
+            case "archive-project":  e.stopPropagation(); archiveProjectModal(id, name); break;
+            case "delete-project":   e.stopPropagation(); deleteProject(id, name); break;
+            case "open-file-line":   openFileAtLine(path, line); break;
+            case "open-file":        openFileInViewer(path); break;
+        }
+    });
+
+    // ────── Modal a11y: ESC, role=dialog, focus trap ──────
+    const _modalClosers = {
+        "archive-modal": () => closeArchiveModal(),
+        "apk-modal": () => closeAPKModal(),
+        "debug-modal": () => closeDebugModal(),
+        "archive-project-modal": () => closeArchiveProjectModal(),
+        "diff-modal": () => closeDiffModal(),
+        "file-viewer-modal": () => closeFileViewerModal(),
+        "project-modal": () => closeProjectModal(),
+        "generic-modal": () => closeGenericModal(),
+        "refactor-modal": () => closeRefactorModal(),
+    };
+    let _lastFocusBeforeModal = null;
+    const _focusableSelector = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+    function _getFocusable(modal) {
+        return Array.from(modal.querySelectorAll(_focusableSelector)).filter(el => el.offsetParent !== null);
+    }
+
+    // Watch modal.active class changes to apply aria-* and focus trap
+    const _modalObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            if (m.attributeName !== "class") continue;
+            const el = m.target;
+            if (!el.classList || !el.classList.contains("modal")) continue;
+            const active = el.classList.contains("active");
+            el.setAttribute("role", "dialog");
+            el.setAttribute("aria-modal", "true");
+            if (active) {
+                _lastFocusBeforeModal = document.activeElement;
+                const focusable = _getFocusable(el);
+                if (focusable.length) focusable[0].focus();
+            } else if (_lastFocusBeforeModal && typeof _lastFocusBeforeModal.focus === "function") {
+                try { _lastFocusBeforeModal.focus(); } catch (e) {}
+                _lastFocusBeforeModal = null;
+            }
+        }
+    });
+    document.querySelectorAll(".modal").forEach(m => {
+        m.setAttribute("role", "dialog");
+        m.setAttribute("aria-modal", "true");
+        _modalObserver.observe(m, { attributes: true, attributeFilter: ["class"] });
+    });
+
     document.addEventListener("keydown", (e) => {
-        if (e.key !== "Escape") return;
         const active = document.querySelectorAll(".modal.active");
         if (!active.length) return;
         const top = active[active.length - 1];
-        // Find a matching close function by id convention: close<Id>Modal
-        const id = top.id || "";
-        const closers = {
-            "archive-modal": closeArchiveModal,
-            "apk-modal": closeAPKModal,
-            "debug-modal": closeDebugModal,
-            "archive-project-modal": closeArchiveProjectModal,
-            "diff-modal": closeDiffModal,
-            "file-viewer-modal": closeFileViewerModal,
-            "project-modal": closeProjectModal,
-            "generic-modal": () => closeGenericModal(),
-            "refactor-modal": closeRefactorModal,
-        };
-        const fn = closers[id];
-        if (typeof fn === "function") {
-            try { fn(); } catch (err) { top.classList.remove("active"); }
-        } else {
-            top.classList.remove("active");
+
+        if (e.key === "Escape") {
+            const fn = _modalClosers[top.id];
+            if (typeof fn === "function") {
+                try { fn(); } catch (err) { top.classList.remove("active"); }
+            } else {
+                top.classList.remove("active");
+            }
+            e.stopPropagation();
+            return;
         }
-        e.stopPropagation();
+
+        // Focus trap: keep TAB cycling inside the modal
+        if (e.key === "Tab") {
+            const focusable = _getFocusable(top);
+            if (!focusable.length) { e.preventDefault(); return; }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
     });
 
     function requireProject() {
@@ -3783,7 +3851,7 @@
             let html = '';
             results.forEach(r => {
                 const lineText = escapeHtml((r.text || '').substring(0, 120));
-                html += `<div class="search-result-item" onclick="openFileAtLine('${escapeHtml(r.file)}', ${r.line || 1})">
+                html += `<div class="search-result-item" data-action="open-file-line" data-path="${escapeHtml(r.file)}" data-line="${r.line || 1}">
                     <div class="search-result-path">${escapeHtml(r.file)}</div>
                     <div class="search-result-line">строка ${r.line || '?'}</div>
                     <div class="search-result-text">${lineText}</div>
@@ -4121,7 +4189,7 @@
                 </div>`;
             } else {
                 const icon = getFileIcon(name);
-                html += `<div class="file-tree-file" style="padding-left:${indent + 8}px;" onclick="openFileInViewer('${escapeHtml(path)}')">
+                html += `<div class="file-tree-file" style="padding-left:${indent + 8}px;" data-action="open-file" data-path="${escapeHtml(path)}">
                     <span class="file-tree-icon">${icon}</span>
                     <span class="file-tree-name">${escapeHtml(name)}</span>
                 </div>`;
