@@ -39,11 +39,14 @@
     <!-- HEADER -->
     <header>
         <div class="header-left">
-            <button class="btn-debug-test" id="btn-debug-test" onclick="toggleDebugMode()" title="Нажми = начать запись логов. Ещё раз = остановить и показать в панели">
-                <span class="debug-dot" id="debug-dot"></span>
-                <span id="debug-btn-label">ТЕСТ</span>
-                <span class="debug-timer" id="debug-timer"></span>
-            </button>
+            <div class="mode-toggle" id="mode-toggle" onclick="toggleWorkMode()" title="Переключить режим работы">
+                <span class="mode-toggle-label" id="mode-toggle-label">✋ Ручной</span>
+                <div class="mode-toggle-track">
+                    <div class="mode-toggle-thumb" id="mode-toggle-thumb"></div>
+                </div>
+                <span class="mode-toggle-label mode-toggle-auto-label" id="mode-toggle-auto-label">🤖 Авто</span>
+            </div>
+            <button class="home-btn" onclick="goHome()" title="На главный экран">🏠</button>
         </div>
         <div class="header-center">
             <div class="header-title no-project" id="current-project-name">FOSVED CODER<span class="header-title-progress-bg" id="title-progress-bg"></span></div>
@@ -57,75 +60,87 @@
             </div>
         </div>
         <div class="header-actions">
+            <button class="btn-add" onclick="clearChat()" title="Очистить" data-hint="Очистить историю чата">🗑</button>
+            <button class="btn-add" onclick="showHelp()" title="Помощь" data-hint="Справка и горячие клавиши">❓</button>
             <button class="btn-add" onclick="toggleLogSidebar()" title="Лог" data-hint="Показать/скрыть панель логов">📋</button>
-            <button class="btn-add" onclick="showHelp()" title="Помощь" data-hint="Справка, горячие клавиши и список команд">❓</button>
-            <button class="btn-add" onclick="clearChat()" title="Очистить" data-hint="Очистить историю чата текущего проекта">🗑</button>
         </div>
     </header>
 
     <div class="main-container">
 
-        <!-- SIDEBAR -->
-        <div class="sidebar">
+        <!-- LEFT SIDEBAR -->
+        <div class="sidebar" id="left-sidebar">
 
-            <!-- Projects (compact, top) -->
-            <div class="sidebar-section" style="flex:0 0 auto; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0; max-height:180px;">
-                <div class="section-header" data-hint="Создавайте проекты для организации кода, каждый со своим контекстом и настройками ИИ">
-                    <h3>Проекты</h3>
-                    <button class="btn-add" onclick="openProjectModal()" title="Новый проект" style="font-size:14px; padding:2px 8px; line-height:1;">+</button>
+            <!-- ═══ PROJECTS PANEL (collapsible) ═══ -->
+            <div class="sidebar-panel" id="panel-projects">
+                <div class="panel-collapse-header" onclick="toggleSidebarPanel('projects')">
+                    <h3>📁 Проекты</h3>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <button class="btn-add" onclick="event.stopPropagation();openProjectModal()" title="Новый проект" style="font-size:12px;padding:2px 8px;line-height:1;">+</button>
+                        <span class="collapse-arrow" id="collapse-projects">▼</span>
+                    </div>
                 </div>
-                <div class="project-list" id="project-list">
-                    <div class="project-empty">Нет проектов</div>
+                <div class="panel-collapse-body" id="collapse-body-projects">
+                    <div class="project-list" id="project-list">
+                        <div class="project-empty">Нет проектов</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Подготовка (промпт-анкеты, черновики) -->
-            <div class="sidebar-section" id="drafts-section" style="flex:0 0 auto; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0; max-height:140px; border-bottom:1px solid var(--border);">
-                <div class="section-header" data-hint="ИДЕЯ: пошаговая подготовка проекта. Успех на 80% зависит от правильной постановки задачи.">
-                    <h3 style="color:var(--amber);">ИДЕЯ</h3>
-                    <button class="btn-add" onclick="createNewDraft()" title="Новая анкета" style="font-size:14px; padding:2px 8px; line-height:1;">+</button>
-                </div>
-                <div id="drafts-list" style="flex:1; overflow-y:auto;">
-                    <div style="color:var(--text-secondary); font-size:11px; padding:4px 8px;">Нет черновиков</div>
-                </div>
-            </div>
-
-            <!-- AI Models (gets most of the space) -->
-            <div class="sidebar-section" style="flex:3; display:flex; flex-direction:column; overflow:hidden; border-bottom:none; padding-bottom:0;">
-                <div class="section-header" data-hint="Выбирайте модели ИИ для чата. Кликните на модель, чтобы сделать её активной.">
-                    <h3>Модели ИИ</h3>
-                    <div style="display:flex; gap:4px; align-items:center;">
+            <!-- ═══ MODELS PANEL (collapsible) ═══ -->
+            <div class="sidebar-panel" id="panel-models" style="flex:3;">
+                <div class="panel-collapse-header" onclick="toggleSidebarPanel('models')">
+                    <h3>🤖 Модели ИИ</h3>
+                    <div style="display:flex;align-items:center;gap:6px;">
                         <div class="active-model-indicator" id="active-model-indicator" style="display:none;">
                             <div class="active-dot"></div>
                             <span id="active-model-name"></span>
                         </div>
-                        <button class="btn-add" onclick="refreshModels()" title="Обновить" data-hint="Обновить список моделей и перепроверить API ключи" style="font-size:12px">↻</button>
+                        <button class="btn-add" onclick="event.stopPropagation();refreshModels()" title="Обновить" style="font-size:12px;">↻</button>
+                        <span class="collapse-arrow" id="collapse-models">▼</span>
                     </div>
                 </div>
-                <div id="models-list" style="flex:1; overflow-y:auto; margin-right:-4px; padding-right:4px;">
-                    <div class="model-card loading">Загрузка...</div>
+                <div class="panel-collapse-body" id="collapse-body-models">
+                    <div id="models-list" style="flex:1;overflow-y:auto;margin-right:-4px;padding-right:4px;">
+                        <div class="model-card loading">Загрузка...</div>
+                    </div>
+                    <!-- Project Models (shown when project is active) -->
+                    <div class="project-models-section" id="project-models-section">
+                        <div class="project-models-label">Модели проекта</div>
+                        <div id="project-models-list"></div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Project Models (shown when project is active) -->
-            <div class="project-models-section" id="project-models-section">
-                <div class="project-models-label">Модели проекта</div>
-                <div id="project-models-list"></div>
+            <!-- ═══ SKILLS PANEL (collapsible) ═══ -->
+            <div class="sidebar-panel" id="panel-skills">
+                <div class="panel-collapse-header" onclick="toggleSidebarPanel('skills')">
+                    <h3>⚡ Навыки</h3>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <button class="btn-add" onclick="event.stopPropagation();showCreateSkillModal()" title="Создать навык" style="font-size:12px;padding:2px 8px;line-height:1;">+</button>
+                        <span class="collapse-arrow" id="collapse-skills">▼</span>
+                    </div>
+                </div>
+                <div class="panel-collapse-body" id="collapse-body-skills">
+                    <div id="skills-list" style="flex:1;overflow-y:auto;padding:4px;">
+                        <div class="skill-empty">Нет навыков</div>
+                    </div>
+                </div>
             </div>
 
-            <!-- Bottom buttons (compact) -->
-            <div style="display:flex; gap:4px; padding:8px 15px; border-top:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0;">
-                <button class="btn-add" onclick="showKeysModal()" data-hint="Управление ключами, токенами, моделями — Claude, OpenAI, Gemini, Expo и др." style="flex:2; font-size:11px; padding:4px 6px;">🔑 Ключи</button>
-                <button class="btn-add" onclick="refreshModels()" data-hint="Обновить список моделей и проверить статусы" style="flex:1; font-size:11px; padding:4px 6px;">🔄</button>
-                <button class="btn-add" onclick="showStats()" data-hint="Статистика использования моделей и роутинга" style="flex:1; font-size:11px; padding:4px 6px;">📊</button>
-            </div>
-            <!-- Color Legend -->
-            <div class="color-legend" id="color-legend">
-                <div class="color-legend-item"><span class="color-legend-dot" style="background:#C8A97E;"></span>Платные</div>
-                <div class="color-legend-item"><span class="color-legend-dot" style="background:#f0a030;"></span>Abacus.AI</div>
-                <div class="color-legend-item"><span class="color-legend-dot" style="background:#e06070;"></span>Локальные</div>
-                <div class="color-legend-item"><span class="color-legend-dot" style="background:var(--blue);"></span>Бесплатные</div>
-                <div class="color-legend-item"><span class="color-legend-dot" style="background:#569cd6;"></span>Кастомные</div>
+            <!-- Color Legend & Quick Actions -->
+            <div style="padding:8px 12px;border-top:1px solid var(--border);background:var(--bg-secondary);flex-shrink:0;">
+                <div style="display:flex;gap:4px;margin-bottom:6px;">
+                    <button class="btn-add" onclick="showKeysModal()" style="flex:1;font-size:10px;padding:3px 6px;">🔑 Ключи</button>
+                    <button class="btn-add" onclick="showStats()" style="flex:1;font-size:10px;padding:3px 6px;">📊 Стат</button>
+                </div>
+                <div class="color-legend" id="color-legend">
+                    <div class="color-legend-item"><span class="color-legend-dot" style="background:#C8A97E;"></span>Платные</div>
+                    <div class="color-legend-item"><span class="color-legend-dot" style="background:#f0a030;"></span>Abacus</div>
+                    <div class="color-legend-item"><span class="color-legend-dot" style="background:#e06070;"></span>Локальные</div>
+                    <div class="color-legend-item"><span class="color-legend-dot" style="background:var(--blue);"></span>Бесплатные</div>
+                    <div class="color-legend-item"><span class="color-legend-dot" style="background:#c080d0;"></span>Кастомные</div>
+                </div>
             </div>
         </div>
 
@@ -145,7 +160,7 @@
             </div>
             <div class="input-area">
                 <div class="input-wrapper">
-                    <textarea id="user-input" placeholder="Опишите задачу для ИИ..." rows="4" onkeydown="handleKeyDown(event)" style="min-height:90px;"></textarea>
+                    <textarea id="user-input" placeholder="Опишите задачу для ИИ..." rows="6" onkeydown="handleKeyDown(event)" style="min-height:110px;"></textarea>
                     <div class="input-actions">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label class="file-label">📎 Прикрепить файл
@@ -159,9 +174,24 @@
                     </div>
                 </div>
             </div>
+            <!-- Status Bar -->
+            <div class="status-bar" id="status-bar">
+                <div class="status-bar-section" id="status-skills">
+                    <span class="status-label">Навыки:</span>
+                    <span id="status-skills-content" class="status-content">—</span>
+                </div>
+                <div class="status-bar-section" id="status-model">
+                    <span class="status-label">Модель:</span>
+                    <span id="status-model-content" class="status-content">—</span>
+                </div>
+                <div class="status-bar-section" id="status-tools">
+                    <span class="status-label">Инструменты:</span>
+                    <span id="status-tools-content" class="status-content">—</span>
+                </div>
+            </div>
             <!-- Bottom Bar -->
             <div class="bottom-bar" id="bottom-bar">
-                <!-- Кнопки будут рендериться динамически через renderBottomBar() -->
+                <!-- Кнопки рендерятся через renderBottomBar() -->
             </div>
         </div>
 
@@ -310,93 +340,7 @@
         </div>
     </div>
 
-    <!-- ═══════════ APK BUILD MODAL ═══════════ -->
-    <div class="modal" id="apk-modal" onclick="if(event.target===this)closeAPKModal()">
-        <div class="modal-content" style="width:580px;max-width:95vw;" onclick="event.stopPropagation()">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                <h2 style="margin-bottom:0">📱 Сборка APK</h2>
-                <button class="btn-add" onclick="closeAPKModal()" style="background:var(--bg-tertiary);font-size:16px;">✕</button>
-            </div>
-            <div class="modal-scroll">
-                <!-- Strategy info -->
-                <div id="apk-strategy-info" style="padding:10px 12px;background:var(--bg-tertiary);border-radius:6px;margin-bottom:14px;font-size:12px;color:var(--text-secondary);display:none;">
-                    <b>Движок:</b> <span id="apk-strategy-name"></span><br>
-                    <span id="apk-strategy-desc"></span>
-                </div>
-                <!-- Not supported -->
-                <div id="apk-not-supported" style="display:none;padding:20px;text-align:center;color:var(--text-secondary);">
-                    Шаблон этого проекта не поддерживает сборку APK.<br>
-                    <small>Поддерживаемые: React, Next.js, Expo, FastAPI, Flask, Python CLI</small>
-                </div>
-                <!-- Form -->
-                <div id="apk-form" style="display:none;">
-                    <div style="display:flex;gap:14px;align-items:flex-start;">
-                        <div style="flex:1;">
-                            <div class="form-group">
-                                <label>Название приложения *</label>
-                                <input type="text" id="apk-app-name" placeholder="MyApp" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
-                            </div>
-                            <div class="form-group">
-                                <label>Package ID *</label>
-                                <input type="text" id="apk-package-id" placeholder="com.mycompany.myapp" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
-                                <small style="color:var(--text-secondary);font-size:11px;">Формат: com.company.app (латиница)</small>
-                            </div>
-                        </div>
-                        <!-- Icon preview -->
-                        <div style="text-align:center;flex-shrink:0;">
-                            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Иконка</label>
-                            <div id="apk-icon-preview" style="width:72px;height:72px;border-radius:16px;background:var(--bg-tertiary);border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;margin:0 auto;overflow:hidden;">
-                                <span style="font-size:28px;opacity:0.3;">🎨</span>
-                            </div>
-                            <small style="color:var(--text-secondary);font-size:10px;display:block;margin-top:4px;">AI генерация</small>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Описание иконки <span style="color:var(--text-secondary);font-weight:normal;">(опционально — подсказка для AI)</span></label>
-                        <input type="text" id="apk-icon-prompt" placeholder="Например: зелёная чат-иконка с молнией" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;">
-                    </div>
-                    <div style="display:flex;gap:12px;">
-                        <div class="form-group" style="flex:1;">
-                            <label>Версия</label>
-                            <input type="text" id="apk-version" value="1.0.0" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
-                        </div>
-                        <div class="form-group" style="flex:1;">
-                            <label>Тип сборки</label>
-                            <select id="apk-build-type" style="width:100%;padding:10px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
-                                <option value="debug">Debug (тестовая)</option>
-                                <option value="release">Release (рабочая)</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="flex:0 0 auto;">
-                            <label>Цвет</label>
-                            <input type="color" id="apk-color" value="#8B1A1A" style="width:44px;height:38px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:0;">
-                        </div>
-                    </div>
-                    <!-- Tools check -->
-                    <div class="form-group">
-                        <label>Окружение</label>
-                        <div id="apk-env-check" style="font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;">
-                            Нажмите "Проверить" чтобы проверить инструменты
-                        </div>
-                        <button class="btn-small btn-outline" onclick="checkAPKEnv()" style="margin-top:6px;padding:6px 14px;">🔍 Проверить инструменты</button>
-                    </div>
-                    <!-- Actions -->
-                    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-                        <button class="btn-small btn-outline" onclick="generateAPKIcon()" style="padding:8px 14px;white-space:nowrap;">🎨 Сгенерировать иконку</button>
-                        <button class="btn-small btn-outline" onclick="initAPKPlatform()" style="padding:8px 14px;white-space:nowrap;">⚡ Инициализировать Android</button>
-                        <button class="btn-small" onclick="buildAPK()" style="padding:8px 20px;white-space:nowrap;background:var(--green);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">🚀 Собрать APK</button>
-                    </div>
-                    <!-- Build log -->
-                    <div id="apk-build-log" style="display:none;margin-top:14px;">
-                        <label style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;display:block;">Лог сборки:</label>
-                        <pre id="apk-log-output" style="font-size:11px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:10px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:var(--text-secondary);font-family:monospace;"></pre>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════════ DEBUG ANALYSIS MODAL ═══════════ -->
+    <!-- ═══════════ DEBUG ANALYSIS MODAL ═══════════ -->>
     <div class="modal" id="debug-modal" onclick="if(event.target===this)closeDebugModal()">
         <div class="modal-content" style="width:820px;max-width:95vw;max-height:90vh;" onclick="event.stopPropagation()">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -1055,7 +999,6 @@
             addMessage("system", "Fosved Coder готов. Выберите модель и начните работу.");
             loadModels();
             loadProjects();
-            loadDrafts();
             // Start heartbeat with pong-timeout liveness check
             wsPongDeadline = Date.now() + WS_PING_INTERVAL_MS + WS_PONG_TIMEOUT_MS;
             wsHeartbeatInterval = setInterval(() => {
@@ -2468,19 +2411,21 @@
     }
 
     // ═══════════════════════════════════════════════════════
-    // BOTTOM BAR (контекстные кнопки)
+    // BOTTOM BAR — Files | Search | Git | Terminal | Stats | Keys | Settings | Help
     // ═══════════════════════════════════════════════════════
     function renderBottomBar() {
         const bar = document.getElementById("bottom-bar");
         const p = currentProjectId ? allProjects.find(x => x.id === currentProjectId) : null;
 
-        // Кнопки без проекта (базовый набор, без дублей с сайдбаром)
         let buttons = [
+            { label: '📁 Files', action: "togglePanel('files')" },
+            { label: '🔍 Search', action: "togglePanel('search')" },
+            { label: '🔀 Git', action: "togglePanel('git')" },
             { label: '🛠 Terminal', action: "insertCommand('/terminal ')" },
-            { label: '⚡ PowerShell', action: "runTerminalCommand('powershell')" },
-            { label: '🔗 GitHub', action: "window.open('https://github.com/ShkodnikAI/Fosved-coder','_blank')" },
-            { label: '📋 Лог', action: "toggleLogSidebar()" },
-            { label: '📊 Стат', action: "showStats()" },
+            { label: '📊 Stats', action: "showStats()" },
+            { label: '🔑 Keys', action: "showKeysModal()" },
+            { label: '⚙️ Settings', action: "showSettings()" },
+            { label: '❓ Help', action: "showHelp()" },
         ];
 
         if (p) {
@@ -2502,10 +2447,8 @@
             buttons.push({ label: '🚀 Sync', action: "wsSend('/quick_push sync')" });
             buttons.push({ label: '🔍 Search', action: "togglePanel('search')" });
             buttons.push({ label: '🔀 Git', action: "togglePanel('git')" });
-            buttons.push({ label: '📦 Packages', action: "togglePanel('packages')" });
             buttons.push({ label: '📁 Files', action: "togglePanel('files')" });
             buttons.push({ label: '🧪 Test', action: "wsSend('/test')" });
-            buttons.push({ label: '📱 APK', action: "openAPKModal()" });
 
             // GitHub проекта (если указан свой репо)
             if (p.github_repo) {
@@ -4638,6 +4581,282 @@
             showToast("Ошибка сборки APK", "error");
         }
     }
+
+    // ═══════════════════════════════════════════════════════
+    // HOME NAVIGATION
+    // ═══════════════════════════════════════════════════════
+    let isHomeScreen = true;
+
+    function goHome() {
+        currentProjectId = null;
+        isHomeScreen = true;
+        document.querySelectorAll(".project-item").forEach(el => el.classList.remove("active"));
+        const titleEl = document.getElementById("current-project-name");
+        const progressBg = document.getElementById("title-progress-bg");
+        titleEl.textContent = "FOSVED CODER";
+        titleEl.appendChild(progressBg);
+        titleEl.className = 'header-title no-project';
+        progressBg.style.width = '0%';
+        progressBg.classList.remove('visible');
+        priorityModels = [];
+        renderModels();
+        renderBottomBar();
+        updateStatusBar();
+        addMessage("system", "Главный экран — режим обсуждения идей");
+        wsSend({ type: "mode_change", mode: workMode });
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // COLLAPSIBLE SIDEBAR PANELS
+    // ═══════════════════════════════════════════════════════
+    const collapsedPanels = {};
+
+    function toggleSidebarPanel(name) {
+        collapsedPanels[name] = !collapsedPanels[name];
+        const body = document.getElementById('collapse-body-' + name);
+        const arrow = document.getElementById('collapse-' + name);
+        if (body) {
+            body.style.display = collapsedPanels[name] ? 'none' : '';
+        }
+        if (arrow) {
+            arrow.textContent = collapsedPanels[name] ? '▶' : '▼';
+            arrow.style.transform = collapsedPanels[name] ? 'rotate(-90deg)' : '';
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // SKILLS PANEL
+    // ═══════════════════════════════════════════════════════
+    let allSkills = [];
+
+    const SKILL_CATEGORIES = [
+        { id: 'files', label: '📁 Файлы', icon: '📁' },
+        { id: 'search', label: '🔍 Поиск', icon: '🔍' },
+        { id: 'git', label: '🔀 Git', icon: '🔀' },
+        { id: 'terminal', label: '⚡ Терминал', icon: '⚡' },
+        { id: 'codegen', label: '💻 Генерация кода', icon: '💻' },
+        { id: 'debug', label: '🐛 Отладка', icon: '🐛' },
+        { id: 'testing', label: '🧪 Тестирование', icon: '🧪' },
+        { id: 'deploy', label: '🚀 Деплой', icon: '🚀' },
+        { id: 'database', label: '🗃️ База данных', icon: '🗃️' },
+        { id: 'api', label: '🌐 API', icon: '🌐' },
+    ];
+
+    async function loadSkills() {
+        try {
+            const resp = await fetch("/api/v1/skills");
+            if (!resp.ok) return;
+            allSkills = await resp.json();
+            renderSkills();
+        } catch(e) { console.error("Failed to load skills:", e); }
+    }
+
+    function renderSkills() {
+        const container = document.getElementById("skills-list");
+        if (!allSkills || !allSkills.length) {
+            container.innerHTML = '<div class="skill-empty">Нет навыков. Модель автоматически подбирает нужные.</div>';
+            return;
+        }
+
+        // Group by category
+        const grouped = {};
+        allSkills.forEach(s => {
+            const cat = s.category || 'other';
+            if (!grouped[cat]) grouped[cat] = [];
+            grouped[cat].push(s);
+        });
+
+        let html = '';
+        for (const [cat, skills] of Object.entries(grouped)) {
+            const catInfo = SKILL_CATEGORIES.find(c => c.id === cat);
+            const label = catInfo ? catInfo.label : cat;
+            html += `<div class="skill-group"><div class="skill-group-header">${escapeHtml(label)}</div>`;
+            skills.forEach(s => {
+                const isActive = s.enabled !== false;
+                html += `<div class="skill-item" data-skill-id="${s.id}">
+                    <label class="skill-checkbox">
+                        <input type="checkbox" ${isActive ? 'checked' : ''} onchange="toggleSkill('${s.id}', this.checked)">
+                        <span class="skill-name">${escapeHtml(s.name || s.id)}</span>
+                    </label>
+                    <div class="skill-desc">${escapeHtml(s.description || '').substring(0, 50)}</div>
+                    <div class="skill-actions">
+                        <button class="btn-small btn-outline" onclick="loadSkill('${s.id}')" title="Загрузить в контекст" style="font-size:9px;padding:1px 6px;">Загрузить</button>
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+        }
+        container.innerHTML = html;
+    }
+
+    function toggleSkill(skillId, enabled) {
+        const skill = allSkills.find(s => s.id === skillId);
+        if (skill) {
+            skill.enabled = enabled;
+            wsSend({ type: "skill_toggle", skill_id: skillId, enabled: enabled });
+            showToast(enabled ? `Навык "${skill.name}" включён` : `Навык "${skill.name}" выключен`, "info");
+        }
+    }
+
+    function loadSkill(skillId) {
+        const skill = allSkills.find(s => s.id === skillId);
+        if (!skill) return;
+        const input = document.getElementById("user-input");
+        if (input) {
+            input.value = `/skill ${skillId} `;
+            input.focus();
+        }
+        showToast(`Навык "${skill.name}" загружен в ввод`, "success");
+    }
+
+    function showCreateSkillModal() {
+        const body = `<div class="keys-section"><h3>Создать навык</h3>
+            <div class="key-form">
+                <label class="key-label">Название</label>
+                <input type="text" id="new-skill-name" class="key-input" placeholder="Название навыка">
+                <label class="key-label">Категория</label>
+                <select id="new-skill-category" class="key-input" style="padding:8px;">
+                    ${SKILL_CATEGORIES.map(c => `<option value="${c.id}">${c.label}</option>`).join('')}
+                </select>
+                <label class="key-label">Описание</label>
+                <textarea id="new-skill-desc" class="key-input" rows="3" placeholder="Краткое описание навыка..."></textarea>
+                <label class="key-label">Промпт (системная инструкция)</label>
+                <textarea id="new-skill-prompt" class="key-input" rows="4" placeholder="Системная инструкция для модели..."></textarea>
+                <div class="key-form-actions">
+                    <button class="btn-small btn-outline" onclick="closeGenericModal()">Отмена</button>
+                    <button class="btn-small" onclick="doCreateSkill()">Создать</button>
+                </div>
+            </div></div>`;
+        openGenericModal("Новый навык", body);
+    }
+
+    async function doCreateSkill() {
+        const name = document.getElementById("new-skill-name").value.trim();
+        const category = document.getElementById("new-skill-category").value;
+        const description = document.getElementById("new-skill-desc").value.trim();
+        const prompt = document.getElementById("new-skill-prompt").value.trim();
+        if (!name) { showToast("Введите название", "error"); return; }
+        try {
+            const resp = await fetch("/api/v1/skills", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ name, category, description, prompt, enabled: true })
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                allSkills.unshift(data);
+                renderSkills();
+                closeGenericModal();
+                showToast(`Навык "${name}" создан`, "success");
+            } else {
+                showToast(data.detail || "Ошибка создания", "error");
+            }
+        } catch(e) { showToast("Ошибка: " + e.message, "error"); }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // STATUS BAR UPDATE
+    // ═══════════════════════════════════════════════════════
+    function updateStatusBar() {
+        // Skills
+        const skillsEl = document.getElementById('status-skills-content');
+        if (skillsEl) {
+            const active = allSkills.filter(s => s.enabled);
+            skillsEl.textContent = active.length > 0 ? `${active.length} активно` : '—';
+        }
+
+        // Model
+        const modelEl = document.getElementById('status-model-content');
+        if (modelEl && activeModelId) {
+            const m = allModels.find(x => x.id === activeModelId);
+            modelEl.textContent = m ? escapeHtml(m.name) : '—';
+        } else if (modelEl) {
+            modelEl.textContent = '—';
+        }
+
+        // Tools — show tool call stats from session
+        const toolsEl = document.getElementById('status-tools-content');
+        if (toolsEl) {
+            if (sessionToolTotal > 0) {
+                const ok = sessionToolDone;
+                const err = sessionToolErrors;
+                toolsEl.textContent = `${ok}/${sessionToolTotal} OK` + (err > 0 ? `, ${err} ош.` : '');
+            } else {
+                toolsEl.textContent = '—';
+            }
+        }
+    }
+
+    // Override autoIncrementProgress to also update status bar
+    const _origAutoIncrementProgress = autoIncrementProgress;
+
+    // ═══════════════════════════════════════════════════════
+    // SILENT MODEL PROBE — тихий опрос всех моделей
+    // ═══════════════════════════════════════════════════════
+    async function probeModels() {
+        showToast("Тихий опрос моделей...", "info");
+        try {
+            const resp = await fetch("/api/v1/models/probe", { method: "POST" });
+            if (!resp.ok) { showToast("Ошибка опроса моделей", "error"); return; }
+            const data = await resp.json();
+            if (data.responded && data.responded.length > 0) {
+                showToast(`Опрос: ${data.responded.length} моделей ответили`, "success");
+            }
+            if (data.failed && data.failed.length > 0) {
+                showToast(`${data.failed.length} моделей не ответили`, "warning");
+            }
+            // Refresh model list after probe
+            await refreshModels();
+        } catch(e) {
+            console.error("Probe error:", e);
+            showToast("Ошибка опроса моделей", "error");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // SETTINGS
+    // ═══════════════════════════════════════════════════════
+    function showSettings() {
+        const html = `
+        <div style="display:flex;flex-direction:column;gap:16px;">
+            <div>
+                <h3 style="margin-bottom:10px;">⚙️ Настройки</h3>
+                <div class="form-group">
+                    <label>Тема оформления</label>
+                    <div style="display:flex;gap:8px;margin-top:6px;">
+                        <button class="btn-small${document.documentElement.dataset.theme!=='light'?' btn-outline active':''}" onclick="setTheme('dark')">🌙 Тёмная</button>
+                        <button class="btn-small${document.documentElement.dataset.theme==='light'?' btn-outline active':''}" onclick="setTheme('light')">☀️ Светлая</button>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <h3 style="margin-bottom:10px;">🔍 Опрос моделей</h3>
+                <p style="color:var(--text-secondary);font-size:12px;margin-bottom:8px;">Отправить минимальный запрос ко всем настроенным моделям для проверки доступности.</p>
+                <button class="btn-small" onclick="probeModels()">🔍 Начать опрос</button>
+            </div>
+            <div>
+                <h3 style="margin-bottom:10px;">🧹 Очистка данных</h3>
+                <p style="color:var(--text-secondary);font-size:12px;margin-bottom:8px;">Удалить сообщения главного экрана старше 10 дней.</p>
+                <button class="btn-small btn-outline" onclick="clearMainChat()" style="color:var(--red);">🗑 Очистить чат</button>
+            </div>
+        </div>`;
+        openGenericModal("⚙️ Настройки", html);
+    }
+
+    async function clearMainChat() {
+        try {
+            const resp = await fetch("/api/v1/chat/main", { method: "DELETE" });
+            if (resp.ok) {
+                const data = await resp.json();
+                showToast(`Удалено ${data.deleted || 0} сообщений`, "success");
+                // Clear chat UI
+                chatBox.innerHTML = '';
+            }
+        } catch(e) {
+            showToast("Ошибка очистки", "error");
+        }
+    }
+
     function closeRefactorModal() { document.getElementById("refactor-modal").classList.remove("active"); }
     function sendRefactor() {
         const code = document.getElementById("refactor-code").value.trim();

@@ -2,12 +2,14 @@ import os
 import sys
 import platform
 import time
+import shlex
+import re
 import glob as glob_mod
 import litellm
 import json
 from pathlib import Path
 from datetime import datetime, timezone
-from core.memory import CONFIG, save_message, get_history, get_project
+from core.memory import CONFIG, save_message, get_history, get_project, get_project_token_by_path, git_push_with_token
 from core.keys_manager import keys_manager
 from core.context_compressor import ContextCompressor
 from core.action_logger import get_logger
@@ -224,6 +226,55 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 - Для кода в тексте ответа используй Markdown code blocks только для объяснений, реальные файлы пиши через write_file"""
 
 
+SYSTEM_PROMPT_INJECTION_TEMPLATE = """Ты Fosved Coder — AI-ассистент для разработки проекта.
+Ты работаешь внутри IDE пользователя и можешь управлять файлами проекта через специальный формат ответа.
+Модель НЕ знает про инструменты — она просто видит контекст задачи и использует формат ответа.
+
+{project_context}
+
+{platform_info}
+
+ФОРМАТ ОТВЕТА — как создавать и изменять файлы:
+
+1. Создать или перезаписать файл:
+<file path="относительный/путь/файла.py">
+полное содержимое файла...
+</file>
+
+2. Создать файл через code block (альтернативный формат):
+```python:относительный/путь/файла.py
+содержимое файла...
+```
+
+3. Показать изменения (diff):
+```diff
+--- a/файл.py
++++ b/файл.py
+@@ -10,5 +10,5 @@
+-старая строка
++новая строка
+```
+
+4. Выполнить команду:
+<command>
+shell-команда
+</command>
+
+5. Git операции:
+<git operation="commit_push" message="описание">
+</git>
+(Автоматически: git add -A → commit → push. БЕЗ force-push.)
+
+ПРАВИЛА:
+- Отвечай на том языке, на котором задан вопрос
+- Сначала объясни что делаешь, потом показывай файлы
+- НЕ проси пользователя копировать код — пиши прямо в файлы через формат выше
+- НЕ используй force-push — никогда
+- После изменения файлов система автоматически сделает git commit + push
+- Будь проактивным — если нужно создать файл, создавай его
+- Для кода в тексте ответа используй Markdown code blocks только для объяснений, реальные файлы пиши через <file> или ```lang:path"""
+
+
 # ═══════════════════════════════════════════════════════
 # TOOL EXECUTION
 # ═══════════════════════════════════════════════════════
@@ -324,11 +375,19 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                         try:
                             with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
                                 for i, line in enumerate(fh, 1):
-                                    if pattern.lower() in line.lower():
-                                        rel = os.path.relpath(fpath, project_path)
-                                        results.append(f"{rel}:{i}: {line.strip()[:120]}")
-                                        if len(results) >= 30:
-                                            break
+                                    try:
+                                        if re.search(pattern, line, re.IGNORECASE):
+                                            rel = os.path.relpath(fpath, project_path)
+                                            results.append(f"{rel}:{i}: {line.strip()[:120]}")
+                                            if len(results) >= 30:
+                                                break
+                                    except re.error:
+                                        # Invalid regex — fall back to substring match
+                                        if pattern.lower() in line.lower():
+                                            rel = os.path.relpath(fpath, project_path)
+                                            results.append(f"{rel}:{i}: {line.strip()[:120]}")
+                                            if len(results) >= 30:
+                                                break
                         except Exception:
                             continue
                     if len(results) >= 30:
@@ -387,9 +446,9 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             safe_msg = message.replace('"', "'")
             r2 = await executor.execute(f'git commit -m "{safe_msg}" --allow-empty', cwd=project_path, need_approval=False)
             commit_out = r2.get("stdout", "") + r2.get("stderr", "")
-            # Push
-            r3 = await executor.execute("git push", cwd=project_path, need_approval=False, timeout=30)
-            push_out = r3.get("stdout", "") + r3.get("stderr", "")
+            # Push with project PAT token if available
+            project_token = await get_project_token_by_path(project_path)
+            push_out = await git_push_with_token(executor, project_path, project_token)
             await websocket.send_json({"type": "tool_call", "tool": name, "args": {"message": message}, "status": "done"})
             await _send_log(websocket, f"🚀 Push: {push_out.strip()[:100]}", "success")
             return f"Commit: {commit_out.strip()}\nPush: {push_out.strip()}"
@@ -484,11 +543,15 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     max_tool_iterations = 10  # Prevent infinite loops
 
     for iteration in range(max_tool_iterations):
+        current_tool_calls = {}  # Accumulate tool call chunks: {index: {id, name, arguments}}
+        current_content = ""
+
         try:
             kwargs = {
                 "model": model,
                 "messages": messages,
                 "max_tokens": CONFIG["llm"].get("max_tokens", 16384) if is_thinking else CONFIG["llm"].get("max_tokens", 4096),
+                "stream": True,
             }
             if not skip_temperature:
                 kwargs["temperature"] = CONFIG["llm"].get("temperature", 0.2)
@@ -520,25 +583,70 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                     await _send_log(websocket, f"⚠️ {model} не поддерживает tools — продолжаю без инструментов", "warning")
                     use_tools = False
                     kwargs.pop("tools", None)
+                    # Signal caller that tools are not supported (for prompt injection fallback)
+                    if _error_info is not None:
+                        _error_info["no_tools"] = True
                     response = await litellm.acompletion(**kwargs)
                 else:
                     raise
 
-            choice = response.choices[0]
-            msg_obj = choice.message
+            # Process streamed chunks
+            finish_reason = None
+            async for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
 
-            # Check for tool calls
-            tool_calls = getattr(msg_obj, 'tool_calls', None)
+                # Stream content chunks to client in real-time
+                if delta.content:
+                    await websocket.send_json({"type": "chunk", "content": delta.content})
+                    full_response += delta.content
+                    current_content += delta.content
 
-            if tool_calls:
-                # Add assistant message with tool calls to history
-                messages.append(msg_obj.model_dump())
+                # Accumulate tool calls from streaming chunks
+                if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in current_tool_calls:
+                            current_tool_calls[idx] = {
+                                "id": tc.id or "",
+                                "name": "",
+                                "arguments": ""
+                            }
+                        if tc.id:
+                            current_tool_calls[idx]["id"] = tc.id
+                        if tc.function:
+                            if hasattr(tc.function, 'name') and tc.function.name:
+                                current_tool_calls[idx]["name"] = tc.function.name
+                            if hasattr(tc.function, 'arguments') and tc.function.arguments:
+                                current_tool_calls[idx]["arguments"] += tc.function.arguments
+
+                if chunk.choices[0].finish_reason:
+                    finish_reason = chunk.choices[0].finish_reason
+
+            # After stream ends, check if we need to handle tool calls
+            if finish_reason == "tool_calls" and current_tool_calls:
+                # Reconstruct the assistant message with tool calls
+                tool_calls_list = []
+                for idx in sorted(current_tool_calls.keys()):
+                    tc = current_tool_calls[idx]
+                    tool_calls_list.append({
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": tc["arguments"]
+                        }
+                    })
+
+                assistant_msg = {"role": "assistant", "content": current_content or None, "tool_calls": tool_calls_list}
+                messages.append(assistant_msg)
 
                 # Execute each tool call
-                for tc in tool_calls:
-                    fn_name = tc.function.name
+                for tc_data in tool_calls_list:
+                    fn_name = tc_data["function"]["name"]
                     try:
-                        fn_args = json.loads(tc.function.arguments)
+                        fn_args = json.loads(tc_data["function"]["arguments"])
                     except json.JSONDecodeError:
                         fn_args = {}
 
@@ -551,28 +659,16 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
                     result = await execute_tool(fn_name, fn_args, project_path, websocket)
 
-                    # Add tool result to messages
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": tc.id,
+                        "tool_call_id": tc_data["id"],
                         "content": result
                     })
 
                 # Continue loop — LLM will process tool results and respond
                 continue
 
-            # No tool calls — stream the text response
-            response_text = getattr(msg_obj, 'content', None) or ""
-
-            if response_text:
-                # Stream text to client
-                # Split into small chunks for real-time feel
-                chunk_size = 20
-                for i in range(0, len(response_text), chunk_size):
-                    chunk = response_text[i:i+chunk_size]
-                    await websocket.send_json({"type": "chunk", "content": chunk})
-                full_response += response_text
-
+            # Normal text response completed (or finish_reason is stop/length/end_turn)
             await websocket.send_json({"type": "done"})
             duration = (time.time() - start_time) * 1000
             tokens = len(full_response) // 4
@@ -808,6 +904,19 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             no_credits_providers.add(model_provider)
             await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
         if ai_response is not None:
+            # Prompt injection fallback: model doesn't support tools but we have a project
+            if error_info.get("no_tools") and project_path:
+                await _send_log(websocket, f"🔄 {display_model}: переключаюсь на prompt injection", "warning")
+                injection_result = await stream_with_prompt_injection(
+                    prompt, history, websocket,
+                    model=model_to_try,
+                    project_path=project_path,
+                    project_id=project_id,
+                    repo_map=repo_map,
+                )
+                if injection_result is not None:
+                    ai_response = injection_result
+                # If injection failed, keep the raw response as fallback
             break
 
     if ai_response:
@@ -818,3 +927,571 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     else:
         await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили."})
         await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
+
+
+# ═══════════════════════════════════════════════════════
+# HUB MODE — Главный экран (без проекта, со скиллами)
+# ═══════════════════════════════════════════════════════
+
+HUB_SYSTEM_PROMPT = """Ты Fosved Coder — AI-ассистент для подготовки проектов.
+Ты находишься на ГЛАВНОМ ЭКРАНЕ — это место для обсуждения идей, подготовки промптов и создания проектов.
+
+Твои задачи:
+- Обсуждать идеи пользователя и помогать их развивать
+- Задавать уточняющие вопросы для формирования полного ТЗ
+- Помогать создавать профессиональный промпт для проекта (оценка 10/10)
+- При необходимости подключать скиллы для enriching контекста
+
+Доступные скиллы (модель сама решает когда подключить):
+- charts — генерация графиков, диаграмм, ER-схем
+- web-search — поиск информации в интернете
+- image-generation — генерация изображений (логотипы, мокапы)
+- pdf — генерация PDF документов
+- docx — генерация Word документов
+- xlsx — генерация таблиц Excel
+- ASR — распознавание речи
+- VLM — анализ изображений
+
+Для активации скилла используй: <skill name="название_скилла">описание задачи</skill>
+
+Когда пользователь готов создать проект, помоги сформировать:
+1. Название проекта
+2. Описание
+3. Шаблон (FastAPI, React, Next.js, Expo, Flask, Python CLI)
+4. Детальное описание дизайна (цвета, стиль, тема, шрифты)
+5. GitHub репозиторий (если есть)
+6. Базовый промпт (инструкции для ИИ при работе в проекте)
+
+{platform_info}
+
+Правила:
+- Отвечай на том языке, на котором задан вопрос
+- Будь проактивным — предлагай идеи и уточнения
+- Если идея неполная — задай вопросы чтобы дополнить
+- Стремись создать промпт на 10/10 — максимально подробный и конкретный
+"""
+
+
+async def handle_hub_message(prompt: str, websocket, model_id: str = None):
+    """
+    Обработчик сообщений ГЛАВНОГО ЭКРАНА.
+    Нет контекста проекта, нет инструментов (read/write/execute).
+    Только чат с ИИ + опросный лист + скиллы.
+    """
+    from core.memory import get_history as get_hub_history
+
+    # История с project_id=None — чат главного экрана
+    history = await get_hub_history(None, limit=50)
+
+    system_prompt = HUB_SYSTEM_PROMPT.format(platform_info=get_platform_info())
+
+    await save_message(None, "user", prompt)
+
+    # Список моделей с fallback
+    models_to_try = []
+    if model_id:
+        models_to_try.append(model_id)
+
+    all_models = keys_manager.get_all_models()
+    for m in all_models:
+        if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
+            if m.get("type") == "free" and m.get("status") == "no_key":
+                continue
+            if m.get("type") == "local" and not m.get("base_url"):
+                continue
+            models_to_try.append(m["id"])
+
+    if not models_to_try:
+        await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
+        return
+
+    ai_response = None
+    tried_count = 0
+    no_credits_providers = set()
+
+    for i, model_to_try in enumerate(models_to_try):
+        model_config = keys_manager.get_model_config(model_to_try)
+        if not model_config:
+            continue
+        has_key = bool(model_config.get("api_key"))
+        is_local = model_to_try in [m["id"] for m in all_models if m["type"] == "local"]
+        if not has_key and not is_local:
+            continue
+
+        model_provider = model_config.get("provider", "")
+        if model_provider in no_credits_providers:
+            continue
+
+        tried_count += 1
+        m_info = next((m for m in all_models if m["id"] == model_to_try), None)
+        display_model = m_info["name"] if m_info else model_to_try
+        await websocket.send_json({"type": "typing", "model": display_model})
+
+        if i > 0:
+            await websocket.send_json({"type": "info", "content": f"Переключаюсь на {display_model} (попытка {tried_count})..."})
+
+        error_info = {}
+        ai_response = await stream_llm_response(
+            prompt, history, websocket,
+            model=model_to_try,
+            system_prompt=system_prompt,
+            project_path=None,
+            use_tools=False,  # На главном экране инструментов НЕТ
+            _error_info=error_info,
+        )
+        if error_info.get("no_credits") and model_provider:
+            no_credits_providers.add(model_provider)
+        if ai_response is not None:
+            break
+
+    if ai_response:
+        await save_message(None, "ai", ai_response)
+        # Проверяем есть ли <skill> теги в ответе — парсим и выполняем
+        await _process_skill_tags(ai_response, websocket)
+    elif tried_count == 0:
+        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом."})
+    else:
+        await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили."})
+
+
+async def _process_skill_tags(response_text: str, websocket):
+    """
+    Парсит ответ модели на наличие <skill name="...">...</skill> тегов
+    и отправляет информацию о запрошенных скиллах на клиент.
+    Клиент сам решает как выполнить скилл.
+    """
+    skill_pattern = re.compile(r'<skill\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)</skill>', re.DOTALL)
+    matches = skill_pattern.findall(response_text)
+
+    for skill_name, task_desc in matches:
+        skill_name = skill_name.strip()
+        task_desc = task_desc.strip()
+        logger.log(f"hub: skill requested: {skill_name} — {task_desc[:80]}", level="info", source="agent")
+        await websocket.send_json({
+            "type": "skill_request",
+            "skill": skill_name,
+            "task": task_desc,
+        })
+        await _send_log(websocket, f"🧩 Скилл запрошен: {skill_name}", "info")
+
+
+# ═══════════════════════════════════════════════════════
+# PROMPT INJECTION MODE — Fallback для моделей без tools
+# ═══════════════════════════════════════════════════════
+
+INJECTION_SYSTEM_PROMPT = """Ты Fosved Coder — AI-ассистент для разработки проекта.
+Ты работаешь с файлами проекта через специальный формат ответа.
+
+{project_context}
+
+{platform_info}
+
+ПРАВИЛА ФОРМАТИРОВАНИЯ ОТВЕТА:
+
+Для СОЗДАНИЯ или ПЕРЕЗАПИСИ файла используй:
+<file path="относительный/путь/файла.py">
+полное содержимое файла...
+</file>
+
+Альтернативный формат (code block с путём):
+```python:src/main.py
+содержимое файла...
+```
+
+Для ПОКАЗА ИЗМЕНЕНИЙ (diff):
+```diff
+--- a/файл.py
++++ b/файл.py
+@@ -10,5 +10,5 @@
+-старая строка
++новая строка
+```
+
+Для ВЫПОЛНЕНИЯ команды:
+<command>
+shell-команда
+</command>
+
+Для GIT ОПЕРАЦИЙ:
+<git operation="commit_push" message="feat: описание">
+</git>
+(Автоматически: git add -A → commit → push. БЕЗ force-push.)
+
+ВАЖНО:
+- Отвечай на том языке, на котором задан вопрос
+- Сначала объясни что делаешь, потом показывай файлы
+- Для чтения файлов — просто укажи <file path="..."> и система покажет содержимое
+- НЕ проси пользователя копировать код — пишши прямо в файлы
+- НЕ используй force-push — никогда
+"""
+
+
+async def handle_project_with_injection(
+    prompt: str, project_id, websocket, model_id: str = None,
+    repo_map: str | None = None,
+):
+    """
+    Дуальный режим для проекта:
+    1. Пробуем tool calling (для поддерживающих моделей)
+    2. Если не поддерживает — переключаемся на prompt injection
+    """
+    from core.prompt_injector import PromptInjector
+    from core.response_parser import ResponseParser, ActionExecutor
+
+    project = await get_project(project_id)
+    if not project:
+        await websocket.send_json({"type": "error", "content": "Проект не найден"})
+        return
+
+    project_path = project.get("path", "")
+    history = await get_history(project_id)
+
+    # Build injector context
+    injector = PromptInjector(project_path)
+    context = await injector.build_context(
+        project_name=project.get("name", ""),
+        project_description=project.get("description", ""),
+        base_prompt=project.get("base_prompt", ""),
+        template=project.get("template", ""),
+        repo_map=repo_map or "",
+        include_git_status=True,
+    )
+
+    system_prompt = INJECTION_SYSTEM_PROMPT.format(
+        project_context=context,
+        platform_info=get_platform_info(),
+    )
+
+    await save_message(project_id, "user", prompt)
+
+    # Model list with fallback
+    models_to_try = []
+    if model_id:
+        models_to_try.append(model_id)
+
+    for pm in _get_priority_models(project):
+        if pm not in models_to_try:
+            models_to_try.append(pm)
+
+    all_models = keys_manager.get_all_models()
+    for m in all_models:
+        if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
+            if m.get("type") == "free" and m.get("status") == "no_key":
+                continue
+            if m.get("type") == "local" and not m.get("base_url"):
+                continue
+            models_to_try.append(m["id"])
+
+    if not models_to_try:
+        await websocket.send_json({"type": "error", "content": "Нет доступных моделей."})
+        return
+
+    ai_response = None
+    tried_count = 0
+    no_credits_providers = set()
+    used_injection = False
+
+    for i, model_to_try in enumerate(models_to_try):
+        model_config = keys_manager.get_model_config(model_to_try)
+        if not model_config:
+            continue
+        has_key = bool(model_config.get("api_key"))
+        is_local = model_to_try in [m["id"] for m in all_models if m["type"] == "local"]
+        if not has_key and not is_local:
+            continue
+
+        model_provider = model_config.get("provider", "")
+        if model_provider in no_credits_providers:
+            continue
+
+        tried_count += 1
+        m_info = next((m for m in all_models if m["id"] == model_to_try), None)
+        display_model = m_info["name"] if m_info else model_to_try
+        await websocket.send_json({"type": "typing", "model": display_model})
+
+        if i > 0:
+            await websocket.send_json({"type": "info", "content": f"Переключаюсь на {display_model} (попытка {tried_count})..."})
+
+        error_info = {}
+
+        # СНАЧАЛА пробуем tool calling
+        tool_response = await stream_llm_response(
+            prompt, history, websocket,
+            model=model_to_try,
+            system_prompt=SYSTEM_PROMPT_TEMPLATE.format(
+                repo_map=f"СТРУКТУРА ПРОЕКТА (Repo Map):\n{repo_map}" if repo_map else "",
+                ideas_context="",
+                project_context="",
+                compressed_context="",
+                platform_info=get_platform_info(),
+            ),
+            project_path=project_path,
+            use_tools=True,
+            _error_info=error_info,
+        )
+
+        if tool_response is not None:
+            ai_response = tool_response
+            break
+
+        # Если tool calling не сработал — пробуем prompt injection
+        if error_info.get("no_tools"):
+            await _send_log(websocket, f"🔄 {display_model}: переключаюсь на prompt injection", "warning")
+            injection_response = await stream_llm_response(
+                prompt, history, websocket,
+                model=model_to_try,
+                system_prompt=system_prompt,
+                project_path=None,  # Контекст уже в промпте
+                use_tools=False,
+                _error_info=error_info,
+            )
+
+            if injection_response is not None:
+                # Парсим ответ и выполняем действия
+                parser = ResponseParser()
+                parse_result = parser.parse(injection_response)
+
+                if parse_result.actions:
+                    await _send_log(websocket, f"📝 Найдено {len(parse_result.actions)} действий в ответе", "info")
+                    executor = ActionExecutor(project_path)
+
+                    for action in parse_result.actions:
+                        result = await executor.execute(action, websocket)
+                        level = "success" if result["success"] else "error"
+                        await _send_log(websocket, f"{'✅' if result['success'] else '❌'} {result['message']}", level)
+
+                    # Показываем чистый текст пользователю
+                    clean_text = parse_result.clean_text.strip()
+                    if clean_text:
+                        # Отправляем как итоговый ответ
+                        await websocket.send_json({"type": "chunk", "content": clean_text})
+                    ai_response = clean_text or injection_response
+                    used_injection = True
+
+                    # Обновляем кеш файлов в injector после изменений
+                    for action in parse_result.actions:
+                        if action.action_type == "write_file" and action.path:
+                            injector.invalidate_file(action.path)
+
+                    break
+
+        if error_info.get("no_credits") and model_provider:
+            no_credits_providers.add(model_provider)
+
+    if ai_response:
+        await save_message(project_id, "ai", ai_response)
+    elif tried_count == 0:
+        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом."})
+    else:
+        await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили."})
+
+
+# ═══════════════════════════════════════════════════════
+# PROMPT INJECTION STREAMING — Dual mode for no-tool models
+# ═══════════════════════════════════════════════════════
+
+async def stream_with_prompt_injection(
+    prompt: str, history: list, websocket,
+    model: str = None, project_path: str = None,
+    project_id=None, repo_map: str = None,
+) -> str | None:
+    """
+    Prompt injection mode: send enriched prompt without tools, parse response,
+    execute actions (file writes, commands, git), return clean text.
+
+    This is the dual mode alongside tool calling — used when a model does NOT
+    support function/tool calling but we still need to manipulate project files.
+
+    Flow:
+    1. PromptInjector builds rich context (project files, git status, repo map)
+    2. Model receives system prompt WITHOUT tools parameter
+    3. ResponseParser.parse() extracts actions from XML tags / code blocks
+    4. ActionExecutor.execute() runs each action
+    5. Auto git commit+push after successful file writes (NEVER force-push)
+    6. If actions found, sends results back to model for a clean summary
+    7. Streams clean text to websocket and returns it
+    """
+    from core.prompt_injector import PromptInjector
+    from core.response_parser import ResponseParser, ActionExecutor
+    from core.executor import CommandExecutor
+
+    if model is None:
+        model = CONFIG["llm"].get("default_model")
+
+    model, api_key, api_base, is_thinking = _resolve_model(model)
+
+    if not api_key:
+        logger.log(f"injection: no_api_key for {model}", level="error", source="agent")
+        return None
+
+    # ── Build injection context via PromptInjector ──
+    project = await get_project(project_id) if project_id else None
+    project_name = project.get("name", "") if project else ""
+    project_desc = project.get("description", "") if project else ""
+    base_prompt = project.get("base_prompt", "") if project else ""
+    template = project.get("template", "") if project else ""
+
+    injector = PromptInjector(project_path)
+    context = await injector.build_context(
+        project_name=project_name,
+        project_description=project_desc,
+        base_prompt=base_prompt,
+        template=template,
+        repo_map=repo_map or "",
+        include_git_status=True,
+    )
+
+    injection_system = SYSTEM_PROMPT_INJECTION_TEMPLATE.format(
+        project_context=context,
+        platform_info=get_platform_info(),
+    )
+
+    # ── Build messages (no tools parameter!) ──
+    api_messages = []
+    role_map = {"ai": "assistant", "system": "system", "user": "user"}
+    for msg in history:
+        mapped_role = role_map.get(msg.get("role", ""), msg.get("role", "user"))
+        api_messages.append({"role": mapped_role, "content": msg.get("content", "")})
+    messages = [{"role": "system", "content": injection_system}] + api_messages + [{"role": "user", "content": prompt}]
+
+    # Anthropic Claude 4+ temperature skip
+    anthropic_no_temp_models = ("claude-opus-4-", "claude-sonnet-4-")
+    skip_temperature = any(m in model.lower() for m in anthropic_no_temp_models)
+
+    start_time = time.time()
+
+    try:
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": CONFIG["llm"].get("max_tokens", 4096),
+        }
+        if not skip_temperature:
+            kwargs["temperature"] = CONFIG["llm"].get("temperature", 0.2)
+        if api_key:
+            kwargs["api_key"] = api_key
+        if api_base and not api_base.startswith("https://api.anthropic.com") and not api_base.startswith("https://api.openai.com/v1") and not api_base.startswith("https://api.x.ai/v1"):
+            kwargs["api_base"] = api_base
+        # NO tools parameter — this is the whole point of prompt injection
+
+        print(f"  [agent] stream_with_prompt_injection: model={model}, project={project_path}")
+        await _send_log(websocket, f"🔄 Prompt injection mode: {model}", "info")
+
+        response = await litellm.acompletion(stream=True, **kwargs)
+
+        # Collect streamed response text
+        response_text = ""
+        async for chunk in response:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                response_text += delta.content
+
+        if not response_text.strip():
+            return None
+
+        # ── Parse response for actions ──
+        parser = ResponseParser(project_path)
+        parse_result = parser.parse(response_text)
+
+        # ── Execute each action ──
+        had_file_writes = False
+        action_results = []
+
+        if parse_result.actions:
+            await _send_log(websocket, f"📝 Найдено {len(parse_result.actions)} действий в ответе", "info")
+            executor = ActionExecutor(project_path)
+
+            for action in parse_result.actions:
+                result = await executor.execute(action, websocket)
+                level = "success" if result["success"] else "error"
+                await _send_log(websocket, f"{'✅' if result['success'] else '❌'} {result['message']}", level)
+                action_results.append(result)
+
+                if action.action_type == "write_file" and result["success"]:
+                    had_file_writes = True
+                    injector.invalidate_file(action.path)
+
+        # ── Auto git commit+push after successful file writes ──
+        if had_file_writes and project_path:
+            try:
+                git_exec = CommandExecutor()
+                await git_exec.execute("git add -A", cwd=project_path, need_approval=False, timeout=10)
+                # Generate commit message from written file paths
+                file_paths = [r.get("path", "files") for r in action_results if r.get("path")]
+                commit_msg = f"update: {', '.join(file_paths[:3])}" if file_paths else "update files"
+                # Security: use shlex.quote for git commit message
+                safe_msg = shlex.quote(commit_msg[:200])
+                r_commit = await git_exec.execute(
+                    f"git commit -m {safe_msg} --allow-empty",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                commit_out = (r_commit.get("stdout", "") + r_commit.get("stderr", "")).strip()
+                if "nothing to commit" not in commit_out.lower() and r_commit.get("exit_code") == 0:
+                    # NEVER force-push — only git push (with project PAT token if available)
+                    project_token = await get_project_token_by_path(project_path)
+                    push_out = await git_push_with_token(git_exec, project_path, project_token)
+                    await _send_log(websocket, f"🚀 Auto git push: {push_out.strip()[:100]}", "success")
+            except Exception as e:
+                logger.log(f"injection: auto git error: {e}", level="warning", source="agent")
+
+        # ── Build clean text for user ──
+        clean_text = parse_result.clean_text.strip()
+
+        # ── If actions were found, ask model for a clean summary ──
+        if parse_result.actions and action_results:
+            results_text = "\n".join(f"- {r['message']}" for r in action_results)
+            summary_prompt = (
+                f"Предыдущий ответ был обработан. Вот результаты выполнения:\n"
+                f"{results_text}\n\n"
+                f"Кратко подведи итог — что было сделано. Без упоминания тегов и инструкций."
+            )
+            messages.append({"role": "assistant", "content": response_text})
+            messages.append({"role": "user", "content": summary_prompt})
+
+            try:
+                summary_kwargs = {
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": CONFIG["llm"].get("max_tokens", 2048),
+                }
+                if not skip_temperature:
+                    summary_kwargs["temperature"] = CONFIG["llm"].get("temperature", 0.2)
+                if api_key:
+                    summary_kwargs["api_key"] = api_key
+                if api_base and not api_base.startswith("https://api.anthropic.com") and not api_base.startswith("https://api.openai.com/v1") and not api_base.startswith("https://api.x.ai/v1"):
+                    summary_kwargs["api_base"] = api_base
+
+                summary_response = await litellm.acompletion(stream=True, **summary_kwargs)
+                summary_text = ""
+                async for schunk in summary_response:
+                    if not schunk.choices:
+                        continue
+                    sdelta = schunk.choices[0].delta
+                    if sdelta.content:
+                        summary_text += sdelta.content
+                if summary_text.strip():
+                    clean_text = summary_text.strip()
+            except Exception:
+                pass  # Keep clean_text from parse_result as-is
+
+        # ── Stream clean text to websocket in real-time ──
+        if clean_text:
+            await websocket.send_json({"type": "chunk", "content": clean_text})
+
+        await websocket.send_json({"type": "done"})
+
+        duration = (time.time() - start_time) * 1000
+        tokens = len(clean_text) // 4
+        logger.ai_response(model=model, tokens=tokens, success=True, duration_ms=duration)
+        await _send_log(websocket, f"✅ Injection: {len(clean_text)} симв., {(duration / 1000):.1f}с", "success")
+
+        return clean_text or response_text
+
+    except Exception as e:
+        duration = (time.time() - start_time) * 1000
+        error_msg = str(e)
+        logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
+        await _send_log(websocket, f"❌ Injection error: {error_msg[:200]}", "error")
+        return None

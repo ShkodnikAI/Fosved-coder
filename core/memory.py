@@ -1,9 +1,10 @@
 import os
+import re
 import uuid
 from sqlalchemy import Text, select, delete, func, String, Boolean
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import yaml
 
 from core.action_logger import get_logger
@@ -125,7 +126,9 @@ class Project(Base):
     progress: Mapped[int] = mapped_column(default=0)  # 0-100 percent
     template: Mapped[str] = mapped_column(default="")  # Project template: fastapi, react, nextjs, etc.
     apk_config: Mapped[str] = mapped_column(Text, default="")  # JSON config for APK building
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    logo: Mapped[str] = mapped_column(Text, default="")  # base64 image or URL
+    design: Mapped[str] = mapped_column(Text, default="")  # JSON with design preferences
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class Idea(Base):
     __tablename__ = "ideas"
@@ -134,7 +137,7 @@ class Idea(Base):
     name: Mapped[str]
     summary: Mapped[str] = mapped_column(Text, default="")
     raw_data: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class ChatHistory(Base):
     __tablename__ = "chat_history"
@@ -143,7 +146,7 @@ class ChatHistory(Base):
     thread_id: Mapped[int | None] = mapped_column(nullable=True, index=True, default=None)
     role: Mapped[str]
     content: Mapped[str] = mapped_column(Text)
-    timestamp: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    timestamp: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class ChatThread(Base):
     __tablename__ = "chat_threads"
@@ -151,7 +154,7 @@ class ChatThread(Base):
     project_id: Mapped[int] = mapped_column(index=True)
     parent_id: Mapped[int | None] = mapped_column(nullable=True, default=None)
     title: Mapped[str] = mapped_column(default="Новый поток")
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class ContextSnapshot(Base):
     __tablename__ = "context_snapshots"
@@ -166,7 +169,7 @@ class ContextSnapshot(Base):
     errors_fixed: Mapped[str] = mapped_column(Text, default="")
     message_count_before: Mapped[int] = mapped_column(default=0)
     message_count_after: Mapped[int] = mapped_column(default=0)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class RepoMap(Base):
     __tablename__ = "repo_maps"
@@ -174,7 +177,7 @@ class RepoMap(Base):
     project_id: Mapped[int] = mapped_column(unique=True, index=True)
     content: Mapped[str] = mapped_column(Text, default="")
     file_hash: Mapped[str] = mapped_column(default="")
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class RoutingStat(Base):
     __tablename__ = "routing_stats"
@@ -183,7 +186,7 @@ class RoutingStat(Base):
     model: Mapped[str] = mapped_column(default="")
     reason: Mapped[str] = mapped_column(Text, default="")
     success: Mapped[bool] = mapped_column(default=True)
-    timestamp: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    timestamp: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class ProjectArchive(Base):
     __tablename__ = "project_archives"
@@ -195,7 +198,7 @@ class ProjectArchive(Base):
     file_list: Mapped[str] = mapped_column(Text, default="[]")
     file_count: Mapped[int] = mapped_column(default=0)
     archive_path: Mapped[str] = mapped_column(default="")
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class PromptDraft(Base):
     """Черновик промпта-анкеты — подготовка перед созданием проекта."""
@@ -212,15 +215,15 @@ class PromptDraft(Base):
     discussion: Mapped[str] = mapped_column(Text, default="[]")
     # Текущий шаг анкеты (0-based)
     current_step: Mapped[int] = mapped_column(default=0)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 class SystemSetting(Base):
     """Системные настройки — персистентное хранилище ключей и конфигов в БД."""
     __tablename__ = "system_settings"
     key: Mapped[str] = mapped_column(primary_key=True)  # уникальный ключ
     value: Mapped[str] = mapped_column(Text, default="")  # JSON или текст
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 # ═══════════════════════════════════════════════════════════════
 # INIT
@@ -335,7 +338,7 @@ async def create_project(name: str, path: str, description: str = "", base_promp
                 os.makedirs(path, exist_ok=True)
             except Exception:
                 pass  # На облаке директория может быть read-only
-            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "github_repo": project.github_repo, "github_token": project.github_token, "local_path": project.local_path, "uuid_key": project.uuid_key, "progress": project.progress, "template": project.template, "apk_config": project.apk_config, "created_at": str(project.created_at)}
+            return {"id": project.id, "name": project.name, "path": project.path, "description": project.description, "base_prompt": project.base_prompt, "ideas": project.ideas, "selected_models": project.selected_models, "github_repo": project.github_repo, "github_token": project.github_token, "local_path": project.local_path, "uuid_key": project.uuid_key, "progress": project.progress, "template": project.template, "apk_config": project.apk_config, "logo": project.logo, "design": project.design, "created_at": str(project.created_at)}
 
 async def get_all_projects() -> list[dict]:
     """Get all projects as list of dicts."""
@@ -344,7 +347,7 @@ async def get_all_projects() -> list[dict]:
             select(Project).order_by(Project.created_at.desc())
         )
         return [
-            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "template": p.template, "apk_config": p.apk_config, "created_at": str(p.created_at)}
+            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "template": p.template, "apk_config": p.apk_config, "logo": p.logo, "design": p.design, "created_at": str(p.created_at)}
             for p in result.scalars().all()
         ]
 
@@ -356,8 +359,98 @@ async def get_project(project_id: int) -> dict | None:
         )
         p = result.scalar_one_or_none()
         if p:
-            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "template": p.template, "apk_config": p.apk_config, "created_at": str(p.created_at)}
+            return {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "template": p.template, "apk_config": p.apk_config, "logo": p.logo, "design": p.design, "created_at": str(p.created_at)}
         return None
+
+
+async def get_project_token_by_path(project_path: str) -> str | None:
+    """Get github_token for a project by its filesystem path."""
+    if not project_path:
+        return None
+    async with async_session() as session:
+        result = await session.execute(
+            select(Project).where(Project.path == project_path)
+        )
+        p = result.scalar_one_or_none()
+        if p and p.github_token:
+            return p.github_token
+        return None
+
+
+async def git_push_with_token(executor, project_path: str, project_token: str | None) -> str:
+    """
+    Perform git push, using project-specific PAT token if available.
+    Temporarily sets the remote URL with embedded token, then restores
+    the original URL for security. Falls back to normal push if no token.
+
+    Args:
+        executor: CommandExecutor instance with .execute() method
+        project_path: Absolute path to the git repository
+        project_token: GitHub PAT token string, or None
+
+    Returns:
+        Combined stdout + stderr from the git push command.
+    """
+    push_out = ""
+    url_restored = False
+
+    if project_token and project_path:
+        try:
+            # Get current remote URL
+            r_remote = await executor.execute(
+                "git remote get-url origin", cwd=project_path,
+                need_approval=False, timeout=10,
+            )
+            remote_url = (r_remote.get("stdout", "") or "").strip()
+
+            if remote_url and "github.com" in remote_url:
+                # Build authenticated URL: replace https://...@github.com or https://github.com
+                auth_url = re.sub(
+                    r'https://[^@]+@github\.com',
+                    f'https://{project_token}@github.com',
+                    remote_url,
+                )
+                if "@github.com" not in auth_url:
+                    auth_url = remote_url.replace(
+                        "https://github.com",
+                        f"https://{project_token}@github.com",
+                    )
+
+                # Set authenticated URL
+                await executor.execute(
+                    f"git remote set-url origin {auth_url}",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+
+                # Push with token
+                r3 = await executor.execute(
+                    "git push", cwd=project_path,
+                    need_approval=False, timeout=30,
+                )
+                push_out = (r3.get("stdout", "") or "") + (r3.get("stderr", "") or "")
+
+                # Restore original URL (security!)
+                await executor.execute(
+                    f"git remote set-url origin {remote_url}",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                url_restored = True
+        except Exception as e:
+            logger.log(
+                f"git_push_token_setup_error: {str(e)[:200]}",
+                level="warning", source="memory",
+            )
+
+    # Fallback: normal push (no token, or token setup failed)
+    if not url_restored:
+        r3 = await executor.execute(
+            "git push", cwd=project_path,
+            need_approval=False, timeout=30,
+        )
+        push_out = (r3.get("stdout", "") or "") + (r3.get("stderr", "") or "")
+
+    return push_out
+
 
 async def migrate_db():
     """Add new columns if they don't exist (for upgrades)."""
@@ -371,6 +464,8 @@ async def migrate_db():
                 "uuid_key": "VARCHAR(36) DEFAULT ''",
                 "template": "TEXT DEFAULT 'react'",
                 "apk_config": "TEXT DEFAULT NULL",
+                "logo": "TEXT DEFAULT ''",
+                "design": "TEXT DEFAULT ''",
             }
             for col_name, col_def in new_columns.items():
                 try:
@@ -396,6 +491,8 @@ async def migrate_db():
                 ("uuid_key", "VARCHAR(36)", "''"),
                 ("template", "TEXT", "'react'"),
                 ("apk_config", "TEXT", "NULL"),
+                ("logo", "TEXT", "''"),
+                ("design", "TEXT", "''"),
             ]
             for col_name, col_type, col_default in new_columns:
                 if col_name not in existing:
@@ -606,7 +703,7 @@ async def update_prompt_draft(draft_id: int, **kwargs) -> dict | None:
                 draft.current_step = kwargs["current_step"]
             if "status" in kwargs:
                 draft.status = kwargs["status"]
-            draft.updated_at = datetime.utcnow()
+            draft.updated_at = datetime.now(timezone.utc)
             await session.flush()
             return {
                 "id": draft.id,
@@ -651,7 +748,7 @@ async def set_system_setting(key: str, value: str):
             setting = result.scalar_one_or_none()
             if setting:
                 setting.value = value
-                setting.updated_at = datetime.utcnow()
+                setting.updated_at = datetime.now(timezone.utc)
             else:
                 session.add(SystemSetting(key=key, value=value))
 
@@ -691,6 +788,31 @@ async def get_message_count(project_id: int | None) -> int:
             select(func.count(ChatHistory.id)).where(ChatHistory.project_id == project_id)
         )
         return result.scalar() or 0
+
+async def clear_main_chat_history(days: int = 10) -> int:
+    """Delete main chat messages older than N days. Returns count deleted."""
+    from sqlalchemy import text
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    if IS_POSTGRES:
+        async with async_session() as session:
+            async with session.begin():
+                result = await session.execute(
+                    text(
+                        "DELETE FROM chat_history WHERE project_id IS NULL AND timestamp < :cutoff"
+                    ),
+                    {"cutoff": cutoff},
+                )
+                return result.rowcount
+    else:
+        async with async_session() as session:
+            async with session.begin():
+                result = await session.execute(
+                    delete(ChatHistory).where(
+                        ChatHistory.project_id == None,
+                        ChatHistory.timestamp < cutoff,
+                    )
+                )
+                return result.rowcount
 
 # ═══════════════════════════════════════════════════════════════
 # CHAT THREADS CRUD
@@ -878,7 +1000,7 @@ async def save_repo_map(project_id: int, content: str, file_hash: str):
             if existing:
                 existing.content = content
                 existing.file_hash = file_hash
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
             else:
                 session.add(RepoMap(project_id=project_id, content=content, file_hash=file_hash))
 

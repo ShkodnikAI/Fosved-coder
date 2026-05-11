@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 
-from core.memory import init_db, save_message, clear_history, get_project, get_repo_map
+from core.memory import init_db, save_message, clear_history, get_project, get_repo_map, git_push_with_token
 from core.keys_manager import keys_manager
 from core.agent import handle_chat_message
 from core.executor import CommandExecutor
@@ -364,27 +364,26 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         except Exception:
             pass
         project_path = None
+        project_token = None
         if project_id:
             project = await get_project(project_id)
             if project:
                 project_path = project["path"]
-        result = await executor.execute("git push", cwd=project_path)
-        exit_code = result.get("exit_code", -1)
-        if exit_code == 0:
-            stdout = result.get("stdout", "").strip()
-            if "Everything up-to-date" in stdout:
-                await websocket.send_json({"type": "system", "content": "📤 Push: уже актуально"})
-            else:
-                # Извлечь что запушилось
-                lines = [l for l in stdout.split("\n") if l.strip()]
-                summary = lines[-1] if lines else "OK"
-                await websocket.send_json({"type": "system", "content": f"📤 Push OK: {summary}"})
-        else:
-            await websocket.send_json({"type": "error", "content": f"📤 Push failed: {result.get('stderr', 'unknown error')[:200]}"})
+                project_token = project.get("github_token") or None
+        push_out = await git_push_with_token(executor, project_path, project_token)
+        push_out_stripped = push_out.strip()
+        if "error" in push_out_stripped.lower() or "fatal" in push_out_stripped.lower() or "denied" in push_out_stripped.lower():
+            await websocket.send_json({"type": "error", "content": f"📤 Push failed: {push_out_stripped[:200]}"})
             try:
-                logger.log("git_push_failed", level="error", source="ws", project_id=project_id, error=result.get('stderr', '')[:200])
+                logger.log("git_push_failed", level="error", source="ws", project_id=project_id, error=push_out_stripped[:200])
             except Exception:
                 pass
+        elif "Everything up-to-date" in push_out_stripped:
+            await websocket.send_json({"type": "system", "content": "📤 Push: уже актуально"})
+        else:
+            lines = [l for l in push_out_stripped.split("\n") if l.strip()]
+            summary = lines[-1] if lines else "OK"
+            await websocket.send_json({"type": "system", "content": f"📤 Push OK: {summary}"})
         await websocket.send_json({"type": "done"})
 
     elif command == "/quick_push":
@@ -394,10 +393,12 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             pass
         # Тихий push: auto commit + push без лишнего вывода
         project_path = None
+        project_token = None
         if project_id:
             project = await get_project(project_id)
             if project:
                 project_path = project["path"]
+                project_token = project.get("github_token") or None
         if not project_path:
             await websocket.send_json({"type": "system", "content": "Выберите проект для Quick Push"})
             await websocket.send_json({"type": "done"})
@@ -412,13 +413,13 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         if "nothing to commit" in commit_out.lower():
             await websocket.send_json({"type": "system", "content": "📤 Quick Push: нет изменений для коммита"})
         else:
-            # push
-            push_result = await executor.execute("git push", cwd=project_path)
-            push_exit = push_result.get("exit_code", -1)
-            if push_exit == 0:
-                await websocket.send_json({"type": "system", "content": f"📤 Quick Push OK: {msg}"})
+            # push with project PAT token
+            push_out = await git_push_with_token(executor, project_path, project_token)
+            push_out_stripped = push_out.strip()
+            if "error" in push_out_stripped.lower() or "fatal" in push_out_stripped.lower() or "denied" in push_out_stripped.lower():
+                await websocket.send_json({"type": "system", "content": f"📤 Committed, push failed: {push_out_stripped[:100]}"})
             else:
-                await websocket.send_json({"type": "system", "content": f"📤 Committed, push failed: {(push_result.get('stderr', ''))[:100]}"})
+                await websocket.send_json({"type": "system", "content": f"📤 Quick Push OK: {msg}"})
         await websocket.send_json({"type": "done"})
 
     elif command == "/clear":

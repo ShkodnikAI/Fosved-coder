@@ -26,6 +26,7 @@ from core.memory import (
     save_project_archive, get_all_archives, get_archive,
     create_prompt_draft, get_prompt_draft, list_prompt_drafts,
     update_prompt_draft, delete_prompt_draft,
+    clear_main_chat_history,
 )
 from core.keys_manager import keys_manager, PROVIDER_DEFS, LOCAL_PROVIDERS
 from core.action_logger import get_logger
@@ -207,6 +208,8 @@ class UpdateProjectSettingsRequest(BaseModel):
     github_repo: str = ""
     github_token: str = ""
     local_path: str = ""
+    logo: str = ""
+    design: str = ""
 
 class ArchiveProjectRequest(BaseModel):
     project_id: int
@@ -696,6 +699,8 @@ async def update_project_settings(req: UpdateProjectSettingsRequest):
             project.github_repo = req.github_repo
             project.github_token = req.github_token
             project.local_path = req.local_path
+            project.logo = req.logo
+            project.design = req.design
             return {"success": True}
 
 
@@ -897,6 +902,171 @@ async def search_files(req: SearchFilesRequest):
                 continue
 
     return {"results": results, "query": req.query, "total": len(results)}
+
+
+# ═══════════════════════════════════════════════════════════════
+# SKILLS
+# ═══════════════════════════════════════════════════════════════
+
+SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills")
+
+
+@router.get("/skills")
+async def list_skills():
+    """List all available skills from the skills/ directory."""
+    _api("GET", "/api/v1/skills")
+    if not os.path.isdir(SKILLS_DIR):
+        return {"skills": [], "groups": []}
+
+    skills = []
+    groups = set()
+    seen = set()
+
+    for entry in sorted(os.listdir(SKILLS_DIR)):
+        skill_path = os.path.join(SKILLS_DIR, entry)
+        if not os.path.isdir(skill_path):
+            continue
+        skill_md = os.path.join(skill_path, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            continue
+
+        # Extract skill metadata from SKILL.md (first line is usually the title)
+        try:
+            with open(skill_md, "r", encoding="utf-8", errors="replace") as f:
+                first_line = f.readline().strip().lstrip("#").strip()
+            title = first_line if first_line else entry
+        except Exception:
+            title = entry
+
+        # Check for _meta.json
+        meta_path = os.path.join(skill_path, "_meta.json")
+        meta = {}
+        if os.path.isfile(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+            except Exception:
+                pass
+
+        skills.append({
+            "name": entry,
+            "title": meta.get("title", title),
+            "description": meta.get("description", "")[:200],
+            "group": meta.get("group", ""),
+        })
+        group = meta.get("group", "")
+        if group:
+            groups.add(group)
+
+    return {"skills": skills, "groups": sorted(groups)}
+
+
+@router.get("/skills/{skill_name}")
+async def get_skill(skill_name: str):
+    """Get skill details by name."""
+    _api("GET", f"/api/v1/skills/{skill_name}")
+    skill_path = os.path.join(SKILLS_DIR, skill_name, "SKILL.md")
+    if not os.path.isfile(skill_path):
+        raise HTTPException(404, f"Skill '{skill_name}' not found")
+    try:
+        with open(skill_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return {"name": skill_name, "content": content}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/skills/{skill_name}/content")
+async def get_skill_content(skill_name: str):
+    """Get full skill content (all files in skill directory)."""
+    _api("POST", f"/api/v1/skills/{skill_name}/content")
+    skill_dir = os.path.join(SKILLS_DIR, skill_name)
+    if not os.path.isdir(skill_dir):
+        raise HTTPException(404, f"Skill '{skill_name}' not found")
+
+    files = {}
+    skip_dirs = {".git", "__pycache__", "node_modules", ".venv", "venv"}
+    for root, dirs, filenames in os.walk(skill_dir):
+        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
+        for fname in filenames:
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, skill_dir).replace("\\", "/")
+            try:
+                size = os.path.getsize(fpath)
+                if size > 2 * 1024 * 1024:  # skip files > 2MB
+                    continue
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    files[rel] = f.read()
+            except Exception:
+                continue
+
+    return {"name": skill_name, "files": files, "file_count": len(files)}
+
+
+# ═══════════════════════════════════════════════════════════════
+# MODEL SILENT PROBE
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/models/probe")
+async def probe_models():
+    """Silent probe: send minimal request to all configured models. Returns which ones responded."""
+    _log("PROBE_MODELS", source="api")
+    responded = []
+    failed = []
+
+    # Collect all models with API keys
+    all_models = keys_manager.get_all_models()
+    # Deduplicate by provider — we only need one model per provider to test connectivity
+    probed_providers = set()
+    for model in all_models:
+        provider_id = model.get("provider_id", "")
+        api_base = model.get("api_base", "")
+        api_key = model.get("api_key", "")
+        model_id = model.get("model_id", model.get("id", ""))
+        is_local = model.get("is_local", False)
+
+        if not provider_id or provider_id in probed_providers:
+            continue
+        if not api_key or is_local:
+            continue
+
+        probed_providers.add(provider_id)
+
+        try:
+            import httpx
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": model_id,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1,
+            }
+            base = api_base.rstrip("/")
+            if not base.endswith("/chat/completions"):
+                base = base.rstrip("/") + "/chat/completions"
+
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(base, json=payload, headers=headers)
+                if resp.status_code in (200, 429):  # 429 = rate limited but alive
+                    responded.append({"provider": provider_id, "model": model_id, "status": "ok"})
+                else:
+                    failed.append({"provider": provider_id, "model": model_id, "status": f"HTTP {resp.status_code}"})
+        except Exception as e:
+            failed.append({"provider": provider_id, "model": model_id, "status": str(e)[:100]})
+
+    return {"responded": responded, "failed": failed}
+
+
+# ═══════════════════════════════════════════════════════════════
+# MAIN CHAT CLEAR
+# ═══════════════════════════════════════════════════════════════
+
+@router.delete("/chat/main")
+async def clear_main_chat():
+    """Clear main screen chat history (messages without project, older than 10 days)."""
+    _log("CLEAR_MAIN_CHAT", source="api")
+    deleted = await clear_main_chat_history(days=10)
+    _log("CLEAR_MAIN_CHAT", source="api", level="success", details={"deleted": deleted})
+    return {"success": True, "deleted": deleted}
 
 
 # ═══════════════════════════════════════════════════════════════
