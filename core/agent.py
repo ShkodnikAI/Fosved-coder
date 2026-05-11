@@ -4,6 +4,7 @@ import platform
 import time
 import shlex
 import re
+import asyncio
 import glob as glob_mod
 import litellm
 import json
@@ -707,6 +708,10 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
 # ═══════════════════════════════════════════════════════
 # PRIORITY ROUTING
+# DEPRECATED: _route_with_priority() дублирует логику
+# HybridRouter.route_task() из core/router.py.
+# Подлежит удалению после миграции на единый роутер.
+# См. core/router.py → class HybridRouter (также deprecated).
 # ═══════════════════════════════════════════════════════
 
 def _get_priority_models(project: dict) -> list[str]:
@@ -869,7 +874,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if not model_config:
             continue
         has_key = bool(model_config.get("api_key"))
-        is_local = model_to_try in [m["id"] for m in all_models if m["type"] == "local"]
+        is_local = any(m["id"] == model_to_try and m.get("type") == "local" for m in all_models)
         if not has_key and not is_local:
             continue
 
@@ -972,6 +977,49 @@ HUB_SYSTEM_PROMPT = """Ты Fosved Coder — AI-ассистент для под
 """
 
 
+# ═══════════════════════════════════════════════════════
+# DYNAMIC QUESTIONNAIRE — Опросный лист для создания проекта
+# ═══════════════════════════════════════════════════════
+
+QUESTIONNAIRE_SYSTEM_PROMPT = """Ты Fosved Coder — аналитик требований проекта.
+Твоя задача — провести краткий опрос пользователя (3-5 вопросов) для формирования карточки проекта.
+
+ПРАВИЛА:
+1. Задавай по ОДНОМУ вопросу за раз — жди ответа перед следующим
+2. Вопросы должны быть адаптивными — уточняй на основе предыдущих ответов
+3. Не спрашивай то, что уже понятно из описания пользователя
+4. Вопросы должны быть сфокусированными и конкретными (не абстрактными)
+
+ТИПЫ ВОПРОСОВ (выбирай адаптивно):
+- Если неясна цель → «Какую основную проблему решает проект?»
+- Если неясна аудитория → «Кто будет пользоваться проектом?»
+- Если неясен стек → «Есть ли предпочтения по технологиям?»
+- Если неясен дизайн → «Есть ли примеры дизайна или референсы?»
+- Если неясен масштаб → «Какой масштаб проекта (MVP / полноценный продукт)?»
+- Если неясна интеграция → «Нужна ли интеграция с внешними сервисами (GitHub, БД, API)?»
+- Если неясен дизайн → «Какой стиль предпочитаете (минимализм, корпоративный, яркий)?»
+
+КОГДА ВСЕ ВОПРОСЫ ОТВЕЧЕНЫ:
+Сгенерируй карточку проекта в формате JSON (без markdown обёрток):
+```json
+{
+  "name": "Короткое название проекта",
+  "description": "Подробное описание (2-3 предложения)",
+  "template": "Технологический стек (напр. FastAPI + React, Next.js, Python CLI, Flask)",
+  "design": "Описание дизайна (цвета, стиль, тема, шрифты)",
+  "base_prompt": "Детальные инструкции для ИИ-ассистента при работе в проекте",
+  "github_repo": "URL GitHub репозитория (если есть, иначе пустая строка)"
+}
+```
+
+ПРИМЕЧАНИЯ:
+- Отвечай на том языке, на котором общается пользователь
+- base_prompt должен быть максимально подробным — это основная инструкция для ИИ
+- Если пользователь сам предоставил достаточно информации — пропусти лишние вопросы и сразу выдай JSON
+- Если пользователь отвечает «не знаю» / «без разницы» — выбери оптимальный вариант и объясни почему
+"""
+
+
 async def handle_hub_message(prompt: str, websocket, model_id: str = None):
     """
     Обработчик сообщений ГЛАВНОГО ЭКРАНА.
@@ -1014,7 +1062,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
         if not model_config:
             continue
         has_key = bool(model_config.get("api_key"))
-        is_local = model_to_try in [m["id"] for m in all_models if m["type"] == "local"]
+        is_local = any(m["id"] == model_to_try and m.get("type") == "local" for m in all_models)
         if not has_key and not is_local:
             continue
 
@@ -1196,7 +1244,7 @@ async def handle_project_with_injection(
         if not model_config:
             continue
         has_key = bool(model_config.get("api_key"))
-        is_local = model_to_try in [m["id"] for m in all_models if m["type"] == "local"]
+        is_local = any(m["id"] == model_to_try and m.get("type") == "local" for m in all_models)
         if not has_key and not is_local:
             continue
 
@@ -1495,3 +1543,153 @@ async def stream_with_prompt_injection(
         logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
         await _send_log(websocket, f"❌ Injection error: {error_msg[:200]}", "error")
         return None
+
+
+# ═══════════════════════════════════════════════════════
+# SILENT PROBING — Тихое зондирование моделей
+# ═══════════════════════════════════════════════════════
+
+async def probe_models(websocket=None) -> list[dict]:
+    """
+    Тихое зондирование: проверить все доступные модели минимальным запросом.
+
+    Для каждой модели (status в valid/rate_limited, есть api_key):
+    1. Отправляет минимальный запрос: {"role": "user", "content": "Hi"}
+    2. Измеряет время ответа (response_time_ms)
+    3. Проверяет поддержку tools (supports_tools) — если ошибка при вызове с tools,
+       помечает как False
+
+    Возвращает список успешно проверенных моделей:
+    [{"id": ..., "name": ..., "response_time_ms": ..., "supports_tools": ...}]
+
+    Ограничения:
+    - max 3 одновременных зондирований (asyncio.Semaphore)
+    - таймаут 15 секунд на каждую модель
+    """
+    _sem = asyncio.Semaphore(3)
+    _probed: list[dict] = []
+
+    all_models = keys_manager.get_all_models()
+    candidates = [
+        m for m in all_models
+        if m.get("status") in ("valid", "rate_limited")
+        and m.get("api_key")
+    ]
+
+    if websocket:
+        await _send_log(
+            websocket,
+            f"🔬 Зондирование: {len(candidates)} моделей для проверки...",
+            "info",
+        )
+
+    async def _probe_one(model_info: dict) -> dict | None:
+        """Зондировать одну модель. Возвращает результат или None при ошибке."""
+        model_id = model_info["id"]
+        model_name = model_info.get("name", model_id)
+
+        # Получаем конфигурацию модели через _resolve_model
+        litellm_model, api_key, api_base, _ = _resolve_model(model_id)
+
+        if not api_key:
+            return None
+
+        probe_messages = [{"role": "user", "content": "Hi"}]
+
+        async with _sem:
+            start = time.time()
+            try:
+                # Обычный запрос (без tools) — проверяем базовую работоспособность
+                resp = await asyncio.wait_for(
+                    litellm.acompletion(
+                        model=litellm_model,
+                        messages=probe_messages,
+                        max_tokens=5,
+                        stream=False,
+                        api_key=api_key,
+                        **({"api_base": api_base} if api_base else {}),
+                    ),
+                    timeout=15,
+                )
+                elapsed_ms = int((time.time() - start) * 1000)
+                # Модель ответила — проверяем поддержку tools
+                supports_tools = True
+                try:
+                    await asyncio.wait_for(
+                        litellm.acompletion(
+                            model=litellm_model,
+                            messages=probe_messages,
+                            max_tokens=5,
+                            stream=False,
+                            tools=TOOLS,
+                            api_key=api_key,
+                            **({"api_base": api_base} if api_base else {}),
+                        ),
+                        timeout=15,
+                    )
+                except Exception as tool_err:
+                    err_str = str(tool_err).lower()
+                    _tool_patterns = [
+                        "does not support tool", "tools are not supported",
+                        "tool use is not enabled", "tool_choice", "tool calling",
+                        "does not support function calling", "invalid tool",
+                        "unknown tool", "unsupported tool",
+                    ]
+                    if any(p in err_str for p in _tool_patterns):
+                        supports_tools = False
+                    else:
+                        # Ошибка не связана с tools (_timeout, 429, etc.) — оставляем True
+                        pass
+
+                result = {
+                    "id": model_id,
+                    "name": model_name,
+                    "response_time_ms": elapsed_ms,
+                    "supports_tools": supports_tools,
+                }
+                return result
+
+            except asyncio.TimeoutError:
+                if websocket:
+                    await _send_log(
+                        websocket,
+                        f"⏱️ {model_name}: таймаут (15с)",
+                        "warning",
+                    )
+                return None
+            except Exception as e:
+                if websocket:
+                    await _send_log(
+                        websocket,
+                        f"⚠️ {model_name}: {str(e)[:80]}",
+                        "warning",
+                    )
+                return None
+
+    # Запускаем все зондирования параллельно (ограничено семафором)
+    tasks = [_probe_one(m) for m in candidates]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for r in results:
+        if isinstance(r, dict) and r is not None:
+            _probed.append(r)
+
+    # Сортируем по времени ответа (быстрые первые)
+    _probed.sort(key=lambda x: x.get("response_time_ms", 999999))
+
+    if websocket:
+        tools_count = sum(1 for m in _probed if m.get("supports_tools"))
+        await _send_log(
+            websocket,
+            f"✅ Зондирование завершено: {len(_probed)}/{len(candidates)} моделей доступны "
+            f"(tools: {tools_count})",
+            "success",
+        )
+
+    logger.log(
+        f"probe_models: {len(_probed)}/{len(candidates)} models responsive",
+        level="info",
+        source="agent",
+    )
+
+    return _probed

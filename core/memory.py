@@ -1,7 +1,7 @@
 import os
 import re
 import uuid
-from sqlalchemy import Text, select, delete, func, String, Boolean
+from sqlalchemy import Text, select, delete, func, String, Boolean, ForeignKey, Column
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from datetime import datetime, timedelta, timezone
@@ -224,6 +224,19 @@ class SystemSetting(Base):
     key: Mapped[str] = mapped_column(primary_key=True)  # уникальный ключ
     value: Mapped[str] = mapped_column(Text, default="")  # JSON или текст
     updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+
+class Questionnaire(Base):
+    """Анкета проекта — динамический чат-опросник для создания проекта (Фаза 3.1)."""
+    __tablename__ = "questionnaires"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("projects.uuid_key"), nullable=True)
+    title = Column(Text, default="")
+    questions = Column(Text, default="[]")  # JSON: [{"question": "...", "answer": "...", "category": "..."}]
+    project_card = Column(Text, default="{}")  # JSON: {"name": "...", "description": "...", ...}
+    status = Column(String, default="draft")  # draft, completed, converted
+    created_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
 
 # ═══════════════════════════════════════════════════════════════
 # INIT
@@ -476,6 +489,19 @@ async def migrate_db():
             await conn.execute(text(
                 "UPDATE projects SET uuid_key = gen_random_uuid()::text WHERE uuid_key = '' OR uuid_key IS NULL"
             ))
+            # Create questionnaires table if not exists (PostgreSQL)
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS questionnaires (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT REFERENCES projects(uuid_key),
+                    title TEXT DEFAULT '',
+                    questions TEXT DEFAULT '[]',
+                    project_card TEXT DEFAULT '{}',
+                    status TEXT DEFAULT 'draft',
+                    created_at TEXT DEFAULT '',
+                    updated_at TEXT DEFAULT ''
+                )
+            """))
     else:
         import sqlite3
         db_file = DB_URL.split(":///")[-1] if ":///" in DB_URL else "fosved_coder.db"
@@ -502,6 +528,19 @@ async def migrate_db():
             rows = cursor.fetchall()
             for row in rows:
                 cursor.execute(f"UPDATE projects SET uuid_key = '{uuid.uuid4()}' WHERE id = {row[0]}")
+            # Create questionnaires table if not exists (SQLite)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS questionnaires (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT REFERENCES projects(uuid_key),
+                    title TEXT DEFAULT '',
+                    questions TEXT DEFAULT '[]',
+                    project_card TEXT DEFAULT '{}',
+                    status TEXT DEFAULT 'draft',
+                    created_at TEXT DEFAULT '',
+                    updated_at TEXT DEFAULT ''
+                )
+            """)
             conn.commit()
             conn.close()
         except Exception:
@@ -1026,3 +1065,127 @@ async def get_archive(archive_id: int) -> dict | None:
                 "created_at": str(a.created_at),
             }
         return None
+
+# ═══════════════════════════════════════════════════════════════
+# QUESTIONNAIRE CRUD (Анкеты — Фаза 3.1)
+# ═══════════════════════════════════════════════════════════════
+
+async def save_questionnaire(data: dict) -> str:
+    """Создать или обновить анкету. Возвращает id."""
+    import json
+    q_id = data.get("id")
+    async with async_session() as session:
+        async with session.begin():
+            if q_id:
+                result = await session.execute(
+                    select(Questionnaire).where(Questionnaire.id == q_id)
+                )
+                q = result.scalar_one_or_none()
+                if q:
+                    if "title" in data:
+                        q.title = data["title"]
+                    if "project_id" in data:
+                        q.project_id = data["project_id"]
+                    if "questions" in data:
+                        q.questions = json.dumps(data["questions"], ensure_ascii=False) if isinstance(data["questions"], list) else data["questions"]
+                    if "project_card" in data:
+                        q.project_card = json.dumps(data["project_card"], ensure_ascii=False) if isinstance(data["project_card"], dict) else data["project_card"]
+                    if "status" in data:
+                        q.status = data["status"]
+                    q.updated_at = datetime.now(timezone.utc).isoformat()
+                    return q.id
+            # Создание новой анкеты
+            questions = data.get("questions", [])
+            project_card = data.get("project_card", {})
+            q = Questionnaire(
+                project_id=data.get("project_id"),
+                title=data.get("title", ""),
+                questions=json.dumps(questions, ensure_ascii=False) if isinstance(questions, list) else questions,
+                project_card=json.dumps(project_card, ensure_ascii=False) if isinstance(project_card, dict) else project_card,
+                status=data.get("status", "draft"),
+            )
+            session.add(q)
+            await session.flush()
+            return q.id
+
+
+async def get_questionnaire(q_id: str) -> dict | None:
+    """Получить анкету по ID."""
+    import json
+    async with async_session() as session:
+        result = await session.execute(
+            select(Questionnaire).where(Questionnaire.id == q_id)
+        )
+        q = result.scalar_one_or_none()
+        if q:
+            return {
+                "id": q.id,
+                "project_id": q.project_id,
+                "title": q.title,
+                "questions": json.loads(q.questions) if q.questions else [],
+                "project_card": json.loads(q.project_card) if q.project_card else {},
+                "status": q.status,
+                "created_at": q.created_at,
+                "updated_at": q.updated_at,
+            }
+        return None
+
+
+async def get_questionnaires_by_project(project_id: str) -> list[dict]:
+    """Получить список анкет для проекта по UUID ключу."""
+    import json
+    async with async_session() as session:
+        result = await session.execute(
+            select(Questionnaire)
+            .where(Questionnaire.project_id == project_id)
+            .order_by(Questionnaire.created_at.desc())
+        )
+        return [
+            {
+                "id": q.id,
+                "project_id": q.project_id,
+                "title": q.title,
+                "questions": json.loads(q.questions) if q.questions else [],
+                "project_card": json.loads(q.project_card) if q.project_card else {},
+                "status": q.status,
+                "created_at": q.created_at,
+                "updated_at": q.updated_at,
+            }
+            for q in result.scalars().all()
+        ]
+
+
+async def delete_questionnaire(q_id: str) -> bool:
+    """Удалить анкету по ID."""
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(Questionnaire).where(Questionnaire.id == q_id)
+            )
+            q = result.scalar_one_or_none()
+            if q:
+                await session.delete(q)
+                return True
+            return False
+
+
+# ═══════════════════════════════════════════════════════════════
+# PROBED MODELS (кэш результатов silent probing)
+# ═══════════════════════════════════════════════════════════════
+
+async def save_probed_models(models: list[dict]):
+    """Сохранить результаты silent model probing в SystemSetting."""
+    import json
+    await set_system_setting("probed_models", json.dumps(models, ensure_ascii=False))
+
+
+async def get_probed_models() -> list[dict]:
+    """Получить кэшированные результаты probing из SystemSetting."""
+    import json
+    raw = await get_system_setting("probed_models")
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            return []
+    return []

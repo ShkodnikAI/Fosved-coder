@@ -3,8 +3,8 @@ Fosved Coder v2.0 — REST API Endpoints
 Включает управление ключами, моделями, проектами, локальные модели, кастомные модели.
 Поиск файлов, гит, шаблоны, пакеты, архив.
 """
-from fastapi import APIRouter, HTTPException, Body
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Body, Query
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
@@ -27,6 +27,9 @@ from core.memory import (
     create_prompt_draft, get_prompt_draft, list_prompt_drafts,
     update_prompt_draft, delete_prompt_draft,
     clear_main_chat_history,
+    save_questionnaire, get_questionnaire, get_questionnaires_by_project,
+    delete_questionnaire,
+    save_probed_models, get_probed_models,
 )
 from core.keys_manager import keys_manager, PROVIDER_DEFS, LOCAL_PROVIDERS
 from core.action_logger import get_logger
@@ -2571,3 +2574,182 @@ async def update_settings(req: UpdateSettingsRequest):
     except Exception as e:
         _log("SETTINGS_SAVE_ERROR", source="api", level="error", error=str(e))
     return {"success": True, "default_model": req.default_model}
+
+
+# ═══════════════════════════════════════════════════════
+# QUESTIONNAIRE (Анкеты — Фаза 3.1)
+# ═══════════════════════════════════════════════════════
+
+class CreateQuestionnaireRequest(BaseModel):
+    title: str = ""
+    project_id: Optional[str] = None
+
+class UpdateQuestionnaireRequest(BaseModel):
+    questions: list = []
+    project_card: dict = {}
+    status: str = ""
+    title: str = ""
+
+
+@router.post("/questionnaire/create")
+async def create_questionnaire_endpoint(req: CreateQuestionnaireRequest):
+    """Создать новую анкету."""
+    _log("CREATE_QUESTIONNAIRE", source="api", details={"title": req.title, "project_id": req.project_id})
+    q_id = await save_questionnaire({
+        "title": req.title,
+        "project_id": req.project_id,
+    })
+    return {"id": q_id, "status": "created"}
+
+
+@router.get("/questionnaire/{q_id}")
+async def get_questionnaire_endpoint(q_id: str):
+    """Получить анкету по ID."""
+    _api("GET", f"/api/v1/questionnaire/{q_id}")
+    q = await get_questionnaire(q_id)
+    if not q:
+        raise HTTPException(404, "Анкета не найдена")
+    return q
+
+
+@router.put("/questionnaire/{q_id}")
+async def update_questionnaire_endpoint(q_id: str, req: UpdateQuestionnaireRequest):
+    """Обновить анкету (добавить ответы, обновить статус)."""
+    _log("UPDATE_QUESTIONNAIRE", source="api", details={"q_id": q_id})
+    data = {"id": q_id}
+    if req.questions:
+        data["questions"] = req.questions
+    if req.project_card:
+        data["project_card"] = req.project_card
+    if req.status:
+        data["status"] = req.status
+    if req.title:
+        data["title"] = req.title
+    result_id = await save_questionnaire(data)
+    return {"id": result_id, "status": "updated"}
+
+
+@router.get("/questionnaires")
+async def list_questionnaires_endpoint(project_id: Optional[str] = Query(default=None)):
+    """Список всех анкет (опциональный фильтр по project_id)."""
+    _api("GET", "/api/v1/questionnaires")
+    if project_id:
+        questionnaires = await get_questionnaires_by_project(project_id)
+    else:
+        # Получить все анкеты — вызываем через session напрямую
+        from core.memory import Questionnaire, async_session
+        import json
+        async with async_session() as session:
+            result = await session.execute(
+                select(Questionnaire).order_by(Questionnaire.created_at.desc())
+            )
+            questionnaires = [
+                {
+                    "id": q.id,
+                    "project_id": q.project_id,
+                    "title": q.title,
+                    "questions": json.loads(q.questions) if q.questions else [],
+                    "project_card": json.loads(q.project_card) if q.project_card else {},
+                    "status": q.status,
+                    "created_at": q.created_at,
+                    "updated_at": q.updated_at,
+                }
+                for q in result.scalars().all()
+            ]
+    return {"questionnaires": questionnaires, "count": len(questionnaires)}
+
+
+@router.delete("/questionnaire/{q_id}")
+async def delete_questionnaire_endpoint(q_id: str):
+    """Удалить анкету."""
+    _log("DELETE_QUESTIONNAIRE", source="api", details={"q_id": q_id})
+    if not await delete_questionnaire(q_id):
+        raise HTTPException(404, "Анкета не найдена")
+    return {"success": True, "id": q_id}
+
+
+# ═══════════════════════════════════════════════════════
+# MODEL PROBING
+# ═══════════════════════════════════════════════════════
+
+@router.post("/probe-models")
+async def probe_models_endpoint():
+    """Запустить silent model probing (фоновая задача)."""
+    _log("PROBE_MODELS", source="api")
+    from core.agent import probe_models
+    import asyncio
+
+    # Запускаем probing в фоне, не блокируя ответ
+    async def _run_probe():
+        try:
+            results = await probe_models()
+            await save_probed_models(results)
+            _log("PROBE_MODELS_DONE", source="api", level="success", details={"count": len(results)})
+        except Exception as e:
+            _log("PROBE_MODELS_ERROR", source="api", level="error", error=str(e)[:200])
+
+    asyncio.create_task(_run_probe())
+    return {"status": "started", "message": "Пробинг моделей запущен в фоне"}
+
+
+@router.get("/probed-models")
+async def get_probed_models_endpoint():
+    """Получить кэшированные результаты model probing."""
+    _api("GET", "/api/v1/probed-models")
+    models = await get_probed_models()
+    return {"models": models, "count": len(models)}
+
+
+# ═══════════════════════════════════════════════════════
+# HUB CHAT (главный экран — SSE streaming)
+# ═══════════════════════════════════════════════════════
+
+class HubChatRequest(BaseModel):
+    prompt: str
+    model_id: Optional[str] = None
+
+
+@router.post("/hub/chat")
+async def hub_chat_endpoint(req: HubChatRequest):
+    """Чат главного экрана (Hub). Возвращает SSE stream."""
+    _log("HUB_CHAT", source="api", details={"prompt_len": len(req.prompt), "model_id": req.model_id})
+    from core.agent import handle_hub_message
+
+    async def _stream():
+        # Фейковый websocket для handle_hub_message
+        collected = []
+
+        class _FakeWS:
+            async def send_json(self, data):
+                collected.append(data)
+
+        fake_ws = _FakeWS()
+        await handle_hub_message(req.prompt, fake_ws, model_id=req.model_id)
+
+        # Отправляем все собранные сообщения как SSE
+        for msg in collected:
+            msg_type = msg.get("type", "")
+            if msg_type == "chunk":
+                content = msg.get("content", "")
+                yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}\n\n"
+            elif msg_type == "tool_call":
+                yield f"data: {json.dumps({'type': 'tool_call', 'name': msg.get('name', ''), 'args': msg.get('arguments', '')}, ensure_ascii=False)}\n\n"
+            elif msg_type == "tool_result":
+                yield f"data: {json.dumps({'type': 'tool_result', 'name': msg.get('name', ''), 'result': msg.get('result', '')[:500]}, ensure_ascii=False)}\n\n"
+            elif msg_type == "error":
+                yield f"data: {json.dumps({'type': 'error', 'content': msg.get('content', '')}, ensure_ascii=False)}\n\n"
+            elif msg_type == "done":
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+        # Если ничего не было собрано, отправляем пустой ответ
+        if not collected:
+            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

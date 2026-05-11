@@ -3,23 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fosved Coder</title>
+    <title>Fosved Coder V2.0</title>
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Внешние библиотеки (CDN) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+    /* ═══════════════════════════════════════════════════════════════
+       FOSVED CODER V2.0 — Дополнительные стили для двухэкранной архитектуры
+       ═══════════════════════════════════════════════════════ */
+
+    /* Экраны: только один видимый за раз */
+    .screen-main, .screen-project { display: none; flex: 1; overflow: hidden; }
+    .screen-main.active, .screen-project.active { display: flex; }
+
+    /* Навигационные кнопки в хедере */
+    .nav-btn {
+        background: none; border: 1px solid var(--border); color: var(--text-secondary);
+        cursor: pointer; padding: 3px 14px; border-radius: var(--radius-md);
+        font-size: 12px; font-weight: 500; transition: all 0.2s;
+        font-family: var(--font-ui); white-space: nowrap;
+    }
+    .nav-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-light); }
+    .nav-btn.active {
+        background: var(--accent); color: #000; border-color: var(--accent);
+        font-weight: 600;
+    }
+
+    /* Индикатор зондирования моделей */
+    .probed-indicator {
+        margin-top: 12px; padding: 10px;
+        background: var(--bg-primary); border: 1px solid var(--border);
+        border-radius: var(--radius-md); text-align: center;
+    }
+    .probed-indicator .probed-count {
+        font-size: 22px; font-weight: 700; color: var(--green);
+    }
+    .probed-indicator .probed-label {
+        font-size: 10px; color: var(--text-dim); text-transform: uppercase;
+        letter-spacing: 0.5px; margin-top: 2px;
+    }
+    .probed-indicator .probed-bar {
+        height: 3px; background: var(--border); border-radius: 2px;
+        margin-top: 8px; overflow: hidden;
+    }
+    .probed-indicator .probed-bar-fill {
+        height: 100%; background: var(--green); border-radius: 2px;
+        transition: width 0.5s ease;
+    }
+
+    /* Панель анкетирования (опросник) */
+    .questionnaire-panel {
+        display: none; margin-top: 8px; padding: 12px;
+        background: var(--bg-tertiary); border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+    }
+    .questionnaire-panel.active { display: block; }
+    .questionnaire-panel .q-title {
+        font-size: 13px; font-weight: 600; color: var(--accent);
+        margin-bottom: 8px;
+    }
+    .questionnaire-panel .q-progress {
+        font-size: 11px; color: var(--text-dim); margin-bottom: 10px;
+    }
+    .questionnaire-panel .q-progress-bar {
+        height: 4px; background: var(--border); border-radius: 2px;
+        overflow: hidden; margin-bottom: 12px;
+    }
+    .questionnaire-panel .q-progress-bar-fill {
+        height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s;
+    }
+
+    /* Табы правой панели */
+    .right-panel-tabs {
+        display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .right-panel-tab {
+        flex: 1; padding: 7px 4px; text-align: center;
+        font-size: 11px; font-weight: 500; color: var(--text-dim);
+        cursor: pointer; border-bottom: 2px solid transparent;
+        transition: all 0.2s;
+    }
+    .right-panel-tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
+    .right-panel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .right-panel-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+    .right-panel-pane { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .right-panel-pane.active { display: flex; }
+
+    /* Вкладка "Скиллы" в правой панели (главный экран) */
+    .skills-panel-list { flex: 1; overflow-y: auto; padding: 6px; }
+
+    /* Левый сайдбар: раздел файлов в проектном экране */
+    .file-tree-section { border-top: 1px solid var(--border); flex-shrink: 0; }
+    .file-tree-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 6px 10px; cursor: pointer; user-select: none;
+    }
+    .file-tree-header:hover { background: var(--bg-hover); }
+    .file-tree-header span { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+    .file-tree-content { overflow-y: auto; max-height: 200px; }
+    .file-tree-content.collapsed { display: none; }
+
+    /* Git мини-панель (вкладка в правой панели проектного экрана) */
+    .git-mini-panel { padding: 10px; flex: 1; overflow-y: auto; }
+    .git-mini-panel .git-status-line {
+        display: flex; align-items: center; gap: 6px;
+        padding: 4px 0; font-size: 12px;
+    }
+    .git-mini-panel .git-actions { display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+
+    /* Скрытие ненужных элементов на определённых экранах */
+    .screen-main .project-only { display: none !important; }
+    .screen-project .main-only { display: none !important; }
+
+    /* Хедер: лого V2.0 */
+    .header-logo {
+        font-size: 12px; font-weight: 700; color: var(--accent);
+        letter-spacing: 1.5px; white-space: nowrap; user-select: none;
+    }
+
+    /* Hub-чат стили */
+    .hub-input-extra {
+        display: flex; align-items: center; gap: 6px; padding: 4px 0;
+    }
+    .hub-input-extra button {
+        background: var(--bg-tertiary); border: 1px solid var(--border);
+        color: var(--text-secondary); padding: 4px 10px; border-radius: var(--radius-md);
+        cursor: pointer; font-size: 11px; font-family: var(--font-ui);
+        transition: all 0.15s;
+    }
+    .hub-input-extra button:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+    /* Кнопки в инпут-области проектного экрана */
+    .project-input-bar {
+        display: flex; align-items: center; gap: 4px; padding: 4px 0;
+    }
+    .project-input-bar button {
+        background: var(--bg-tertiary); border: 1px solid var(--border);
+        color: var(--text-secondary); padding: 4px 10px; border-radius: var(--radius-md);
+        cursor: pointer; font-size: 11px; font-family: var(--font-ui);
+        transition: all 0.15s;
+    }
+    .project-input-bar button:hover { background: var(--bg-hover); color: var(--text-primary); }
+    </style>
 </head>
 <body>
 
-<!-- ═══ LOADING SCREEN ═══ -->
+<!-- ═══════════════════════════════════════════════════════════════
+     ЭКРАН ЗАГРУЗКИ
+     ═══════════════════════════════════════════════════════ -->
 <div id="loading-screen">
-    <div class="logo">FOSVED CODER</div>
+    <div class="logo">FOSVED CODER V2.0</div>
     <div class="sub" id="loading-text">Загрузка...</div>
     <div class="bar-track"><div class="bar-fill" id="loading-bar"></div></div>
 </div>
 
-<!-- ═══ SETUP BANNER ═══ -->
+<!-- ═══ БАННЕР НАСТРОЙКИ ═══ -->
 <div id="setup-banner">
     <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:18px;">⚠️</span>
@@ -28,20 +169,21 @@
     <button class="setup-btn" onclick="showKeysModal();document.getElementById('setup-banner').style.display='none'">🔑 Настроить</button>
 </div>
 
-<!-- ═══ TOAST CONTAINER ═══ -->
+<!-- ═══ КОНТЕЙНЕР ТОСТОВ ═══ -->
 <div id="toast-container"></div>
 
-<!-- ═══ HEADER ═══ -->
+<!-- ═══════════════════════════════════════════════════════════════
+     ХЕДЕР — Навигация V2.0
+     ═══════════════════════════════════════════════════════ -->
 <header class="header">
     <div class="header-left">
-        <div class="mode-toggle" onclick="toggleWorkMode()" title="Переключить режим">
-            <span class="mode-toggle-label" id="mode-label-manual">✋ Ручной</span>
-            <span class="mode-toggle-label" id="mode-label-auto">🤖 Авто</span>
-        </div>
-        <button class="hdr-btn" onclick="goHome()" title="На главный">🏠</button>
+        <span class="header-logo">FOSVED CODER V2.0</span>
+        <div style="width:1px;height:20px;background:var(--border);margin:0 4px;"></div>
+        <!-- Кнопки навигации между экранами -->
+        <button class="nav-btn active" id="nav-main" onclick="switchScreen('main')">🏠 Главная</button>
+        <button class="nav-btn" id="nav-project" onclick="switchScreen('project')">📁 Проект</button>
     </div>
     <div class="header-center">
-        <span class="header-title" id="header-title">FOSVED CODER</span>
         <div class="progress-mini" id="header-progress" style="display:none">
             <div class="progress-mini-fill" id="header-progress-fill"></div>
             <span class="progress-mini-text" id="header-progress-text">0%</span>
@@ -52,119 +194,285 @@
         </span>
     </div>
     <div class="header-right">
+        <!-- Режим авто/ручной (только в проектном экране) -->
+        <div class="mode-toggle project-only" id="mode-toggle" onclick="toggleWorkMode()" title="Переключить режим" style="display:none;">
+            <span class="mode-toggle-label" id="mode-label-manual">✋ Ручной</span>
+            <span class="mode-toggle-label" id="mode-label-auto">🤖 Авто</span>
+        </div>
         <button class="hdr-btn" onclick="clearChat()" title="Очистить чат">🗑</button>
+        <button class="hdr-btn" onclick="showSettings()" title="Настройки">⚙</button>
         <button class="hdr-btn" onclick="showHelp()" title="Справка">❓</button>
     </div>
 </header>
 
-<!-- ═══ MAIN LAYOUT ═══ -->
-<div class="main-layout">
-
-    <!-- LEFT PANEL -->
-    <div class="left-panel" id="left-panel">
-        <div class="panel-tabs">
-            <div class="panel-tab active" data-tab="projects" onclick="switchTab('projects')">
-                <span class="tab-icon">📁</span>Проекты
-            </div>
-            <div class="panel-tab" data-tab="models" onclick="switchTab('models')">
-                <span class="tab-icon">🤖</span>Модели
-            </div>
-            <div class="panel-tab" data-tab="skills" onclick="switchTab('skills')">
-                <span class="tab-icon">⚡</span>Навыки
-            </div>
-        </div>
-        <div class="tab-content">
-            <!-- PROJECTS TAB -->
-            <div class="tab-pane active" id="tab-projects">
-                <div class="panel-list" id="project-list">
-                    <div class="panel-list-empty">Нет проектов</div>
+<!-- ═══════════════════════════════════════════════════════════════
+     ГЛАВНЫЙ ЭКРАН (Hub) — Модели, чат, скиллы, логи
+     ═══════════════════════════════════════════════════════ -->
+<div class="screen-main active" id="screen-main">
+    <div class="main-layout">
+        <!-- ЛЕВАЯ ПАНЕЛЬ: Модели + индикатор зондирования -->
+        <div class="left-panel hub-sidebar" id="hub-left-panel">
+            <div class="panel-tabs">
+                <div class="panel-tab active" data-tab="hub-models" onclick="switchHubTab('hub-models')">
+                    <span class="tab-icon">🤖</span>Модели
                 </div>
-                <button class="add-btn" onclick="openProjectModal()">+ Новый проект</button>
-            </div>
-            <!-- MODELS TAB -->
-            <div class="tab-pane" id="tab-models">
-                <div class="panel-search">
-                    <input type="text" id="model-search" placeholder="Поиск моделей..." oninput="filterModels(this.value)">
-                </div>
-                <div class="panel-list" id="models-list">
-                    <div class="panel-list-empty">Загрузка...</div>
-                </div>
-                <button class="add-btn" onclick="showAddLocalModelModal()">+ Локальная модель</button>
-                <button class="add-btn" onclick="showAddCustomModelModal()">+ Кастомная модель</button>
-            </div>
-            <!-- SKILLS TAB -->
-            <div class="tab-pane" id="tab-skills">
-                <div class="panel-list" id="skills-list">
-                    <div class="panel-list-empty">Загрузка...</div>
+                <div class="panel-tab" data-tab="hub-projects" onclick="switchHubTab('hub-projects')">
+                    <span class="tab-icon">📁</span>Проекты
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- RESIZE HANDLE (left) -->
-    <div class="resize-handle" id="left-resize-handle"></div>
-
-    <!-- CENTER AREA -->
-    <div class="center-area">
-        <div class="chat-area" id="chat-box">
-            <div class="msg system">Подключение к серверу...</div>
-        </div>
-        <div class="input-area">
-            <div class="input-wrapper" id="input-wrapper">
-                <textarea id="user-input" placeholder="Опишите задачу для ИИ..." rows="3" onkeydown="handleKeyDown(event)"></textarea>
-                <div class="input-actions">
-                    <div class="input-left">
-                        <label class="file-label">📎 <input type="file" id="file-input" style="display:none" onchange="handleFile(event)" multiple>
-                            <span id="file-preview" style="display:none" class="file-preview"></span>
-                        </label>
-                        <button id="file-remove" class="file-remove" onclick="removeAttachedFile()" style="display:none" title="Убрать">✕</button>
-                        <button id="retry-btn" class="btn-retry" onclick="retryLastMessage()" style="display:none">🔄</button>
+            <div class="tab-content">
+                <!-- Вкладка: Модели (на главном экране) -->
+                <div class="tab-pane active" id="tab-hub-models">
+                    <div class="panel-search">
+                        <input type="text" id="hub-model-search" placeholder="Поиск моделей..." oninput="filterModels(this.value)">
                     </div>
-                    <div class="input-right">
-                        <button class="btn-mic" onclick="startVoice()" title="Голосовой ввод">🎤</button>
-                        <button class="btn-send" id="send-btn" onclick="sendMessage()" data-send-btn>Отправить ➤</button>
+                    <div class="panel-list" id="hub-models-list">
+                        <div class="panel-list-empty">Загрузка...</div>
+                    </div>
+                    <button class="add-btn" onclick="showAddLocalModelModal()">+ Локальная модель</button>
+                    <button class="add-btn" onclick="showAddCustomModelModal()">+ Кастомная модель</button>
+                    <!-- Индикатор зондирования -->
+                    <div class="probed-indicator" id="probed-indicator" style="display:none;">
+                        <div class="probed-count" id="probed-count">0/0</div>
+                        <div class="probed-label">Зондировано моделей</div>
+                        <div class="probed-bar"><div class="probed-bar-fill" id="probed-bar-fill" style="width:0%"></div></div>
                     </div>
                 </div>
+                <!-- Вкладка: Проекты (быстрый доступ с главного экрана) -->
+                <div class="tab-pane" id="tab-hub-projects">
+                    <div class="panel-list" id="hub-project-list">
+                        <div class="panel-list-empty">Нет проектов</div>
+                    </div>
+                    <button class="add-btn" onclick="openProjectModal()">+ Новый проект</button>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- RESIZE HANDLE (right) -->
-    <div class="resize-handle" id="right-resize-handle"></div>
+        <!-- Ручка изменения размера (левая) -->
+        <div class="resize-handle" id="hub-left-resize-handle"></div>
 
-    <!-- RIGHT PANEL (Logs) -->
-    <div class="right-panel" id="right-panel">
-        <div class="right-panel-header">
-            <div class="right-panel-title">
-                📋 Логи
-                <span class="log-badge" id="log-badge" style="display:none">0</span>
+        <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ: Hub-чат -->
+        <div class="center-area">
+            <div class="chat-area" id="hub-chat-box">
+                <div class="msg system">Fosved Coder V2.0 — Главная. Выберите модель и начните обсуждение.</div>
             </div>
-            <div class="right-panel-actions">
-                <button class="log-btn" onclick="copyAllLogs()" title="Копировать все">📋</button>
-                <button class="log-btn" onclick="saveAllLogs()" title="Сохранить">💾</button>
-                <button class="log-btn" onclick="loadServerLogs({level:'error'})" title="Ошибки">❌</button>
-                <button class="log-btn" onclick="clearAutoLog();fetch('/api/v1/logs',{method:'DELETE'})" title="Очистить">🗑</button>
+            <!-- Панель анкетирования (скрыта по умолчанию) -->
+            <div class="questionnaire-panel" id="questionnaire-panel">
+                <div class="q-title">📝 Анкетирование</div>
+                <div class="q-progress" id="q-progress-text">Вопрос 0/0</div>
+                <div class="q-progress-bar"><div class="q-progress-bar-fill" id="q-progress-fill" style="width:0%"></div></div>
+            </div>
+            <div class="input-area">
+                <div class="input-wrapper" id="hub-input-wrapper">
+                    <textarea id="hub-user-input" placeholder="Задайте вопрос ИИ, обсудите идею..." rows="3" onkeydown="handleHubKeyDown(event)"></textarea>
+                    <div class="input-actions">
+                        <div class="input-left">
+                            <label class="file-label">📎 <input type="file" id="hub-file-input" style="display:none" onchange="handleHubFile(event)" multiple>
+                                <span id="hub-file-preview" style="display:none" class="file-preview"></span>
+                            </label>
+                            <button id="hub-file-remove" class="file-remove" onclick="removeHubAttachedFile()" style="display:none" title="Убрать">✕</button>
+                            <button id="hub-retry-btn" class="btn-retry" onclick="retryHubMessage()" style="display:none">🔄</button>
+                        </div>
+                        <div class="input-right">
+                            <button class="btn-mic" onclick="startVoice('hub')" title="Голосовой ввод">🎤</button>
+                            <button class="btn-send" id="hub-send-btn" onclick="sendHubMessage()">Отправить ➤</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Дополнительные кнопки под инпутом -->
+                <div class="hub-input-extra">
+                    <button onclick="startQuestionnaire()" title="Начать опрос для создания проекта">📝 Анкета</button>
+                    <button onclick="insertHubCommand('/probe ')" title="Зондировать модели">🔍 /probe</button>
+                </div>
             </div>
         </div>
-        <div class="log-filter">
-            <button class="log-filter-btn active" data-filter="all" onclick="filterLogs('all',this)">Все</button>
-            <button class="log-filter-btn" data-filter="info" onclick="filterLogs('info',this)">ℹ️</button>
-            <button class="log-filter-btn" data-filter="success" onclick="filterLogs('success',this)">✅</button>
-            <button class="log-filter-btn" data-filter="warning" onclick="filterLogs('warning',this)">⚠️</button>
-            <button class="log-filter-btn" data-filter="error" onclick="filterLogs('error',this)">❌</button>
-        </div>
-        <div class="log-entries" id="log-entries"></div>
-        <div class="log-footer">
-            <span id="log-count">0 записей</span>
-            <span id="log-session-time"></span>
+
+        <!-- Ручка изменения размера (правая) -->
+        <div class="resize-handle" id="hub-right-resize-handle"></div>
+
+        <!-- ПРАВАЯ ПАНЕЛЬ: Скиллы | Логи -->
+        <div class="right-panel" id="hub-right-panel">
+            <div class="right-panel-tabs">
+                <div class="right-panel-tab active" data-rptab="hub-skills" onclick="switchHubRightTab('hub-skills')">⚡ Скиллы</div>
+                <div class="right-panel-tab" data-rptab="hub-logs" onclick="switchHubRightTab('hub-logs')">📋 Логи</div>
+            </div>
+            <div class="right-panel-content">
+                <!-- Вкладка: Скиллы -->
+                <div class="right-panel-pane active" id="rp-hub-skills">
+                    <div class="skills-panel-list" id="hub-skills-list">
+                        <div class="panel-list-empty">Загрузка...</div>
+                    </div>
+                </div>
+                <!-- Вкладка: Логи -->
+                <div class="right-panel-pane" id="rp-hub-logs">
+                    <div class="log-filter">
+                        <button class="log-filter-btn active" data-filter="all" onclick="filterLogs('all',this)">Все</button>
+                        <button class="log-filter-btn" data-filter="info" onclick="filterLogs('info',this)">ℹ️</button>
+                        <button class="log-filter-btn" data-filter="success" onclick="filterLogs('success',this)">✅</button>
+                        <button class="log-filter-btn" data-filter="warning" onclick="filterLogs('warning',this)">⚠️</button>
+                        <button class="log-filter-btn" data-filter="error" onclick="filterLogs('error',this)">❌</button>
+                    </div>
+                    <div class="log-entries" id="hub-log-entries"></div>
+                    <div class="log-footer">
+                        <span class="hub-log-count">0 записей</span>
+                        <span></span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- ═══ BOTTOM BAR ═══ -->
+<!-- ═══════════════════════════════════════════════════════════════
+     ЭКРАН ПРОЕКТА — Файлы, чат, git, инструменты
+     ═══════════════════════════════════════════════════════ -->
+<div class="screen-project" id="screen-project">
+    <div class="main-layout">
+        <!-- ЛЕВАЯ ПАНЕЛЬ: Проекты + файловое дерево -->
+        <div class="left-panel project-sidebar" id="project-left-panel">
+            <div class="panel-tabs">
+                <div class="panel-tab active" data-tab="proj-list" onclick="switchProjTab('proj-list')">
+                    <span class="tab-icon">📁</span>Проекты
+                </div>
+                <div class="panel-tab" data-tab="proj-models" onclick="switchProjTab('proj-models')">
+                    <span class="tab-icon">🤖</span>Модели
+                </div>
+            </div>
+            <div class="tab-content">
+                <!-- Вкладка: Список проектов -->
+                <div class="tab-pane active" id="tab-proj-list">
+                    <div class="panel-list" id="project-list">
+                        <div class="panel-list-empty">Нет проектов</div>
+                    </div>
+                    <button class="add-btn" onclick="openProjectModal()">+ Новый проект</button>
+                </div>
+                <!-- Вкладка: Модели (для проектного экрана) -->
+                <div class="tab-pane" id="tab-proj-models">
+                    <div class="panel-search">
+                        <input type="text" id="proj-model-search" placeholder="Поиск моделей..." oninput="filterProjModels(this.value)">
+                    </div>
+                    <div class="panel-list" id="proj-models-list">
+                        <div class="panel-list-empty">Загрузка...</div>
+                    </div>
+                    <button class="add-btn" onclick="showAddLocalModelModal()">+ Локальная модель</button>
+                    <button class="add-btn" onclick="showAddCustomModelModal()">+ Кастомная модель</button>
+                </div>
+            </div>
+            <!-- Секция файлового дерева (сворачиваемая) -->
+            <div class="file-tree-section">
+                <div class="file-tree-header" onclick="toggleProjectFileTree()">
+                    <span>📂 Файлы</span>
+                    <span id="file-tree-toggle-icon">▼</span>
+                </div>
+                <div class="file-tree-content" id="project-file-tree-content">
+                    <div id="project-file-tree" style="padding:4px;">
+                        <div class="panel-placeholder" style="font-size:11px;">Выберите проект</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ручка изменения размера (левая) -->
+        <div class="resize-handle" id="proj-left-resize-handle"></div>
+
+        <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ: Чат проекта -->
+        <div class="center-area">
+            <div class="chat-area" id="project-chat-box">
+                <div class="msg system">Выберите проект для начала работы</div>
+            </div>
+            <div class="input-area">
+                <div class="input-wrapper" id="project-input-wrapper">
+                    <textarea id="project-user-input" placeholder="Опишите задачу для ИИ..." rows="3" onkeydown="handleProjectKeyDown(event)"></textarea>
+                    <div class="input-actions">
+                        <div class="input-left">
+                            <label class="file-label">📎 <input type="file" id="project-file-input" style="display:none" onchange="handleProjectFile(event)" multiple>
+                                <span id="project-file-preview" style="display:none" class="file-preview"></span>
+                            </label>
+                            <button id="project-file-remove" class="file-remove" onclick="removeProjectAttachedFile()" style="display:none" title="Убрать">✕</button>
+                            <button id="project-retry-btn" class="btn-retry" onclick="retryLastMessage()" style="display:none">🔄</button>
+                        </div>
+                        <div class="input-right">
+                            <button class="btn-mic" onclick="startVoice('project')" title="Голосовой ввод">🎤</button>
+                            <button class="btn-send" id="project-send-btn" onclick="sendMessage()">Отправить ➤</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Дополнительные кнопки под инпутом -->
+                <div class="project-input-bar">
+                    <button onclick="insertCommand('/terminal ')" title="Терминал">🛠 Терминал</button>
+                    <button onclick="insertCommand('/clear')" title="Очистить">🗑 /clear</button>
+                    <button onclick="insertCommand('/test')" title="Тест">🧪 /test</button>
+                    <button onclick="insertCommand('/repo_map')" title="Карта">🗺 /map</button>
+                    <button onclick="wsSend('/git_push')" title="Push">📤 Push</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ручка изменения размера (правая) -->
+        <div class="resize-handle" id="proj-right-resize-handle"></div>
+
+        <!-- ПРАВАЯ ПАНЕЛЬ: Логи | Git -->
+        <div class="right-panel" id="project-right-panel">
+            <div class="right-panel-tabs">
+                <div class="right-panel-tab active" data-rptab="proj-logs" onclick="switchProjRightTab('proj-logs')">📋 Логи</div>
+                <div class="right-panel-tab" data-rptab="proj-git" onclick="switchProjRightTab('proj-git')">🔀 Git</div>
+            </div>
+            <div class="right-panel-content">
+                <!-- Вкладка: Логи проекта -->
+                <div class="right-panel-pane active" id="rp-proj-logs">
+                    <div class="right-panel-header" style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+                        <div class="right-panel-title">
+                            Логи <span class="log-badge" id="proj-log-badge" style="display:none">0</span>
+                        </div>
+                        <div class="right-panel-actions">
+                            <button class="log-btn" onclick="copyAllLogs()" title="Копировать">📋</button>
+                            <button class="log-btn" onclick="saveAllLogs()" title="Сохранить">💾</button>
+                            <button class="log-btn" onclick="clearAutoLog();fetch('/api/v1/logs',{method:'DELETE'})" title="Очистить">🗑</button>
+                        </div>
+                    </div>
+                    <div class="log-filter">
+                        <button class="log-filter-btn active" data-filter="all" onclick="filterLogs('all',this)">Все</button>
+                        <button class="log-filter-btn" data-filter="info" onclick="filterLogs('info',this)">ℹ️</button>
+                        <button class="log-filter-btn" data-filter="success" onclick="filterLogs('success',this)">✅</button>
+                        <button class="log-filter-btn" data-filter="warning" onclick="filterLogs('warning',this)">⚠️</button>
+                        <button class="log-filter-btn" data-filter="error" onclick="filterLogs('error',this)">❌</button>
+                    </div>
+                    <div class="log-entries" id="log-entries"></div>
+                    <div class="log-footer">
+                        <span id="log-count">0 записей</span>
+                        <span id="log-session-time"></span>
+                    </div>
+                </div>
+                <!-- Вкладка: Git -->
+                <div class="right-panel-pane" id="rp-proj-git">
+                    <div class="git-mini-panel">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">🔀 Git</div>
+                        <div class="git-controls">
+                            <button class="btn btn-sm btn-ghost" onclick="gitAction('status')">Status</button>
+                            <button class="btn btn-sm btn-ghost" onclick="gitAction('log')">Log</button>
+                            <button class="btn btn-sm btn-ghost" onclick="gitAction('diff')">Diff</button>
+                            <button class="btn btn-sm btn-ghost" onclick="gitAction('push')">Push</button>
+                            <button class="btn btn-sm btn-ghost" onclick="gitAction('pull')">Pull</button>
+                        </div>
+                        <div id="proj-git-commit-form" class="hidden" style="margin:8px 0;padding:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-md);">
+                            <input type="text" id="proj-git-commit-msg" class="panel-input" style="width:100%;margin-bottom:8px;" placeholder="Сообщение коммита...">
+                            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;">
+                                <input type="checkbox" id="proj-git-auto-add" checked> git add -A
+                            </label>
+                            <button class="btn btn-primary btn-sm" onclick="doGitCommit()" style="margin-top:8px;">Коммит</button>
+                        </div>
+                        <div id="proj-git-output" class="panel-output"><div class="panel-placeholder">Выберите проект</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ НИЖНЯЯ ПАНЕЛЬ КНОПОК ═══ -->
 <div class="bottom-bar" id="bottom-bar"></div>
 
-<!-- ═══ STATUS BAR ═══ -->
+<!-- ═══ СТАТУС-БАР ═══ -->
 <div class="status-bar" id="status-bar">
     <div class="status-section">
         <span class="status-label">Навыки:</span>
@@ -175,13 +483,19 @@
         <span class="status-content" id="status-model">—</span>
     </div>
     <div class="status-section">
-        <span class="status-label">Инструменты:</span>
-        <span class="status-content" id="status-tools">—</span>
+        <span class="status-label">Экран:</span>
+        <span class="status-content" id="status-screen">Главная</span>
+    </div>
+    <div class="status-section">
+        <span class="status-label">Токены:</span>
+        <span class="status-content" id="status-tokens">—</span>
     </div>
 </div>
 
-<!-- ═══ SLIDE PANELS ═══ -->
-<!-- SEARCH -->
+<!-- ═══════════════════════════════════════════════════════════════
+     SLIDE-ПАНЕЛИ (поиск, файлы)
+     ═══════════════════════════════════════════════════════ -->
+<!-- ПОИСК -->
 <div class="slide-panel slide-left" id="panel-search">
     <div class="slide-panel-header">
         <span class="slide-panel-title">🔍 Поиск по файлам</span>
@@ -197,32 +511,7 @@
     </div>
 </div>
 
-<!-- GIT -->
-<div class="slide-panel slide-left" id="panel-git">
-    <div class="slide-panel-header">
-        <span class="slide-panel-title">🔀 Git</span>
-        <button class="modal-close" onclick="closePanel('git')">✕</button>
-    </div>
-    <div class="slide-panel-body">
-        <div class="git-controls">
-            <button class="btn btn-sm btn-ghost" onclick="gitAction('status')">Status</button>
-            <button class="btn btn-sm btn-ghost" onclick="gitAction('log')">Log</button>
-            <button class="btn btn-sm btn-ghost" onclick="gitAction('diff')">Diff</button>
-            <button class="btn btn-sm btn-ghost" onclick="gitAction('push')">Push</button>
-            <button class="btn btn-sm btn-ghost" onclick="gitAction('pull')">Pull</button>
-        </div>
-        <div id="git-commit-form" class="hidden" style="margin:8px 0;padding:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-md);">
-            <input type="text" id="git-commit-msg" class="panel-input" style="width:100%;margin-bottom:8px;" placeholder="Сообщение коммита...">
-            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;">
-                <input type="checkbox" id="git-auto-add" checked> git add -A
-            </label>
-            <button class="btn btn-primary btn-sm" onclick="doGitCommit()" style="margin-top:8px;">Коммит</button>
-        </div>
-        <div id="git-output" class="panel-output"><div class="panel-placeholder">Выберите действие</div></div>
-    </div>
-</div>
-
-<!-- FILES -->
+<!-- ФАЙЛЫ -->
 <div class="slide-panel slide-right" id="panel-files">
     <div class="slide-panel-header">
         <span class="slide-panel-title">📁 Файлы</span>
@@ -236,9 +525,11 @@
     </div>
 </div>
 
-<!-- ═══ MODALS ═══ -->
+<!-- ═══════════════════════════════════════════════════════════════
+     МОДАЛЬНЫЕ ОКНА
+     ═══════════════════════════════════════════════════════ -->
 
-<!-- PROJECT MODAL -->
+<!-- МОДАЛКА: Создание/редактирование проекта -->
 <div class="modal-overlay" id="project-modal" onclick="if(event.target===this)closeProjectModal()">
     <div class="modal" style="width:680px;" onclick="event.stopPropagation()">
         <div class="modal-header">
@@ -305,7 +596,7 @@
     </div>
 </div>
 
-<!-- GENERIC MODAL (Keys, Stats, Help, Settings) -->
+<!-- ОБЩАЯ МОДАЛКА (Ключи, Статистика, Справка, Настройки) -->
 <div class="modal-overlay" id="generic-modal" onclick="if(event.target===this)closeGenericModal()">
     <div class="modal" onclick="event.stopPropagation()" style="max-height:85vh;">
         <div class="modal-header">
@@ -316,7 +607,7 @@
     </div>
 </div>
 
-<!-- DIFF MODAL -->
+<!-- МОДАЛКА: Diff просмотрщик -->
 <div class="modal-overlay" id="diff-modal" onclick="if(event.target===this)closeDiffModal()">
     <div class="modal" style="width:90vw;max-width:1200px;" onclick="event.stopPropagation()">
         <div class="modal-header">
@@ -327,7 +618,7 @@
     </div>
 </div>
 
-<!-- FILE VIEWER MODAL -->
+<!-- МОДАЛКА: Просмотр файлов -->
 <div class="modal-overlay" id="file-viewer-modal" onclick="if(event.target===this)closeFileViewerModal()">
     <div class="modal" style="width:90vw;max-width:1000px;" onclick="event.stopPropagation()">
         <div class="modal-header">
@@ -344,24 +635,34 @@
 </div>
 
 <script>
+// ═══════════════════════════════════════════════════════════════════
+// FOSVED CODER V2.0 — ПОЛНЫЙ JS-МОДУЛЬ
+// Двухэкранная архитектура: Главная (Hub) + Проект
+// ═══════════════════════════════════════════════════════════════════
+
 // ═══════════════════════════════════════════════════════
-// STATE
+// ГЛОБАЛЬНОЕ СОСТОЯНИЕ
 // ═══════════════════════════════════════════════════════
 let ws = null;
-const chatBox = document.getElementById("chat-box");
-let currentAiDiv = null;
+let currentAiDiv = null;          // Текущий div стриминга AI-ответа (проектный чат)
 let currentAiText = "";
 let currentTypingDiv = null;
+let currentHubAiDiv = null;        // Текущий div стриминга AI-ответа (hub-чат)
+let currentHubAiText = "";
+let currentHubTypingDiv = null;
 let currentProjectId = null;
 let allModels = [];
 let allProjects = [];
 let activeModelId = null;
-let attachedFile = null;
+let attachedFile = null;           // Прикреплённый файл (проектный чат)
+let hubAttachedFile = null;        // Прикреплённый файл (hub-чат)
 let openPanels = new Set();
 let editingProjectId = null;
 let workMode = "manual";
 let lastSentMessage = null;
 let lastSentPayload = null;
+let lastHubSentMessage = null;
+let lastHubSentPayload = null;
 let autoModeRunning = false;
 let priorityModels = [];
 let currentLogFilter = "all";
@@ -369,21 +670,55 @@ let autoLogCount = 0;
 let autoLogPanelVisible = true;
 let activeToolDivs = {};
 let isWaitingAI = false;
+let isHubWaitingAI = false;
 let waitTimer = null;
 let diffViewMode = "unified";
 let currentFileViewPath = null;
 let activeSkills = new Set();
+let currentScreen = "main";        // "main" или "project"
+let tokenCount = 0;                // Счётчик токенов
+
+// Ссылки на DOM-элементы чатов
+const hubChatBox = document.getElementById("hub-chat-box");
+const projectChatBox = document.getElementById("project-chat-box");
 
 // ═══════════════════════════════════════════════════════
-// UTILS
+// УТИЛИТЫ
 // ═══════════════════════════════════════════════════════
+/** Экранирование HTML-символов */
 function escapeHtml(t) {
     if (!t) return '';
     const d = document.createElement('div'); d.textContent = t; return d.innerHTML;
 }
 
+/** Получить активный чат-бокс в зависимости от экрана */
+function getActiveChatBox() {
+    return currentScreen === "main" ? hubChatBox : projectChatBox;
+}
+
+/** Получить активный AI-див и текст */
+function getActiveAiContext() {
+    if (currentScreen === "main") {
+        return { div: currentHubAiDiv, text: currentHubAiText, chatBox: hubChatBox, typingDiv: currentHubTypingDiv };
+    }
+    return { div: currentAiDiv, text: currentAiText, chatBox: projectChatBox, typingDiv: currentTypingDiv };
+}
+
+/** Установить активный AI-див и текст */
+function setActiveAiContext(div, text, chatBox, typingDiv) {
+    if (currentScreen === "main") {
+        currentHubAiDiv = div;
+        currentHubAiText = text;
+        currentHubTypingDiv = typingDiv;
+    } else {
+        currentAiDiv = div;
+        currentAiText = text;
+        currentTypingDiv = typingDiv;
+    }
+}
+
 // ═══════════════════════════════════════════════════════
-// LOADING SCREEN
+// ЭКРАН ЗАГРУЗКИ
 // ═══════════════════════════════════════════════════════
 function hideLoadingScreen() {
     const el = document.getElementById('loading-screen');
@@ -399,7 +734,7 @@ function updateLoadingBar(pct, text) {
 }
 
 // ═══════════════════════════════════════════════════════
-// TOAST
+// ТОСТ-УВЕДОМЛЕНИЯ
 // ═══════════════════════════════════════════════════════
 function showToast(message, type) {
     type = type || "info";
@@ -417,15 +752,55 @@ function showToast(message, type) {
 }
 
 // ═══════════════════════════════════════════════════════
-// TAB SWITCHING
+// ПЕРЕКЛЮЧЕНИЕ ЭКРАНОВ (Главная / Проект)
 // ═══════════════════════════════════════════════════════
-function switchTab(tab) {
-    document.querySelectorAll('.panel-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
-    document.querySelectorAll('.tab-pane').forEach(el => el.classList.toggle('active', el.id === 'tab-' + tab));
+function switchScreen(screen) {
+    currentScreen = screen;
+    // Переключить видимость экранов
+    document.getElementById("screen-main").classList.toggle("active", screen === "main");
+    document.getElementById("screen-project").classList.toggle("active", screen === "project");
+    // Обновить навигационные кнопки
+    document.getElementById("nav-main").classList.toggle("active", screen === "main");
+    document.getElementById("nav-project").classList.toggle("active", screen === "project");
+    // Показать/скрыть режим авто/ручной
+    const modeToggle = document.getElementById("mode-toggle");
+    if (modeToggle) modeToggle.style.display = screen === "project" ? "flex" : "none";
+    // Обновить статус-бар
+    document.getElementById("status-screen").textContent = screen === "main" ? "Главная" : "Проект";
+    // Обновить нижнюю панель
+    renderBottomBar();
 }
 
 // ═══════════════════════════════════════════════════════
-// RESIZE HANDLES
+// ПЕРЕКЛЮЧЕНИЕ ТАБОВ В ПАНЕЛЯХ
+// ═══════════════════════════════════════════════════════
+
+/** Табы левой панели главного экрана */
+function switchHubTab(tab) {
+    document.querySelectorAll('#hub-left-panel .panel-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+    document.querySelectorAll('#hub-left-panel .tab-pane').forEach(el => el.classList.toggle('active', el.id === 'tab-' + tab));
+}
+
+/** Табы левой панели проектного экрана */
+function switchProjTab(tab) {
+    document.querySelectorAll('#project-left-panel .panel-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+    document.querySelectorAll('#project-left-panel .tab-pane').forEach(el => el.classList.toggle('active', el.id === 'tab-' + tab));
+}
+
+/** Табы правой панели главного экрана */
+function switchHubRightTab(tab) {
+    document.querySelectorAll('#hub-right-panel .right-panel-tab').forEach(el => el.classList.toggle('active', el.dataset.rptab === tab));
+    document.querySelectorAll('#hub-right-panel .right-panel-pane').forEach(el => el.classList.toggle('active', el.id === 'rp-' + tab));
+}
+
+/** Табы правой панели проектного экрана */
+function switchProjRightTab(tab) {
+    document.querySelectorAll('#project-right-panel .right-panel-tab').forEach(el => el.classList.toggle('active', el.dataset.rptab === tab));
+    document.querySelectorAll('#project-right-panel .right-panel-pane').forEach(el => el.classList.toggle('active', el.id === 'rp-' + tab));
+}
+
+// ═══════════════════════════════════════════════════════
+// РУЧКИ ИЗМЕНЕНИЯ РАЗМЕРА
 // ═══════════════════════════════════════════════════════
 function setupResize(handleId, panelId, storageKey, minW, maxW) {
     const handle = document.getElementById(handleId);
@@ -439,11 +814,14 @@ function setupResize(handleId, panelId, storageKey, minW, maxW) {
     document.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; handle.classList.remove("active"); document.body.style.cursor = ""; document.body.style.userSelect = ""; localStorage.setItem(storageKey, panel.offsetWidth + 'px'); });
     handle.addEventListener("dblclick", () => { panel.style.width = ''; localStorage.removeItem(storageKey); });
 }
-setupResize("left-resize-handle", "left-panel", "fosved-left-w", 200, 420);
-setupResize("right-resize-handle", "right-panel", "fosved-right-w", 200, 450);
+// Инициализация ручек для обоих экранов
+setupResize("hub-left-resize-handle", "hub-left-panel", "fosved-hub-left-w", 200, 420);
+setupResize("hub-right-resize-handle", "hub-right-panel", "fosved-hub-right-w", 200, 450);
+setupResize("proj-left-resize-handle", "project-left-panel", "fosved-proj-left-w", 200, 420);
+setupResize("proj-right-resize-handle", "project-right-panel", "fosved-proj-right-w", 200, 450);
 
 // ═══════════════════════════════════════════════════════
-// MARKED + HIGHLIGHT
+// MARKED + HIGHLIGHT (Markdown + подсветка синтаксиса)
 // ═══════════════════════════════════════════════════════
 marked.setOptions({
     highlight: function(code, lang) {
@@ -468,9 +846,11 @@ function renderMarkdown(text) {
 }
 
 // ═══════════════════════════════════════════════════════
-// MESSAGES
+// СООБЩЕНИЯ ЧАТА
 // ═══════════════════════════════════════════════════════
-function addMessage(type, text) {
+/** Добавить сообщение в указанный чат-бокс */
+function addMessageTo(type, text, targetChatBox) {
+    const chatBox = targetChatBox || getActiveChatBox();
     const div = document.createElement("div");
     div.className = "msg " + type;
     if (type === "ai") { div.innerHTML = renderMarkdown(text); addCopyButtons(div); }
@@ -481,23 +861,50 @@ function addMessage(type, text) {
     chatBox.scrollTop = chatBox.scrollHeight;
 }
 
+/** Обёртка для совместимости — добавляет в активный чат */
+function addMessage(type, text) {
+    addMessageTo(type, text);
+}
+
+// ─── Стриминг AI-ответа ───
 let _aiRenderPending = false, _aiRenderLast = 0;
 const AI_RENDER_INTERVAL = 100;
 
 function scheduleAiRender() {
-    if (!currentAiDiv) return;
-    chatBox.scrollTop = chatBox.scrollHeight;
+    const ctx = getActiveAiContext();
+    if (!ctx.div) return;
+    ctx.chatBox.scrollTop = ctx.chatBox.scrollHeight;
     const now = Date.now();
-    if (now - _aiRenderLast >= AI_RENDER_INTERVAL) { _aiRenderLast = now; currentAiDiv.innerHTML = renderMarkdown(currentAiText); addCopyButtons(currentAiDiv); return; }
+    if (now - _aiRenderLast >= AI_RENDER_INTERVAL) {
+        _aiRenderLast = now;
+        ctx.div.innerHTML = renderMarkdown(ctx.text);
+        addCopyButtons(ctx.div);
+        return;
+    }
     if (_aiRenderPending) return;
     _aiRenderPending = true;
-    setTimeout(() => { _aiRenderPending = false; _aiRenderLast = Date.now(); if (currentAiDiv) { currentAiDiv.innerHTML = renderMarkdown(currentAiText); addCopyButtons(currentAiDiv); chatBox.scrollTop = chatBox.scrollHeight; } }, AI_RENDER_INTERVAL);
+    setTimeout(() => {
+        _aiRenderPending = false; _aiRenderLast = Date.now();
+        const c2 = getActiveAiContext();
+        if (c2.div) {
+            c2.div.innerHTML = renderMarkdown(c2.text);
+            addCopyButtons(c2.div);
+            c2.chatBox.scrollTop = c2.chatBox.scrollHeight;
+        }
+    }, AI_RENDER_INTERVAL);
 }
+
 function flushAiRender() {
-    if (currentAiDiv) { currentAiDiv.innerHTML = renderMarkdown(currentAiText); addCopyButtons(currentAiDiv); chatBox.scrollTop = chatBox.scrollHeight; }
+    const ctx = getActiveAiContext();
+    if (ctx.div) {
+        ctx.div.innerHTML = renderMarkdown(ctx.text);
+        addCopyButtons(ctx.div);
+        ctx.chatBox.scrollTop = ctx.chatBox.scrollHeight;
+    }
     _aiRenderPending = false;
 }
 
+// ─── Кнопки копирования кода ───
 function addCopyButtons(container) {
     container.querySelectorAll("pre").forEach(pre => {
         if (pre.querySelector(".code-btn-bar")) return;
@@ -548,7 +955,7 @@ async function doSaveFile() {
 }
 
 // ═══════════════════════════════════════════════════════
-// TOOL CALLS
+// ВИЗУАЛИЗАЦИЯ ВЫЗОВОВ ИНСТРУМЕНТОВ
 // ═══════════════════════════════════════════════════════
 function handleToolCall(data) {
     const tool = data.tool || '?';
@@ -565,91 +972,123 @@ function handleToolCall(data) {
     else if (tool==='execute_command'&&args.command) detail=args.command;
     else if (args.path) detail=args.path;
 
-    const container = document.getElementById('log-entries');
-    if (!container) return;
+    // Логировать в активный контейнер логов
+    const containers = [
+        document.getElementById('log-entries'),
+        document.getElementById('hub-log-entries')
+    ].filter(Boolean);
+
     const time = new Date().toLocaleTimeString();
 
     if (status === 'running') {
         if (!activeToolDivs[key]) {
-            const entry = document.createElement('div');
-            entry.className = 'log-entry info tool';
-            entry.dataset.level = 'info';
-            entry.dataset.toolKey = key;
-            entry.innerHTML = `<span class="log-icon" style="color:var(--blue)">${icon}</span><span class="log-time">${time}</span><span class="log-tool-status">⏳</span><span class="log-text"><b>${escapeHtml(label)}</b>${detail?' <span style="opacity:0.7">'+escapeHtml(detail)+'</span>':''}</span>`;
-            if (currentLogFilter!=='all'&&'info'!==currentLogFilter) entry.style.display='none';
-            container.appendChild(entry);
-            container.scrollTop = container.scrollHeight;
-            activeToolDivs[key] = entry;
+            containers.forEach(container => {
+                const entry = document.createElement('div');
+                entry.className = 'log-entry info tool';
+                entry.dataset.level = 'info';
+                entry.dataset.toolKey = key;
+                entry.innerHTML = `<span class="log-icon" style="color:var(--blue)">${icon}</span><span class="log-time">${time}</span><span class="log-tool-status">⏳</span><span class="log-text"><b>${escapeHtml(label)}</b>${detail?' <span style="opacity:0.7">'+escapeHtml(detail)+'</span>':''}</span>`;
+                if (currentLogFilter!=='all'&&'info'!==currentLogFilter) entry.style.display='none';
+                container.appendChild(entry);
+                container.scrollTop = container.scrollHeight;
+            });
+            activeToolDivs[key] = true;
             autoLogCount++;
             updateLogBadge();
         }
     } else if (status === 'done') {
-        const entry = activeToolDivs[key];
-        if (entry) {
+        if (activeToolDivs[key]) {
             const ec = data.exit_code;
             const si = (tool==='execute_command'&&ec!==undefined)?(ec===0?'✅':'⚠️'):'✅';
-            const se = entry.querySelector('.log-tool-status');
-            if (se) se.textContent = si;
-            if (ec!==undefined&&ec!==0) { entry.className='log-entry warning tool'; entry.dataset.level='warning'; }
-            else { entry.className='log-entry success tool'; entry.dataset.level='success'; }
+            containers.forEach(container => {
+                const entry = container.querySelector(`[data-tool-key="${CSS.escape(key)}"]`);
+                if (entry) {
+                    const se = entry.querySelector('.log-tool-status');
+                    if (se) se.textContent = si;
+                    if (ec!==undefined&&ec!==0) { entry.className='log-entry warning tool'; entry.dataset.level='warning'; }
+                    else { entry.className='log-entry success tool'; entry.dataset.level='success'; }
+                    if (currentLogFilter!=='all') entry.style.display = entry.dataset.level===currentLogFilter?'':'none';
+                }
+            });
             activeToolDivs[key] = null;
-            if (currentLogFilter!=='all') entry.style.display = entry.dataset.level===currentLogFilter?'':'none';
             autoLogCount++;
         }
     } else if (status === 'error') {
-        const entry = activeToolDivs[key];
-        if (entry) {
-            const se = entry.querySelector('.log-tool-status');
-            if (se) se.textContent = '❌';
-            entry.className = 'log-entry error tool'; entry.dataset.level='error';
+        if (activeToolDivs[key]) {
+            containers.forEach(container => {
+                const entry = container.querySelector(`[data-tool-key="${CSS.escape(key)}"]`);
+                if (entry) {
+                    const se = entry.querySelector('.log-tool-status');
+                    if (se) se.textContent = '❌';
+                    entry.className = 'log-entry error tool'; entry.dataset.level='error';
+                    if (currentLogFilter!=='all'&&'error'!==currentLogFilter) entry.style.display='none';
+                }
+            });
             activeToolDivs[key] = null;
-            if (currentLogFilter!=='all'&&'error'!==currentLogFilter) entry.style.display='none';
         }
     }
 }
 
 // ═══════════════════════════════════════════════════════
-// AUTO STEP MESSAGES
+// СООБЩЕНИЯ АВТО-ШАГОВ
 // ═══════════════════════════════════════════════════════
 function addAutoStepMessage(text, type, canRetry) {
     const div = document.createElement('div');
     div.className = 'auto-step ' + type;
     const icons = {step:'🔄',done:'✅',warning:'⚠️',error:'❌'};
     div.innerHTML = `<span class="step-icon">${icons[type]||'🔄'}</span><span class="step-text">${escapeHtml(text)}</span>${canRetry?'<button class="btn-retry" style="padding:2px 8px;font-size:11px;margin-left:8px;" onclick="retryLastMessage()">🔄</button>':''}`;
-    chatBox.appendChild(div);
-    chatBox.scrollTop = chatBox.scrollHeight;
+    getActiveChatBox().appendChild(div);
+    getActiveChatBox().scrollTop = getActiveChatBox().scrollHeight;
 }
 
 // ═══════════════════════════════════════════════════════
-// INPUT
+// УПРАВЛЕНИЕ ВВОДОМ
 // ═══════════════════════════════════════════════════════
 function setWaitingAI(state) {
+    // Для проектного чата
     isWaitingAI = state;
-    const input = document.getElementById('user-input');
+    const input = document.getElementById('project-user-input');
     const progress = document.getElementById('header-progress');
     const fill = document.getElementById('header-progress-fill');
-    const retryBtn = document.getElementById('retry-btn');
-    const sendBtn = document.getElementById('send-btn');
-    sendBtn.disabled = !!state;
-    sendBtn.classList.toggle('is-loading', !!state);
+    const retryBtn = document.getElementById('project-retry-btn');
+    const sendBtn = document.getElementById('project-send-btn');
+    if (sendBtn) { sendBtn.disabled = !!state; sendBtn.classList.toggle('is-loading', !!state); }
     if (state) {
-        input.classList.add('waiting');
+        if (input) input.classList.add('waiting');
         if (retryBtn) retryBtn.style.display = 'none';
-        progress.style.display = 'flex'; fill.style.width = '0%';
+        if (progress) { progress.style.display = 'flex'; fill.style.width = '0%'; }
         document.getElementById('header-progress-text').textContent = '...';
         let w = 0; clearInterval(waitTimer);
         waitTimer = setInterval(() => { w = Math.min(w+1,90); fill.style.width = w+'%'; document.getElementById('header-progress-text').textContent = w+'%'; if (w>=90) clearInterval(waitTimer); }, 333);
     } else {
-        input.classList.remove('waiting');
+        if (input) input.classList.remove('waiting');
         clearInterval(waitTimer);
-        fill.style.width = '100%';
+        if (fill) fill.style.width = '100%';
         document.getElementById('header-progress-text').textContent = 'OK';
-        setTimeout(() => { progress.style.display = 'none'; if (retryBtn && lastSentMessage && !autoModeRunning) retryBtn.style.display = 'flex'; }, 800);
+        setTimeout(() => { if (progress) progress.style.display = 'none'; if (retryBtn && lastSentMessage && !autoModeRunning) retryBtn.style.display = 'flex'; }, 800);
     }
 }
 
+function setHubWaitingAI(state) {
+    isHubWaitingAI = state;
+    const input = document.getElementById('hub-user-input');
+    const sendBtn = document.getElementById('hub-send-btn');
+    const retryBtn = document.getElementById('hub-retry-btn');
+    if (sendBtn) { sendBtn.disabled = !!state; sendBtn.classList.toggle('is-loading', !!state); }
+    if (state) {
+        if (input) input.classList.add('waiting');
+        if (retryBtn) retryBtn.style.display = 'none';
+    } else {
+        if (input) input.classList.remove('waiting');
+        if (retryBtn && lastHubSentMessage) retryBtn.style.display = 'flex';
+    }
+}
+
+// ═══════════════════════════════════════════════════════
+// ОТПРАВКА СООБЩЕНИЙ — ПРОЕКТНЫЙ ЧАТ
+// ═══════════════════════════════════════════════════════
 function sendMessage() {
-    const input = document.getElementById("user-input");
+    const input = document.getElementById("project-user-input");
     const text = input.value.trim();
     if (!text && !attachedFile) return;
     if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
@@ -664,10 +1103,10 @@ function sendMessage() {
     lastSentMessage = text;
     lastSentPayload = { ...payload };
     input.value = ""; attachedFile = null;
-    document.getElementById("file-input").value = "";
+    document.getElementById("project-file-input").value = "";
     input.style.height = "auto";
-    document.getElementById("file-preview").style.display = "none";
-    document.getElementById("file-remove").style.display = "none";
+    document.getElementById("project-file-preview").style.display = "none";
+    document.getElementById("project-file-remove").style.display = "none";
 }
 
 function retryLastMessage() {
@@ -681,15 +1120,65 @@ function retryLastMessage() {
     wsSend(payload);
 }
 
-function handleKeyDown(e) {
+// ═══════════════════════════════════════════════════════
+// ОТПРАВКА СООБЩЕНИЙ — HUB-ЧАТ
+// ═══════════════════════════════════════════════════════
+function sendHubMessage() {
+    const input = document.getElementById("hub-user-input");
+    const text = input.value.trim();
+    if (!text && !hubAttachedFile) return;
+    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
+    if (!activeModelId) { showToast("Выберите модель", "error"); return; }
+    let displayText = hubAttachedFile ? "📎 " + hubAttachedFile.filename + "\n" + text : text;
+    addMessageTo("user", displayText, hubChatBox);
+    setHubWaitingAI(true);
+    // Отправляем как hub_chat
+    let payload = { type: "hub_chat", prompt: text, model: activeModelId };
+    if (priorityModels.length) payload.priority_models = priorityModels;
+    if (hubAttachedFile) payload.file_content = hubAttachedFile.content;
+    wsSend(payload);
+    lastHubSentMessage = text;
+    lastHubSentPayload = { ...payload };
+    input.value = ""; hubAttachedFile = null;
+    document.getElementById("hub-file-input").value = "";
+    input.style.height = "auto";
+    document.getElementById("hub-file-preview").style.display = "none";
+    document.getElementById("hub-file-remove").style.display = "none";
+}
+
+function retryHubMessage() {
+    if (!lastHubSentPayload) return;
+    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
+    if (!activeModelId) return;
+    addMessageTo("user", "🔄 [Повтор] " + (lastHubSentMessage||''), hubChatBox);
+    setHubWaitingAI(true);
+    let payload = { ...lastHubSentPayload, model: activeModelId };
+    if (priorityModels.length) payload.priority_models = priorityModels;
+    wsSend(payload);
+}
+
+// ═══════════════════════════════════════════════════════
+// ОБРАБОТЧИКИ КЛАВИАТУРЫ
+// ═══════════════════════════════════════════════════════
+function handleProjectKeyDown(e) {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendMessage(); }
+}
+function handleHubKeyDown(e) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendHubMessage(); }
 }
 
 function insertCommand(cmd) {
-    const input = document.getElementById("user-input");
+    const input = document.getElementById("project-user-input");
+    input.value = cmd; input.focus();
+}
+function insertHubCommand(cmd) {
+    const input = document.getElementById("hub-user-input");
     input.value = cmd; input.focus();
 }
 
+// ═══════════════════════════════════════════════════════
+// ОБРАБОТКА ФАЙЛОВ
+// ═══════════════════════════════════════════════════════
 async function handleFile(event) {
     const file = event.target.files[0]; if (!file) return;
     const formData = new FormData(); formData.append("file", file);
@@ -698,22 +1187,47 @@ async function handleFile(event) {
         attachedFile = await res.json();
         if (attachedFile) {
             const sizeStr = attachedFile.size ? ` (${Math.round(attachedFile.size/1024)}KB)` : '';
-            document.getElementById("file-preview").textContent = "📎 " + attachedFile.filename + sizeStr;
-            document.getElementById("file-preview").style.display = "inline";
-            document.getElementById("file-remove").style.display = "inline";
+            document.getElementById("project-file-preview").textContent = "📎 " + attachedFile.filename + sizeStr;
+            document.getElementById("project-file-preview").style.display = "inline";
+            document.getElementById("project-file-remove").style.display = "inline";
         }
         showToast("Файл: " + attachedFile.filename, "success");
     } catch(e) { showToast("Ошибка загрузки", "error"); }
 }
 
-function removeAttachedFile() {
-    attachedFile = null;
-    document.getElementById("file-input").value = "";
-    document.getElementById("file-preview").style.display = "none";
-    document.getElementById("file-remove").style.display = "none";
+async function handleHubFile(event) {
+    const file = event.target.files[0]; if (!file) return;
+    const formData = new FormData(); formData.append("file", file);
+    try {
+        const res = await fetch("/upload", { method: "POST", body: formData });
+        hubAttachedFile = await res.json();
+        if (hubAttachedFile) {
+            const sizeStr = hubAttachedFile.size ? ` (${Math.round(hubAttachedFile.size/1024)}KB)` : '';
+            document.getElementById("hub-file-preview").textContent = "📎 " + hubAttachedFile.filename + sizeStr;
+            document.getElementById("hub-file-preview").style.display = "inline";
+            document.getElementById("hub-file-remove").style.display = "inline";
+        }
+        showToast("Файл: " + hubAttachedFile.filename, "success");
+    } catch(e) { showToast("Ошибка загрузки", "error"); }
 }
 
-function startVoice() {
+function removeAttachedFile() {
+    attachedFile = null;
+    document.getElementById("project-file-input").value = "";
+    document.getElementById("project-file-preview").style.display = "none";
+    document.getElementById("project-file-remove").style.display = "none";
+}
+function removeHubAttachedFile() {
+    hubAttachedFile = null;
+    document.getElementById("hub-file-input").value = "";
+    document.getElementById("hub-file-preview").style.display = "none";
+    document.getElementById("hub-file-remove").style.display = "none";
+}
+
+// ═══════════════════════════════════════════════════════
+// ГОЛОСОВОЙ ВВОД
+// ═══════════════════════════════════════════════════════
+function startVoice(target) {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
         showToast("Голосовой ввод не поддерживается", "error"); return;
     }
@@ -722,23 +1236,30 @@ function startVoice() {
     recognition.lang = 'ru-RU';
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.onresult = (e) => { const t = e.results[0][0].transcript; document.getElementById('user-input').value += t; };
+    const inputId = target === 'hub' ? 'hub-user-input' : 'project-user-input';
+    recognition.onresult = (e) => { const t = e.results[0][0].transcript; document.getElementById(inputId).value += t; };
     recognition.onerror = (e) => { showToast('Ошибка: ' + e.error, 'error'); };
     recognition.start();
     showToast('🎤 Говорите...', 'info');
 }
 
-// Textarea auto-resize
-document.getElementById('user-input').addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+// ─── Авто-ресайз текстовых полей ───
+['hub-user-input', 'project-user-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 200) + 'px'; });
 });
-// Focus effect
-document.getElementById('user-input').addEventListener('focus', () => document.getElementById('input-wrapper').classList.add('focused'));
-document.getElementById('user-input').addEventListener('blur', () => document.getElementById('input-wrapper').classList.remove('focused'));
+// ─── Фокус-эффект ───
+['hub-user-input', 'project-user-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const wrapperId = id === 'hub-user-input' ? 'hub-input-wrapper' : 'project-input-wrapper';
+    el.addEventListener('focus', () => document.getElementById(wrapperId).classList.add('focused'));
+    el.addEventListener('blur', () => document.getElementById(wrapperId).classList.remove('focused'));
+});
 
 // ═══════════════════════════════════════════════════════
-// WORK MODE
+// РЕЖИМ РАБОТЫ (Авто / Ручной)
 // ═══════════════════════════════════════════════════════
 function toggleWorkMode() {
     workMode = workMode === "manual" ? "auto" : "manual";
@@ -748,13 +1269,15 @@ function toggleWorkMode() {
     wsSend({ type: "mode_change", mode: workMode });
 }
 function updateModeUI() {
-    document.getElementById('mode-label-manual').classList.toggle('active', workMode === 'manual');
-    document.getElementById('mode-label-auto').classList.toggle('active', workMode === 'auto');
+    const manual = document.getElementById('mode-label-manual');
+    const auto = document.getElementById('mode-label-auto');
+    if (manual) manual.classList.toggle('active', workMode === 'manual');
+    if (auto) auto.classList.toggle('active', workMode === 'auto');
 }
 setTimeout(updateModeUI, 100);
 
 // ═══════════════════════════════════════════════════════
-// WEBSOCKET
+// WEBSOCKET — Подключение и обработка сообщений
 // ═══════════════════════════════════════════════════════
 let wsReconnectAttempts = 0;
 const WS_MAX_RECONNECTS = 5;
@@ -780,83 +1303,185 @@ function wsConnect() {
     ws.onopen = () => {
         wsReconnectAttempts = 0; wsIsConnected = true;
         updateLoadingBar(50, 'Загрузка моделей...');
-        chatBox.innerHTML = "";
-        addMessage("system", "Fosved Coder готов. Выберите модель и начните работу.");
+        hubChatBox.innerHTML = "";
+        projectChatBox.innerHTML = "";
+        addMessageTo("system", "Fosved Coder V2.0 готов. Добро пожаловать!", hubChatBox);
+        addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
         loadModels(); loadProjects();
         while (wsMessageQueue.length > 0) { ws.send(wsMessageQueue.shift()); }
         persistQ();
     };
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.type === "pong" || data.type === "ping") { if (data.type==="ping") try{ws.send(JSON.stringify({type:"pong"}));}catch(e){} return; }
+
+        // Пинг/понг
+        if (data.type === "pong" || data.type === "ping") {
+            if (data.type==="ping") try{ws.send(JSON.stringify({type:"pong"}));}catch(e){}
+            return;
+        }
+
+        // ─── Стриминг чанков ───
         if (data.type === "chunk") {
-            if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
+            // Определяем, куда направлять — в зависимости от текущего экрана или источника
+            const ctx = getActiveAiContext();
+            if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            // Сбросить ожидание обоих чатов
             setWaitingAI(false);
-            if (!currentAiDiv) { currentAiDiv = document.createElement("div"); currentAiDiv.className = "msg ai"; chatBox.appendChild(currentAiDiv); }
-            currentAiText += data.content;
+            setHubWaitingAI(false);
+            if (!ctx.div) {
+                const newDiv = document.createElement("div");
+                newDiv.className = "msg ai";
+                getActiveChatBox().appendChild(newDiv);
+                setActiveAiContext(newDiv, "", getActiveChatBox(), null);
+                const updatedCtx = getActiveAiContext();
+                // Переназначить
+                if (currentScreen === "main") { currentHubAiDiv = newDiv; currentHubAiText = ""; currentHubTypingDiv = null; }
+                else { currentAiDiv = newDiv; currentAiText = ""; currentTypingDiv = null; }
+            }
+            const ctx2 = getActiveAiContext();
+            if (currentScreen === "main") { currentHubAiText += data.content; }
+            else { currentAiText += data.content; }
+            tokenCount += (data.content || '').length;
+            updateTokenCount();
             scheduleAiRender();
-        } else if (data.type === "done") {
-            if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
-            flushAiRender(); setWaitingAI(false);
-            currentAiDiv = null; currentAiText = "";
+            return;
+        }
+
+        // ─── Завершение ответа ───
+        if (data.type === "done") {
+            const ctx = getActiveAiContext();
+            if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            flushAiRender();
+            setWaitingAI(false);
+            setHubWaitingAI(false);
+            if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
+            else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
             setTimeout(() => { updateHeaderModelBadge(null); }, 3000);
             if (currentProjectId) autoIncrementProgress();
-        } else if (data.type === "error") {
-            if (currentTypingDiv) { currentTypingDiv.remove(); currentTypingDiv = null; }
-            setWaitingAI(false); updateHeaderModelBadge(null);
-            currentAiDiv = null; currentAiText = "";
-        } else if (data.type === "system") {
+            return;
+        }
+
+        // ─── Ошибка ───
+        if (data.type === "error") {
+            const ctx = getActiveAiContext();
+            if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            setWaitingAI(false);
+            setHubWaitingAI(false);
+            updateHeaderModelBadge(null);
+            if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
+            else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
+            addMessage("error", data.content || "Произошла ошибка");
+            return;
+        }
+
+        // ─── Системное сообщение ───
+        if (data.type === "system") {
             addMessage("system", data.content);
             if (data.content && data.content.length < 200) addLogEntryToPanel({level:'info',source:'system',action:data.content,time:new Date().toLocaleTimeString()});
-        } else if (data.type === "typing") {
+            return;
+        }
+
+        // ─── Индикатор набора текста ───
+        if (data.type === "typing") {
             setWaitingAI(true);
-            if (currentTypingDiv) currentTypingDiv.remove();
-            currentTypingDiv = document.createElement("div");
-            currentTypingDiv.className = "msg ai typing-indicator";
+            setHubWaitingAI(true);
+            if (getActiveAiContext().typingDiv) getActiveAiContext().typingDiv.remove();
+            const typingDiv = document.createElement("div");
+            typingDiv.className = "msg ai typing-indicator";
             const mn = data.model||'';
             const sn = mn.includes('__') ? mn.split('__').pop() : mn;
-            currentTypingDiv.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div><span>Думаю'+(sn?' ('+escapeHtml(sn)+')':'')+'...</span>';
-            chatBox.appendChild(currentTypingDiv); chatBox.scrollTop = chatBox.scrollHeight;
+            typingDiv.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div><span>Думаю'+(sn?' ('+escapeHtml(sn)+')':'')+'...</span>';
+            getActiveChatBox().appendChild(typingDiv);
+            getActiveChatBox().scrollTop = getActiveChatBox().scrollHeight;
+            if (currentScreen === "main") currentHubTypingDiv = typingDiv;
+            else currentTypingDiv = typingDiv;
             if (sn) updateHeaderModelBadge(sn, 'thinking');
-        } else if (data.type === "command_result") {
+            return;
+        }
+
+        // ─── Результат команды ───
+        if (data.type === "command_result") {
             addLogEntryToPanel({level:'info',source:'terminal',action:data.content.substring(0,500),time:new Date().toLocaleTimeString()});
-        } else if (data.type === "auto_step") {
+            return;
+        }
+
+        // ─── Авто-режим ───
+        if (data.type === "auto_step") {
             autoModeRunning = true;
             addAutoStepMessage(data.content||"Авто-шаг", "step");
-        } else if (data.type === "auto_done") {
+            return;
+        }
+        if (data.type === "auto_done") {
             autoModeRunning = false;
             const hasErr = data.content && data.content.includes("ошибк");
             addAutoStepMessage(data.content||"Авто завершено", hasErr?"warning":"done");
             setWaitingAI(false);
-        } else if (data.type === "auto_error") {
+            return;
+        }
+        if (data.type === "auto_error") {
             autoModeRunning = false;
             addAutoStepMessage(data.content, "error", true);
             setWaitingAI(false);
-        } else if (data.type === "idea_result") {
-            addLogEntryToPanel({level:'info',source:'idea',action:data.content.substring(0,500),time:new Date().toLocaleTimeString()});
-        } else if (data.type === "auto_log") {
-            handleAutoLog(data);
-        } else if (data.type === "tool_call") {
-            handleToolCall(data);
-        } else {
-            addMessage(data.type||"system", data.content||"");
+            return;
         }
+
+        // ─── Результат идеи ───
+        if (data.type === "idea_result") {
+            addLogEntryToPanel({level:'info',source:'idea',action:data.content.substring(0,500),time:new Date().toLocaleTimeString()});
+            return;
+        }
+
+        // ─── Авто-лог ───
+        if (data.type === "auto_log") {
+            handleAutoLog(data);
+            return;
+        }
+
+        // ─── Вызов инструмента ───
+        if (data.type === "tool_call") {
+            handleToolCall(data);
+            return;
+        }
+
+        // ─── Результаты зондирования моделей (новое в V2.0) ───
+        if (data.type === "probed_models") {
+            handleProbedModels(data.models || []);
+            return;
+        }
+
+        // ─── Анкета создана (новое в V2.0) ───
+        if (data.type === "questionnaire_created") {
+            handleQuestionnaireCreated(data);
+            return;
+        }
+
+        // ─── Запрос навыка (новое в V2.0) ───
+        if (data.type === "skill_request") {
+            handleSkillRequest(data);
+            return;
+        }
+
+        // ─── Прочие типы сообщений ───
+        addMessage(data.type || "system", data.content || "");
     };
+
     ws.onclose = () => {
         wsIsConnected = false;
-        addMessage("error", "Соединение потеряно. Переподключение...");
+        addMessageTo("error", "Соединение потеряно. Переподключение...", hubChatBox);
+        addMessageTo("error", "Соединение потеряно. Переподключение...", projectChatBox);
         if (wsReconnectAttempts < WS_MAX_RECONNECTS) {
             setTimeout(wsConnect, Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000));
             wsReconnectAttempts++;
         } else {
-            addMessage("error", "Не удалось подключиться. Перезагрузите (F5).");
+            addMessageTo("error", "Не удалось подключиться. Перезагрузите (F5).", hubChatBox);
+            addMessageTo("error", "Не удалось подключиться. Перезагрузите (F5).", projectChatBox);
         }
     };
     ws.onerror = () => {};
 }
 
 // ═══════════════════════════════════════════════════════
-// HEADER MODEL BADGE
+// BADGE МОДЕЛИ В ХЕДЕРЕ
 // ═══════════════════════════════════════════════════════
 function updateHeaderModelBadge(name, state) {
     const badge = document.getElementById('header-model-badge');
@@ -870,7 +1495,52 @@ function updateHeaderModelBadge(name, state) {
 }
 
 // ═══════════════════════════════════════════════════════
-// MODELS
+// ОБРАБОТЧИКИ НОВЫХ ТИПОВ СООБЩЕНИЙ (V2.0)
+// ═══════════════════════════════════════════════════════
+
+/** Результаты зондирования моделей */
+function handleProbedModels(models) {
+    const indicator = document.getElementById('probed-indicator');
+    if (!indicator || !models.length) return;
+    indicator.style.display = 'block';
+    document.getElementById('probed-count').textContent = models.length;
+    // Обновить статус в интерфейсе
+    showToast(`Зондировано ${models.length} моделей`, 'success');
+}
+
+/** Анкета создана */
+function handleQuestionnaireCreated(data) {
+    const panel = document.getElementById('questionnaire-panel');
+    panel.classList.add('active');
+    showToast('Анкета создана', 'success');
+    // Переключиться на главный экран, если не там
+    if (currentScreen !== 'main') switchScreen('main');
+}
+
+/** Запрос навыка */
+function handleSkillRequest(data) {
+    const skillName = data.skill || data.name || 'навык';
+    showToast(`⚡ Активация навыка: ${skillName}`, 'info');
+}
+
+/** Начать анкетирование */
+function startQuestionnaire() {
+    const title = 'Новый проект';
+    wsSend({ type: "start_questionnaire", title: title });
+    showToast('📝 Запуск анкетирования...', 'info');
+}
+
+/** Обновить счётчик токенов */
+function updateTokenCount() {
+    const el = document.getElementById('status-tokens');
+    if (el) {
+        const k = tokenCount > 1000 ? (tokenCount / 1000).toFixed(1) + 'k' : tokenCount;
+        el.textContent = k;
+    }
+}
+
+// ═══════════════════════════════════════════════════════
+// МОДЕЛИ — Загрузка, рендеринг, выбор
 // ═══════════════════════════════════════════════════════
 function getModelInitials(name) {
     const p = name.replace(/[^a-zA-Z0-9]/g,' ').trim().split(/\s+/);
@@ -910,8 +1580,14 @@ function buildModelCard(m, type) {
 }
 
 function renderModels() {
-    const list = document.getElementById("models-list");
-    if (!allModels.length) { list.innerHTML = '<div class="panel-list-empty">Нет моделей</div>'; return; }
+    if (!allModels.length) {
+        ['hub-models-list', 'proj-models-list'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '<div class="panel-list-empty">Нет моделей</div>';
+        });
+        updateStatusBar();
+        return;
+    }
     const abacus = allModels.filter(m=>m.provider==='abacus'&&(m.status==='valid'||m.status==='rate_limited'));
     const paidValid = allModels.filter(m=>m.type==="paid"&&(m.status==='valid'||m.status==='rate_limited')&&m.provider!=='abacus');
     const free = allModels.filter(m=>m.type==='free');
@@ -940,13 +1616,23 @@ function renderModels() {
         html += '</div>';
     }
     if (!html) html = '<div class="panel-list-empty">Нет моделей</div>';
-    list.innerHTML = html;
+    // Обновляем оба списка моделей
+    ['hub-models-list', 'proj-models-list'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html;
+    });
     updateStatusBar();
 }
 
 function filterModels(q) {
     q = q.toLowerCase();
-    document.querySelectorAll('#models-list .model-card').forEach(el => {
+    document.querySelectorAll('#hub-models-list .model-card').forEach(el => {
+        el.style.display = el.dataset.name.includes(q) ? '' : 'none';
+    });
+}
+function filterProjModels(q) {
+    q = q.toLowerCase();
+    document.querySelectorAll('#proj-models-list .model-card').forEach(el => {
         el.style.display = el.dataset.name.includes(q) ? '' : 'none';
     });
 }
@@ -1034,7 +1720,7 @@ async function doAddCustomModel() {
 }
 
 // ═══════════════════════════════════════════════════════
-// PROJECTS
+// ПРОЕКТЫ — Загрузка, рендеринг, CRUD
 // ═══════════════════════════════════════════════════════
 async function loadProjects() {
     try {
@@ -1047,13 +1733,11 @@ async function loadProjects() {
 }
 
 function renderProjects() {
-    const list = document.getElementById("project-list");
-    if (!allProjects.length) { list.innerHTML = '<div class="panel-list-empty">Нет проектов</div>'; return; }
-    let html = '';
-    allProjects.forEach(p => {
+    const lists = [document.getElementById("project-list"), document.getElementById("hub-project-list")];
+    const html = allProjects.length ? allProjects.map(p => {
         const isActive = p.id === currentProjectId;
         const progress = p.progress || 0;
-        html += `<div class="project-card${isActive?' active':''}" onclick="selectProject(${p.id})" data-id="${p.id}">
+        return `<div class="project-card${isActive?' active':''}" onclick="selectProject(${p.id})" data-id="${p.id}">
             <div class="project-card-header">
                 <div class="project-logo">${p.logo||'📁'}</div>
                 <div class="project-card-info">
@@ -1067,26 +1751,32 @@ function renderProjects() {
             </div>
             ${progress>0?`<div class="project-progress-bar"><div class="project-progress-fill" style="width:${progress}%"></div></div>`:''}
         </div>`;
-    });
-    list.innerHTML = html;
+    }).join('') : '<div class="panel-list-empty">Нет проектов</div>';
+    lists.forEach(el => { if (el) el.innerHTML = html; });
 }
 
 async function selectProject(id) {
     currentProjectId = id;
     renderProjects();
     renderBottomBar();
+    updateStatusBar();
     const p = allProjects.find(x=>x.id===id);
-    const title = document.getElementById('header-title');
     if (p) {
-        title.textContent = p.name;
-        title.classList.add('has-project');
         priorityModels = p.model_ids || [];
     } else {
-        title.textContent = 'FOSVED CODER';
-        title.classList.remove('has-project');
         priorityModels = [];
     }
-    showToast(p ? 'Проект: '+p.name : 'Режим без проекта', 'info');
+    // Переключиться на экран проекта
+    switchScreen('project');
+    if (p) {
+        projectChatBox.innerHTML = "";
+        addMessageTo("system", `Проект: ${p.name}`, projectChatBox);
+        showToast('Проект: ' + p.name, 'info');
+        // Загрузить файловое дерево
+        loadProjectFileTree();
+    } else {
+        showToast('Режим без проекта', 'info');
+    }
 }
 
 async function deleteProject(id, name) {
@@ -1094,7 +1784,11 @@ async function deleteProject(id, name) {
     try {
         await fetch(`/api/v1/projects/${id}`, {method:"DELETE"});
         await loadProjects();
-        if (currentProjectId===id) selectProject(null);
+        if (currentProjectId===id) {
+            currentProjectId = null;
+            projectChatBox.innerHTML = "";
+            addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
+        }
         showToast(`"${name}" удалён`, "success");
     } catch(e) { showToast(e.message, "error"); }
 }
@@ -1190,7 +1884,7 @@ async function autoIncrementProgress() {
 }
 
 // ═══════════════════════════════════════════════════════
-// SKILLS
+// СКИЛЛЫ
 // ═══════════════════════════════════════════════════════
 const SKILL_GROUPS = [
     { name: 'AI', icon: '🧠', skills: [
@@ -1222,7 +1916,6 @@ const SKILL_GROUPS = [
 ];
 
 function renderSkills() {
-    const list = document.getElementById('skills-list');
     let html = '';
     SKILL_GROUPS.forEach(g => {
         html += `<div class="skill-group"><div class="skill-group-header">${g.icon} ${g.name}</div>`;
@@ -1236,7 +1929,8 @@ function renderSkills() {
         });
         html += '</div>';
     });
-    list.innerHTML = html;
+    const el = document.getElementById('hub-skills-list');
+    if (el) el.innerHTML = html;
 }
 
 function toggleSkill(id) {
@@ -1247,20 +1941,24 @@ function toggleSkill(id) {
 }
 
 // ═══════════════════════════════════════════════════════
-// LOG PANEL
+// ЛОГ-ПАНЕЛЬ
 // ═══════════════════════════════════════════════════════
 function addLogEntryToPanel(entry) {
-    const container = document.getElementById('log-entries');
-    if (!container) return;
+    const containers = [
+        document.getElementById('log-entries'),
+        document.getElementById('hub-log-entries')
+    ].filter(Boolean);
     const level = entry.level || 'info';
     const icons = {info:'ℹ️',success:'✅',warning:'⚠️',error:'❌',debug:'🔍'};
-    const el = document.createElement('div');
-    el.className = 'log-entry ' + level;
-    el.dataset.level = level;
-    el.innerHTML = `<span class="log-icon">${icons[level]||'ℹ️'}</span><span class="log-time">${entry.time||new Date().toLocaleTimeString()}</span><span class="log-text">${escapeHtml(entry.action||entry.message||'')}</span><button class="log-copy" onclick="navigator.clipboard.writeText(this.parentElement.querySelector('.log-text').textContent);this.textContent='OK';">📋</button>`;
-    if (currentLogFilter!=='all'&&level!==currentLogFilter) el.style.display='none';
-    container.appendChild(el);
-    container.scrollTop = container.scrollHeight;
+    containers.forEach(container => {
+        const el = document.createElement('div');
+        el.className = 'log-entry ' + level;
+        el.dataset.level = level;
+        el.innerHTML = `<span class="log-icon">${icons[level]||'ℹ️'}</span><span class="log-time">${entry.time||new Date().toLocaleTimeString()}</span><span class="log-text">${escapeHtml(entry.action||entry.message||'')}</span><button class="log-copy" onclick="navigator.clipboard.writeText(this.parentElement.querySelector('.log-text').textContent);this.textContent='OK';">📋</button>`;
+        if (currentLogFilter!=='all'&&level!==currentLogFilter) el.style.display='none';
+        container.appendChild(el);
+        container.scrollTop = container.scrollHeight;
+    });
     autoLogCount++;
     updateLogBadge();
 }
@@ -1271,13 +1969,12 @@ function handleAutoLog(data) {
 }
 
 function updateLogBadge() {
-    const badge = document.getElementById('log-badge');
+    ['log-badge', 'proj-log-badge'].forEach(id => {
+        const badge = document.getElementById(id);
+        if (badge) { badge.textContent = autoLogCount; badge.style.display = autoLogCount > 0 ? '' : 'none'; }
+    });
     const count = document.getElementById('log-count');
-    const container = document.getElementById('log-entries');
-    const total = container ? container.querySelectorAll('.log-entry').length : autoLogCount;
-    badge.textContent = total;
-    badge.style.display = total > 0 ? '' : 'none';
-    if (count) count.textContent = total + ' записей';
+    if (count) count.textContent = autoLogCount + ' записей';
 }
 
 function filterLogs(level, btn) {
@@ -1289,20 +1986,22 @@ function filterLogs(level, btn) {
 }
 
 function clearAutoLog() {
-    const c = document.getElementById('log-entries');
-    if (c) c.innerHTML = '';
+    ['log-entries', 'hub-log-entries'].forEach(id => {
+        const c = document.getElementById(id);
+        if (c) c.innerHTML = '';
+    });
     autoLogCount = 0;
     updateLogBadge();
 }
 
 function copyAllLogs() {
-    const entries = document.querySelectorAll('.log-entry .log-text');
+    const entries = document.querySelectorAll('#log-entries .log-text');
     const text = Array.from(entries).map(e=>e.textContent).join('\n');
     navigator.clipboard.writeText(text).then(()=>showToast("Скопировано","success"));
 }
 
 function saveAllLogs() {
-    const entries = document.querySelectorAll('.log-entry .log-text');
+    const entries = document.querySelectorAll('#log-entries .log-text');
     const text = Array.from(entries).map(e=>e.textContent).join('\n');
     const blob = new Blob([text], {type:'text/plain'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -1319,41 +2018,51 @@ async function loadServerLogs(filter) {
 }
 
 // ═══════════════════════════════════════════════════════
-// BOTTOM BAR
+// НИЖНЯЯ ПАНЕЛЬ
 // ═══════════════════════════════════════════════════════
 function renderBottomBar() {
-    const bar = document.getElementById('bottom-bar');
+    const bar = document.getElementById('bottom-bar");
     const p = currentProjectId ? allProjects.find(x=>x.id===currentProjectId) : null;
     const ma = workMode==='auto'?' auto-active':'';
     const mm = workMode==='manual'?' active':'';
-    let btns = [
-        `<div class="mode-group"><button class="mode-group-btn${mm}" onclick="toggleWorkMode()">✋ Ручной</button><span class="mode-group-sep"></span><button class="mode-group-btn${ma}" onclick="toggleWorkMode()">🤖 Авто</button></div>`,
-        '<span class="bottom-sep"></span>',
-        {l:'📁 Files',a:"togglePanel('files')"},
-        {l:'🔍 Search',a:"togglePanel('search')"},
-        {l:'🔀 Git',a:"togglePanel('git')"},
-        {l:'🛠 Terminal',a:"insertCommand('/terminal ')"},
-        {l:'📊 Stats',a:"showStats()"},
-        {l:'🔑 Keys',a:"showKeysModal()"},
-        {l:'⚙️ Settings',a:"showSettings()"},
-        {l:'❓ Help',a:"showHelp()"},
-    ];
-    if (p) {
-        btns.push('<span class="bottom-sep"></span>');
-        btns.push({l:'📥 Pull',a:"wsSend('/git_pull')"});
-        btns.push({l:'📤 Push',a:"wsSend('/git_push')"});
-        btns.push({l:'🚀 Sync',a:"wsSend('/quick_push sync')"});
-        btns.push({l:'🧪 Test',a:"wsSend('/test')"});
-        btns.push({l:'🗺 Map',a:"wsSend('/repo_map')"});
+    let btns = [];
+
+    if (currentScreen === 'project') {
+        btns = [
+            `<div class="mode-group"><button class="mode-group-btn${mm}" onclick="toggleWorkMode()">✋ Ручной</button><span class="mode-group-sep"></span><button class="mode-group-btn${ma}" onclick="toggleWorkMode()">🤖 Авто</button></div>`,
+            '<span class="bottom-sep"></span>',
+            {l:'📁 Files',a:"togglePanel('files')"},
+            {l:'🔍 Search',a:"togglePanel('search')"},
+            {l:'🔀 Git',a:"togglePanel('git')"},
+            {l:'🛠 Terminal',a:"insertCommand('/terminal ')"},
+            {l:'📊 Stats',a:"showStats()"},
+            {l:'🔑 Keys',a:"showKeysModal()"},
+            {l:'⚙️ Settings',a:"showSettings()"},
+            {l:'❓ Help',a:"showHelp()"},
+        ];
+        if (p) {
+            btns.push('<span class="bottom-sep"></span>');
+            btns.push({l:'📥 Pull',a:"wsSend('/git_pull')"});
+            btns.push({l:'📤 Push',a:"wsSend('/git_push')"});
+            btns.push({l:'🚀 Sync',a:"wsSend('/quick_push sync')"});
+            btns.push({l:'🧪 Test',a:"wsSend('/test')"});
+            btns.push({l:'🗺 Map',a:"wsSend('/repo_map')"});
+        }
+    } else {
+        btns = [
+            {l:'📊 Stats',a:"showStats()"},
+            {l:'🔑 Keys',a:"showKeysModal()"},
+            {l:'⚙️ Settings',a:"showSettings()"},
+            {l:'❓ Help',a:"showHelp()"},
+        ];
     }
     bar.innerHTML = btns.map(b => typeof b==='string' ? b : `<button class="bottom-btn" onclick="${b.a}">${b.l}</button>`).join('');
 }
 
 // ═══════════════════════════════════════════════════════
-// STATUS BAR
+// СТАТУС-БАР
 // ═══════════════════════════════════════════════════════
 function updateStatusBar() {
-    // Skills
     const skillsEl = document.getElementById('status-skills');
     if (activeSkills.size > 0) {
         skillsEl.innerHTML = Array.from(activeSkills).map(s => {
@@ -1362,24 +2071,18 @@ function updateStatusBar() {
             return sk ? `<span class="skill-tag">${sk.icon} ${sk.name}</span>` : '';
         }).join('');
     } else skillsEl.textContent = '—';
-    // Model
     const modelEl = document.getElementById('status-model');
     const m = allModels.find(x=>x.id===activeModelId);
     modelEl.innerHTML = m ? `<span class="status-dot green"></span>${escapeHtml(m.name)}` : '—';
-    // Tools
-    const toolsEl = document.getElementById('status-tools');
-    const msgCount = chatBox ? chatBox.querySelectorAll('.msg').length : 0;
-    toolsEl.textContent = msgCount > 0 ? `Сообщений: ${msgCount}` : '—';
 }
 
 // ═══════════════════════════════════════════════════════
-// PANELS
+// SLIDE-ПАНЕЛИ
 // ═══════════════════════════════════════════════════════
 function togglePanel(name) {
     const panel = document.getElementById('panel-' + name);
     if (!panel) return;
     const isOpen = panel.classList.contains('open');
-    // Close all
     document.querySelectorAll('.slide-panel').forEach(p => p.classList.remove('open'));
     if (!isOpen) panel.classList.add('open');
 }
@@ -1389,7 +2092,7 @@ function closePanel(name) {
 }
 
 // ═══════════════════════════════════════════════════════
-// SEARCH
+// ПОИСК ПО ФАЙЛАМ
 // ═══════════════════════════════════════════════════════
 async function searchFiles() {
     if (!currentProjectId) { showToast("Выберите проект", "error"); return; }
@@ -1409,27 +2112,31 @@ async function searchFiles() {
 // ═══════════════════════════════════════════════════════
 async function gitAction(action) {
     if (!currentProjectId) { showToast("Выберите проект", "error"); return; }
-    if (action==='commit') { document.getElementById('git-commit-form').classList.toggle('hidden'); return; }
+    if (action==='commit') {
+        // Переключить на Git-вкладку в правой панели проектного экрана
+        document.getElementById('proj-git-commit-form').classList.toggle('hidden');
+        return;
+    }
     try {
         const resp = await fetch('/api/v1/projects/'+currentProjectId+'/git', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:currentProjectId,operation:action}) });
         const data = await resp.json();
-        document.getElementById('git-output').textContent = data.output || data.result || JSON.stringify(data, null, 2);
-    } catch(e) { document.getElementById('git-output').textContent = 'Ошибка: '+e.message; }
+        document.getElementById('proj-git-output').textContent = data.output || data.result || JSON.stringify(data, null, 2);
+    } catch(e) { document.getElementById('proj-git-output').textContent = 'Ошибка: '+e.message; }
 }
 async function doGitCommit() {
     if (!currentProjectId) return;
-    const msg = document.getElementById('git-commit-msg').value.trim();
-    const autoAdd = document.getElementById('git-auto-add').checked;
+    const msg = document.getElementById('proj-git-commit-msg').value.trim();
+    const autoAdd = document.getElementById('proj-git-auto-add').checked;
     try {
         const resp = await fetch('/api/v1/projects/'+currentProjectId+'/git', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:currentProjectId,operation:'commit',message:msg,auto_add:autoAdd}) });
         const data = await resp.json();
-        document.getElementById('git-output').textContent = data.output || data.result || 'OK';
-        document.getElementById('git-commit-form').classList.add('hidden');
-    } catch(e) { document.getElementById('git-output').textContent = 'Ошибка: '+e.message; }
+        document.getElementById('proj-git-output').textContent = data.output || data.result || 'OK';
+        document.getElementById('proj-git-commit-form').classList.add('hidden');
+    } catch(e) { document.getElementById('proj-git-output').textContent = 'Ошибка: '+e.message; }
 }
 
 // ═══════════════════════════════════════════════════════
-// FILE TREE
+// ФАЙЛОВОЕ ДЕРЕВО
 // ═══════════════════════════════════════════════════════
 async function loadFileTree() {
     if (!currentProjectId) { showToast("Выберите проект", "error"); return; }
@@ -1440,6 +2147,25 @@ async function loadFileTree() {
         if (!data.tree || !data.tree.length) { el.innerHTML = '<div class="panel-placeholder">Пусто</div>'; return; }
         el.innerHTML = renderTreeNodes(data.tree, 0);
     } catch(e) { document.getElementById('file-tree').innerHTML = '<div class="panel-placeholder">Ошибка</div>'; }
+}
+
+/** Загрузить файловое дерево в боковую панель проектного экрана */
+async function loadProjectFileTree() {
+    if (!currentProjectId) return;
+    try {
+        const resp = await fetch('/api/v1/projects/'+currentProjectId+'/tree');
+        const data = await resp.json();
+        const el = document.getElementById('project-file-tree');
+        if (!data.tree || !data.tree.length) { el.innerHTML = '<div class="panel-placeholder" style="font-size:11px;">Нет файлов</div>'; return; }
+        el.innerHTML = renderTreeNodes(data.tree, 0);
+    } catch(e) { document.getElementById('project-file-tree').innerHTML = '<div class="panel-placeholder" style="font-size:11px;">Ошибка</div>'; }
+}
+
+function toggleProjectFileTree() {
+    const content = document.getElementById('project-file-tree-content');
+    const icon = document.getElementById('file-tree-toggle-icon');
+    content.classList.toggle('collapsed');
+    icon.textContent = content.classList.contains('collapsed') ? '▶' : '▼';
 }
 
 function renderTreeNodes(nodes, depth) {
@@ -1486,7 +2212,7 @@ async function saveFileFromViewer() {
 }
 
 // ═══════════════════════════════════════════════════════
-// GENERIC MODAL
+// ОБЩАЯ МОДАЛКА
 // ═══════════════════════════════════════════════════════
 function openGenericModal(title, bodyHtml, footerHtml) {
     document.getElementById('generic-modal-title').textContent = title;
@@ -1506,7 +2232,7 @@ function closeGenericModal() { document.getElementById('generic-modal').classLis
 function closeDiffModal() { document.getElementById('diff-modal').classList.remove('open'); }
 
 // ═══════════════════════════════════════════════════════
-// KEYS MODAL
+// МОДАЛКА API КЛЮЧЕЙ
 // ═══════════════════════════════════════════════════════
 async function showKeysModal() {
     try {
@@ -1524,7 +2250,7 @@ async function showKeysModal() {
             const dis = cfg.enabled===false ? 'opacity:0.4;' : '';
             const offBadge = cfg.enabled===false ? '<span style="background:var(--red);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:6px;">OFF</span>' : '';
             html += `<div class="key-card" style="${dis}"><div class="key-card-header"><span class="key-provider">${pdef.name}${offBadge}</span><span class="key-status ${sCls}">${sLabel}</span></div>
-                ${cfg.has_key?'<div class="key-value">●●●●●●●●</div>':''}
+                ${cfg.has_key?'<div class="key-value">●●●●●●●●●</div>':''}
                 <div class="key-actions">
                     ${cfg.has_key?`<button class="btn btn-sm btn-ghost" onclick="toggleProvider('${pid}',${cfg.enabled!==false})">${cfg.enabled!==false?'⏸ Выкл':'▶ Вкл'}</button><button class="btn btn-sm btn-danger" onclick="removeKey('${pid}')">Удалить</button><button class="btn btn-sm btn-ghost" onclick="revalidateKey('${pid}')">Проверить</button>`:`<button class="btn btn-sm btn-primary" onclick="showAddKeyForm('${pid}','${pdef.name}')">Добавить</button>`}
                 </div></div>`;
@@ -1580,7 +2306,7 @@ async function toggleGitHub(enabled) {
 }
 
 // ═══════════════════════════════════════════════════════
-// STATS
+// СТАТИСТИКА
 // ═══════════════════════════════════════════════════════
 async function showStats() {
     try {
@@ -1599,7 +2325,7 @@ async function showStats() {
 }
 
 // ═══════════════════════════════════════════════════════
-// SETTINGS
+// НАСТРОЙКИ
 // ═══════════════════════════════════════════════════════
 function showSettings() {
     const body = `<div class="form-group"><label>Версия</label><div style="color:var(--text-primary);">Fosved Coder v2.0</div></div>
@@ -1609,7 +2335,7 @@ function showSettings() {
 }
 
 // ═══════════════════════════════════════════════════════
-// HELP
+// СПРАВКА
 // ═══════════════════════════════════════════════════════
 function showHelp() {
     const body = `<h3 style="color:var(--accent);margin-bottom:8px;">Горячие клавиши</h3>
@@ -1621,27 +2347,47 @@ function showHelp() {
         <ul style="padding-left:20px;color:var(--text-secondary);line-height:2;">
             <li><code>/terminal &lt;cmd&gt;</code> — выполнить команду</li>
             <li><code>/git_push</code> / <code>/git_pull</code></li>
-            <li><code>/quick_push [msg]</code> — commit + push</li>
+            <li><code>/quick_push sync</code> — commit + push</li>
             <li><code>/test</code> — проверить код</li>
             <li><code>/repo_map</code> — структура проекта</li>
             <li><code>/ideas &lt;url&gt;</code> — анализ репо</li>
             <li><code>/clear</code> — очистить чат</li>
             <li><code>/help</code> — справка</li>
+            <li><code>/probe</code> — показать результаты зондирования моделей</li>
+            <li><code>/questionnaire [title]</code> — начать опрос для создания проекта</li>
         </ul>`;
     openGenericModal("❓ Справка", body);
 }
 
 // ═══════════════════════════════════════════════════════
-// CHAT
+// УТИЛИТЫ ЧАТА
 // ═══════════════════════════════════════════════════════
-function clearChat() { wsSend("/clear"); chatBox.querySelectorAll(".msg").forEach(m=>m.remove()); addMessage("system","Чат очищен."); }
-function goHome() { selectProject(null); showToast("Режим без проекта", "info"); }
+function clearChat() {
+    // Очищаем оба чата
+    hubChatBox.querySelectorAll(".msg").forEach(m=>m.remove());
+    projectChatBox.querySelectorAll(".msg").forEach(m=>m.remove());
+    addMessageTo("system", "Чат очищен.", hubChatBox);
+    addMessageTo("system", "Чат очищен.", projectChatBox);
+    tokenCount = 0;
+    updateTokenCount();
+}
+
+function goHome() {
+    currentProjectId = null;
+    priorityModels = [];
+    switchScreen('main');
+    projectChatBox.innerHTML = "";
+    addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
+    renderProjects();
+    showToast("Режим без проекта", "info");
+}
 
 // ═══════════════════════════════════════════════════════
-// INIT
+// ИНИЦИАЛИЗАЦИЯ
 // ═══════════════════════════════════════════════════════
 renderSkills();
 renderBottomBar();
+updateStatusBar();
 wsConnect();
 </script>
 </body>

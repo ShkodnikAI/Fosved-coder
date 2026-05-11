@@ -56,6 +56,8 @@ class PromptInjector:
         repo_map: str = "",
         include_git_status: bool = True,
         files_to_include: list[str] | None = None,
+        include_skills: bool = False,
+        skills_dir: str = "skills",
     ) -> str:
         """
         Построить полный контекст для инъекции в промпт.
@@ -67,6 +69,12 @@ class PromptInjector:
             return self._minimal_context(project_name, project_description)
 
         sections = []
+
+        # 0. Скиллы (если запрошено)
+        if include_skills:
+            skill_context = self.build_skill_context(skills_dir)
+            if skill_context:
+                sections.append(skill_context)
 
         # 1. Базовая информация о проекте
         project_info = self._build_project_info(
@@ -117,6 +125,100 @@ class PromptInjector:
         if project_description:
             parts.append(f"ОПИСАНИЕ: {project_description}")
         return "\n".join(parts) if parts else ""
+
+    def build_skill_context(self, skills_dir: str = "skills") -> str:
+        """
+        Сканирует директорию скиллов и строит контекст.
+
+        Для каждого подкаталога в skills_dir ищет skill.md,
+        извлекает первую строку (описание) и формирует список.
+
+        Возвращает:
+            ## ДОСТУПНЫЕ СКИЛЛЫ:
+            - **skill-name**: description
+            ...
+        """
+        if not self.project_path:
+            # Пробуем как абсолютный путь
+            scan_dir = skills_dir
+        else:
+            scan_dir = os.path.join(self.project_path, skills_dir)
+
+        if not os.path.isdir(scan_dir):
+            return ""
+
+        entries = []
+        try:
+            for entry in sorted(os.listdir(scan_dir)):
+                skill_path = os.path.join(scan_dir, entry)
+                if not os.path.isdir(skill_path):
+                    continue
+
+                # Пропускаем служебные директории
+                if entry.startswith(".") or entry.startswith("_"):
+                    continue
+
+                skill_md = os.path.join(skill_path, "skill.md")
+                description = ""
+                if os.path.isfile(skill_md):
+                    try:
+                        with open(skill_md, "r", encoding="utf-8", errors="replace") as f:
+                            first_line = f.readline().strip()
+                            if first_line:
+                                description = first_line.lstrip("# ")
+                    except Exception:
+                        pass
+
+                if description:
+                    entries.append(f"- **{entry}**: {description}")
+                else:
+                    entries.append(f"- **{entry}**")
+        except Exception as e:
+            logger.log(
+                f"prompt_injector: skill scan error: {e}",
+                level="warning", source="injector",
+            )
+            return ""
+
+        if not entries:
+            return ""
+
+        return "## ДОСТУПНЫЕ СКИЛЛЫ:\n" + "\n".join(entries)
+
+    def build_questionnaire_context(self, questions: list[dict]) -> str:
+        """
+        Формирует контекст из ответов на вопросы.
+
+        Принимает список словарей: {"question": str, "answer": str, "category": str}
+        Группирует по категории и форматирует.
+
+        Возвращает:
+            ## ОТВЕТЫ НА ВОПРОСЫ:
+            ### Категория
+            **Q:** question
+            **A:** answer
+            ...
+        """
+        if not questions:
+            return ""
+
+        # Группируем по категории
+        categories: dict[str, list[dict]] = {}
+        for q in questions:
+            cat = q.get("category", "Общее").strip() or "Общее"
+            categories.setdefault(cat, []).append(q)
+
+        sections = ["## ОТВЕТЫ НА ВОПРОСЫ:"]
+        for cat, items in categories.items():
+            sections.append(f"### {cat}")
+            for item in items:
+                question = item.get("question", "").strip()
+                answer = item.get("answer", "").strip()
+                if question:
+                    sections.append(f"**Q:** {question}")
+                    sections.append(f"**A:** {answer}")
+
+        return "\n".join(sections)
 
     def _build_project_info(
         self, name: str, description: str, template: str
@@ -248,9 +350,16 @@ class PromptInjector:
 
         return "\n".join(entries) if entries else ""
 
-    def _build_file_contents(self, file_paths: list[str]) -> str:
+    def _build_file_contents(
+        self,
+        file_paths: list[str],
+        priority_files: list[str] | None = None,
+    ) -> str:
         """
         Секция: содержимое конкретных файлов.
+
+        Приоритетные файлы (priority_files) включаются ПЕРВЫМИ
+        с повышенным лимитом символов (30000 вместо 15000).
 
         Формат:
         --- src/main.py ---
@@ -260,18 +369,42 @@ class PromptInjector:
         if not self.project_path or not file_paths:
             return ""
 
+        PRIORITY_MAX_FILE_CHARS = 30000
+
+        # Строим итоговый список: приоритетные первые, затем остальные
+        priority_set = set(priority_files) if priority_files else set()
+        ordered_paths = []
+        seen = set()
+
+        # 1. Приоритетные файлы
+        if priority_files:
+            for p in priority_files:
+                if p not in seen:
+                    ordered_paths.append((p, True))
+                    seen.add(p)
+
+        # 2. Остальные файлы (без дублирования приоритетных)
+        for path in file_paths:
+            if path not in seen:
+                ordered_paths.append((path, False))
+                seen.add(path)
+
         parts = []
         total_chars = 0
 
-        for path in file_paths:
+        for idx, (path, is_priority) in enumerate(ordered_paths):
             if total_chars >= MAX_TOTAL_CHARS:
-                parts.append(f"\n... (контекст обрезан, {len(file_paths) - file_paths.index(path)} файлов пропущено)")
+                remaining = len(ordered_paths) - idx
+                parts.append(f"\n... (контекст обрезан, {remaining} файлов пропущено)")
                 break
 
             if len(parts) >= MAX_FILES:
-                remaining = len(file_paths) - file_paths.index(path)
+                remaining = len(ordered_paths) - idx
                 parts.append(f"\n... (лимит {MAX_FILES} файлов, {remaining} пропущено)")
                 break
+
+            # Лимит символов для этого файла
+            max_chars = PRIORITY_MAX_FILE_CHARS if is_priority else MAX_FILE_CHARS
 
             # Проверяем кеш
             if path in self._file_cache:
@@ -294,8 +427,8 @@ class PromptInjector:
 
             # Обрезаем длинные файлы
             display_content = content
-            if len(content) > MAX_FILE_CHARS:
-                display_content = content[:MAX_FILE_CHARS] + f"\n\n... (обрезано, всего {len(content)} симв.)"
+            if len(content) > max_chars:
+                display_content = content[:max_chars] + f"\n\n... (обрезано, всего {len(content)} симв.)"
 
             parts.append(f"\n--- {path} ---\n{display_content}")
             total_chars += len(display_content)
@@ -350,6 +483,18 @@ shell-команда здесь
 <git operation="commit" message="описание коммита">
 </git>
 (автоматически: git add -A → commit → push)
+
+6. Прочитать файл:
+<read file="относительный/путь/файла.py">
+или
+<read file="относительный/путь/файла.py"/>
+Система прочитает файл и вернёт его содержимое.
+
+7. Создать директорию:
+<mkdir path="относительный/путь/директории">
+или
+<mkdir path="относительный/путь/директории"/>
+Система создаст директорию (и все промежуточные).
 
 После завершения работы с файлами система автоматически выполнит:
 - git add -A

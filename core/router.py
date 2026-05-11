@@ -25,8 +25,10 @@ class HybridRouter:
     """
     Hybrid task router: keyword matching first, AI-based routing as fallback.
 
-    В v2.0 используется через agent.py::_route_with_priority()
-    для выбора оптимальной модели из приоритетного списка проекта.
+    .. deprecated::
+        DEPRECATED: Эта логика дублируется в agent.py::_route_with_priority().
+        Класс подлежит удалению после миграции на единый роутер.
+        Используйте agent._route_with_priority() (также deprecated).
     """
 
     KEYWORDS_SIMPLE = [

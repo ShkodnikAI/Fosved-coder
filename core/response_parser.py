@@ -8,6 +8,8 @@ core/response_parser.py — Парсер ответов модели
 3. ```diff — применить патч
 4. <command>команда</command> — выполнить shell-команду
 5. <git operation="commit/push" message="..."> — git операции
+6. <read file="путь"> — прочитать файл и вернуть содержимое
+7. <mkdir path="путь"> — создать директорию
 
 Модель НЕ знает что это "инструменты" — для неё это просто формат ответа.
 """
@@ -78,6 +80,16 @@ class ResponseParser:
     RE_DIFF_BLOCK = re.compile(
         r'```diff\s*\n(.*?)```',
         re.DOTALL,
+    )
+
+    # <read file="путь"> or <read file="путь"/>
+    RE_READ_TAG = re.compile(
+        r'<read\s+file\s*=\s*["\']([^"\']+)["\']\s*/?>',
+    )
+
+    # <mkdir path="путь"> or <mkdir path="путь"/>
+    RE_MKDIR_TAG = re.compile(
+        r'<mkdir\s+path\s*=\s*["\']([^"\']+)["\']\s*/?>',
     )
 
     def __init__(self, project_path: str | None = None):
@@ -190,6 +202,38 @@ class ResponseParser:
             actions.append(action)
             used_ranges.append((match.start(), match.end()))
 
+        # 6. <read file="..."> — прочитать файл
+        for match in self.RE_READ_TAG.finditer(text):
+            if self._overlaps(match.start(), match.end(), used_ranges):
+                continue
+
+            file_path = match.group(1).strip()
+            action = ParsedAction(
+                action_type="read_file",
+                path=file_path,
+                raw_text=match.group(0),
+                line_start=match.start(),
+                line_end=match.end(),
+            )
+            actions.append(action)
+            used_ranges.append((match.start(), match.end()))
+
+        # 7. <mkdir path="..."> — создать директорию
+        for match in self.RE_MKDIR_TAG.finditer(text):
+            if self._overlaps(match.start(), match.end(), used_ranges):
+                continue
+
+            dir_path = match.group(1).strip()
+            action = ParsedAction(
+                action_type="create_directory",
+                path=dir_path,
+                raw_text=match.group(0),
+                line_start=match.start(),
+                line_end=match.end(),
+            )
+            actions.append(action)
+            used_ranges.append((match.start(), match.end()))
+
         # Строим чистый текст (убираем все инструкции)
         clean = self._remove_ranges(text, used_ranges)
 
@@ -271,6 +315,10 @@ class ActionExecutor:
             return await self._execute_command(action, websocket)
         elif action.action_type == "git_operation":
             return await self._git_operation(action, websocket)
+        elif action.action_type == "read_file":
+            return await self._read_file(action, websocket)
+        elif action.action_type == "create_directory":
+            return await self._create_directory(action, websocket)
         else:
             return {
                 "success": False,
@@ -599,6 +647,146 @@ class ActionExecutor:
             "action_type": "git_operation",
             "message": result_text,
         }
+
+    async def _read_file(
+        self, action: ParsedAction, websocket=None
+    ) -> dict:
+        """Прочитать файл и вернуть содержимое (max 30000 симв.)."""
+        if not self.project_path:
+            return {"success": False, "action_type": "read_file", "message": "Нет пути к проекту"}
+
+        rel_path = action.path
+        full_path = self._safe_resolve(rel_path)
+
+        if not full_path:
+            return {
+                "success": False,
+                "action_type": "read_file",
+                "message": f"Путь вне проекта: {rel_path}",
+                "path": rel_path,
+            }
+
+        try:
+            if not os.path.isfile(full_path):
+                return {
+                    "success": False,
+                    "action_type": "read_file",
+                    "message": f"Файл не найден: {rel_path}",
+                    "path": rel_path,
+                }
+
+            if os.path.getsize(full_path) > 5 * 1024 * 1024:
+                return {
+                    "success": False,
+                    "action_type": "read_file",
+                    "message": f"Файл слишком большой: {rel_path}",
+                    "path": rel_path,
+                }
+
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+
+            READ_MAX_CHARS = 30000
+            truncated = False
+            if len(content) > READ_MAX_CHARS:
+                content = content[:READ_MAX_CHARS]
+                truncated = True
+
+            logger.log(
+                f"parser: read_file {rel_path} ({len(content)} chars"
+                + (", обрезано" if truncated else "") + ")",
+                level="info", source="parser",
+            )
+
+            if websocket:
+                try:
+                    await websocket.send_json({
+                        "type": "tool_call",
+                        "tool": "read_file",
+                        "args": {"path": rel_path, "size": len(content), "truncated": truncated},
+                        "status": "done",
+                    })
+                except Exception:
+                    pass
+
+            result_msg = f"Файл {rel_path} прочитан ({len(content)} симв.)"
+            if truncated:
+                result_msg += " (обрезано до 30000 симв.)"
+
+            return {
+                "success": True,
+                "action_type": "read_file",
+                "message": result_msg,
+                "path": rel_path,
+                "content": content,
+            }
+
+        except Exception as e:
+            logger.log(
+                f"parser: read_file error: {e}",
+                level="error", source="parser",
+            )
+            return {
+                "success": False,
+                "action_type": "read_file",
+                "message": f"Ошибка чтения {rel_path}: {e}",
+                "path": rel_path,
+            }
+
+    async def _create_directory(
+        self, action: ParsedAction, websocket=None
+    ) -> dict:
+        """Создать директорию (и все промежуточные)."""
+        if not self.project_path:
+            return {"success": False, "action_type": "create_directory", "message": "Нет пути к проекту"}
+
+        rel_path = action.path
+        full_path = self._safe_resolve(rel_path)
+
+        if not full_path:
+            return {
+                "success": False,
+                "action_type": "create_directory",
+                "message": f"Путь вне проекта: {rel_path}",
+                "path": rel_path,
+            }
+
+        try:
+            os.makedirs(full_path, exist_ok=True)
+            logger.log(
+                f"parser: create_directory {rel_path}",
+                level="info", source="parser",
+            )
+
+            if websocket:
+                try:
+                    await websocket.send_json({
+                        "type": "tool_call",
+                        "tool": "create_directory",
+                        "args": {"path": rel_path},
+                        "status": "done",
+                    })
+                except Exception:
+                    pass
+
+            return {
+                "success": True,
+                "action_type": "create_directory",
+                "message": f"Директория {rel_path} создана",
+                "path": rel_path,
+            }
+
+        except Exception as e:
+            logger.log(
+                f"parser: create_directory error: {e}",
+                level="error", source="parser",
+            )
+            return {
+                "success": False,
+                "action_type": "create_directory",
+                "message": f"Ошибка создания директории {rel_path}: {e}",
+                "path": rel_path,
+            }
 
     def _safe_resolve(self, rel_path: str) -> str | None:
         """Безопасно разрешить путь."""

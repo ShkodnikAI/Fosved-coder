@@ -8,9 +8,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 
-from core.memory import init_db, save_message, clear_history, get_project, get_repo_map, git_push_with_token
+from core.memory import init_db, save_message, clear_history, get_project, get_repo_map, git_push_with_token, save_probed_models, get_probed_models, save_questionnaire
 from core.keys_manager import keys_manager
-from core.agent import handle_chat_message
+from core.agent import handle_chat_message, handle_hub_message
 from core.executor import CommandExecutor
 from core.ideas_injector import IdeasInjector
 from core.context_manager import ContextManager
@@ -93,6 +93,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"  [abacus] Фоновая загрузка: {e}")
     asyncio.create_task(_bg_load_abacus())
+
+    # Тихое зондирование моделей при старте (фоновая задача)
+    async def _background_probe():
+        try:
+            from core.agent import probe_models
+            results = await probe_models()
+            if results:
+                await save_probed_models(results)
+                print(f"  [startup] Probed {len(results)} models successfully")
+        except Exception as e:
+            print(f"  [startup] Probe failed: {e}")
+    asyncio.create_task(_background_probe())
 
     print(f"  Готово! Откройте приложение в браузере.\n")
     yield
@@ -209,6 +221,25 @@ async def websocket_chat(websocket: WebSocket):
                 current_mode = new_mode
                 logger.user_action(f"mode_change: {new_mode}", project_id=current_project_id)
                 await websocket.send_json({"type": "system", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}"})
+                continue
+
+            # Handle hub chat (главный экран — без контекста проекта)
+            if payload.get("type") == "hub_chat":
+                hub_prompt = payload.get("prompt", "")
+                hub_model = payload.get("model_id")
+                if hub_prompt:
+                    logger.user_action("hub_chat", details={"model": hub_model})
+                    await handle_hub_message(hub_prompt, websocket, model_id=hub_model)
+                continue
+
+            # Handle start_questionnaire (создание анкеты из UI)
+            if payload.get("type") == "start_questionnaire":
+                q_title = payload.get("title", "Новый проект")
+                q_id = await save_questionnaire({"title": q_title, "project_id": project_id})
+                await websocket.send_json({"type": "questionnaire_created", "id": q_id})
+                from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
+                questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {q_title}"
+                await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id)
                 continue
 
             # Handle refactor requests
@@ -470,6 +501,22 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         else:
             await websocket.send_json({"type": "system", "content": "Выберите проект для построения Repo Map."})
 
+    elif command == "/probe":
+        probed = await get_probed_models()
+        await websocket.send_json({"type": "probed_models", "models": probed})
+        if probed:
+            await websocket.send_json({"type": "system", "content": f"Зондировано моделей: {len(probed)}"})
+        else:
+            await websocket.send_json({"type": "system", "content": "Нет результатов зондирования. Попробуйте позже."})
+
+    elif command == "/questionnaire":
+        title = args.strip() or "Новый проект"
+        q_id = await save_questionnaire({"title": title, "project_id": project_id})
+        await websocket.send_json({"type": "questionnaire_created", "id": q_id})
+        from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
+        questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {title}"
+        await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id)
+
     elif command == "/help":
         help_text = (
             "Доступные команды:\n"
@@ -482,6 +529,8 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             "/test [--no-tests] — проверить код проекта (синтаксис, линт, тесты)\n"
             "/ideas <github_url> — проанализировать репозиторий\n"
             "/repo_map — показать структуру проекта\n"
+            "/probe — показать результаты зондирования моделей\n"
+            "/questionnaire [title] — начать опрос для создания проекта\n"
             "/clear — очистить историю чата\n"
             "/help — эта справка"
         )
