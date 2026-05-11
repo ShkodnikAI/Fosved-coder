@@ -506,10 +506,18 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             try:
                 response = await litellm.acompletion(**kwargs)
             except Exception as tool_err:
-                err_str = str(tool_err)
-                # If tools not supported, retry without tools
-                if "tools" in err_str.lower() or "tool use" in err_str.lower() or "function" in err_str.lower() or "parameter" in err_str.lower():
+                err_str = str(tool_err).lower()
+                # Only retry without tools if the error is SPECIFICALLY about tool calling
+                # Don't match generic words like "function" or "parameter" that appear in auth/401 errors
+                _tool_only_patterns = [
+                    "does not support tool", "tools are not supported",
+                    "tool use is not enabled", "tool_choice", "tool calling",
+                    "does not support function calling", "invalid tool",
+                    "unknown tool", "unsupported tool",
+                ]
+                if any(p in err_str for p in _tool_only_patterns):
                     print(f"  [agent] Tools not supported by {model}, retrying without tools")
+                    await _send_log(websocket, f"⚠️ {model} не поддерживает tools — продолжаю без инструментов", "warning")
                     use_tools = False
                     kwargs.pop("tools", None)
                     response = await litellm.acompletion(**kwargs)
@@ -778,7 +786,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         tried_count += 1
         print(f"  [agent] trying model #{i}: {model_to_try}")
 
-        await websocket.send_json({"type": "typing", "model": model_to_try})
+        # Send display name (not raw ID) to frontend
+        m_info = next((m for m in all_models if m["id"] == model_to_try), None)
+        display_model = m_info["name"] if m_info else model_to_try
+        await websocket.send_json({"type": "typing", "model": display_model})
 
         if i > 0:
             m_info = next((m for m in all_models if m["id"] == model_to_try), None)

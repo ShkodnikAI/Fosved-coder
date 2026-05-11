@@ -1152,7 +1152,7 @@ class KeysManager:
                 "provider": "openrouter",
                 "provider_name": "OpenRouter",
                 "type": "free",
-                "status": "valid" if or_key else "no_key",
+                "status": or_status if or_key else "no_key",
             })
 
         # 4. Кастомные модели (force connect)
