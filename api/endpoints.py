@@ -1749,52 +1749,8 @@ async def get_config():
 
 
 # ═══════════════════════════════════════════════════════════════
-# THREADS
+# THREADS — removed (threads deprecated, ChatThread table kept for DB compatibility)
 # ═══════════════════════════════════════════════════════════════
-
-class CreateThreadRequest(BaseModel):
-    project_id: int
-    title: str = "Новый поток"
-    parent_thread_id: int | None = None
-
-class RenameThreadRequest(BaseModel):
-    title: str
-
-@router.post("/threads")
-async def create_thread_endpoint(req: CreateThreadRequest):
-    from core.memory import create_thread
-    _log("CREATE_THREAD", source="api", project_id=req.project_id, details={"title": req.title})
-    result = await create_thread(req.project_id, req.title, req.parent_thread_id)
-    return result
-
-@router.get("/projects/{project_id}/threads")
-async def list_threads(project_id: int):
-    from core.memory import get_threads
-    _api("GET", f"/api/v1/projects/{project_id}/threads", project_id=project_id)
-    return await get_threads(project_id)
-
-@router.delete("/threads/{thread_id}")
-async def delete_thread_endpoint(thread_id: int):
-    from core.memory import delete_thread
-    _log("DELETE_THREAD", source="api", details={"thread_id": thread_id})
-    if await delete_thread(thread_id):
-        return {"success": True}
-    raise HTTPException(404, "Поток не найден")
-
-@router.get("/threads/{thread_id}/messages")
-async def get_thread_messages_endpoint(thread_id: int):
-    from core.memory import get_thread_messages
-    _log("GET_THREAD_MESSAGES", source="api", details={"thread_id": thread_id})
-    messages = await get_thread_messages(thread_id)
-    return {"messages": messages}
-
-@router.put("/threads/{thread_id}/rename")
-async def rename_thread_endpoint(thread_id: int, req: RenameThreadRequest):
-    from core.memory import rename_thread
-    _log("RENAME_THREAD", source="api", details={"thread_id": thread_id, "title": req.title})
-    if await rename_thread(thread_id, req.title):
-        return {"success": True, "title": req.title}
-    raise HTTPException(404, "Поток не найден")
 
 
 # ═══════════════════════════════════════════════════════════════

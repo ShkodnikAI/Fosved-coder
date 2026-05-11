@@ -757,17 +757,15 @@ async def set_system_setting(key: str, value: str):
 # ═══════════════════════════════════════════════════════════════
 
 async def save_message(project_id: int | None, role: str, content: str, thread_id: int | None = None):
-    """Save a chat message."""
+    """Save a chat message. thread_id is accepted for backward compatibility but ignored."""
     async with async_session() as session:
         async with session.begin():
-            session.add(ChatHistory(project_id=project_id, role=role, content=content, thread_id=thread_id))
+            session.add(ChatHistory(project_id=project_id, role=role, content=content, thread_id=None))
 
 async def get_history(project_id: int | None, limit: int = 50, thread_id: int | None = None) -> list[dict]:
-    """Get chat history for a project, optionally filtered by thread_id."""
+    """Get chat history for a project. thread_id is accepted for backward compatibility but ignored."""
     async with async_session() as session:
         query = select(ChatHistory).where(ChatHistory.project_id == project_id)
-        if thread_id is not None:
-            query = query.where(ChatHistory.thread_id == thread_id)
         result = await session.execute(
             query.order_by(ChatHistory.timestamp.asc()).limit(limit)
         )
@@ -815,81 +813,9 @@ async def clear_main_chat_history(days: int = 10) -> int:
                 return result.rowcount
 
 # ═══════════════════════════════════════════════════════════════
-# CHAT THREADS CRUD
+# CHAT THREADS — CRUD functions removed (threads deprecated)
+# ChatThread ORM class kept above for backward compatibility with existing DBs.
 # ═══════════════════════════════════════════════════════════════
-
-async def create_thread(project_id: int, title: str = "Новый поток", parent_id: int | None = None) -> dict:
-    """Create a new chat thread."""
-    async with async_session() as session:
-        async with session.begin():
-            thread = ChatThread(project_id=project_id, title=title, parent_id=parent_id)
-            session.add(thread)
-            await session.flush()
-            await session.refresh(thread)
-            return {"id": thread.id, "project_id": thread.project_id, "parent_id": thread.parent_id, "title": thread.title, "created_at": str(thread.created_at)}
-
-async def get_threads(project_id: int) -> list[dict]:
-    """Get all threads for a project."""
-    async with async_session() as session:
-        result = await session.execute(
-            select(ChatThread).where(ChatThread.project_id == project_id)
-            .order_by(ChatThread.created_at.desc())
-        )
-        return [
-            {"id": t.id, "project_id": t.project_id, "parent_id": t.parent_id, "title": t.title, "created_at": str(t.created_at)}
-            for t in result.scalars().all()
-        ]
-
-async def get_thread(thread_id: int) -> dict | None:
-    """Get a single thread by ID."""
-    async with async_session() as session:
-        result = await session.execute(
-            select(ChatThread).where(ChatThread.id == thread_id)
-        )
-        t = result.scalar_one_or_none()
-        if t:
-            return {"id": t.id, "project_id": t.project_id, "parent_id": t.parent_id, "title": t.title, "created_at": str(t.created_at)}
-        return None
-
-async def rename_thread(thread_id: int, title: str) -> bool:
-    """Rename a thread."""
-    async with async_session() as session:
-        async with session.begin():
-            result = await session.execute(
-                select(ChatThread).where(ChatThread.id == thread_id)
-            )
-            thread = result.scalar_one_or_none()
-            if thread:
-                thread.title = title
-                return True
-            return False
-
-async def delete_thread(thread_id: int) -> bool:
-    """Delete a thread and all its messages."""
-    async with async_session() as session:
-        async with session.begin():
-            # Удаляем все сообщения с этим thread_id
-            await session.execute(
-                delete(ChatHistory).where(ChatHistory.thread_id == thread_id)
-            )
-            # Удаляем сам поток
-            result = await session.execute(
-                select(ChatThread).where(ChatThread.id == thread_id)
-            )
-            thread = result.scalar_one_or_none()
-            if thread:
-                await session.delete(thread)
-                return True
-            return False
-
-async def get_thread_messages(thread_id: int, limit: int = 50) -> list[dict]:
-    """Get messages for a specific thread."""
-    async with async_session() as session:
-        result = await session.execute(
-            select(ChatHistory).where(ChatHistory.thread_id == thread_id)
-            .order_by(ChatHistory.timestamp.asc()).limit(limit)
-        )
-        return [{"role": m.role, "content": m.content, "timestamp": str(m.timestamp)} for m in result.scalars().all()]
 
 # ═══════════════════════════════════════════════════════════════
 # CONTEXT SNAPSHOTS CRUD
