@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import Text, select, delete, func, String, Boolean, Integer, Float, Index, and_, or_, desc, asc, text as sa_text
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.memory import Base, async_session, engine, IS_POSTGRES
