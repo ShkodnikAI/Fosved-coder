@@ -384,10 +384,7 @@
                         </div>
                     </div>
                 </div>
-                <!-- Дополнительные кнопки под инпутом -->
-                <div class="hub-input-extra">
-                    <button onclick="insertHubCommand('/probe ')" title="Зондировать модели">🔍 /probe</button>
-                </div>
+                <!-- Кнопки перенесены в нижнюю панель -->
             </div>
         </div>
 
@@ -510,14 +507,7 @@
                             </div>
                         </div>
                     </div>
-                    <!-- Дополнительные кнопки под инпутом -->
-                    <div class="project-input-bar">
-                        <button onclick="insertCommand('/terminal ')" title="Терминал">🛠 Терминал</button>
-                        <button onclick="insertCommand('/clear')" title="Очистить">🗑 /clear</button>
-                        <button onclick="insertCommand('/test')" title="Тест">🧪 /test</button>
-                        <button onclick="insertCommand('/repo_map')" title="Карта">🗺 /map</button>
-                        <button onclick="wsSend('/git_push')" title="Push">📤 Push</button>
-                    </div>
+                    <!-- Кнопки перенесены в нижнюю панель -->
                 </div>
             </div>
 
@@ -2365,6 +2355,7 @@ function renderBottomBar() {
             {l:'🔍 Search',a:"togglePanel('search')"},
             {l:'🔀 Git',a:"togglePanel('git')"},
             {l:'🛠 Terminal',a:"insertCommand('/terminal ')"},
+            {l:'🗑 Clear',a:"insertCommand('/clear')"},
             {l:'📊 Stats',a:"showStats()"},
             {l:'⚙️ Settings',a:"showSettings()"},
             {l:'❓ Help',a:"showHelp()"},
@@ -2379,6 +2370,7 @@ function renderBottomBar() {
         }
     } else {
         btns = [
+            {l:'🔍 Probe',a:"insertHubCommand('/probe ')"},
             {l:'📊 Stats',a:"showStats()"},
             {l:'⚙️ Settings',a:"showSettings()"},
             {l:'❓ Help',a:"showHelp()"},
