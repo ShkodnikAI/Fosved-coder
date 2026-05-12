@@ -517,11 +517,13 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
     if not api_key:
         logger.log(f"no_api_key: {model}", level="error", source="agent")
+        print(f"  [agent] ERROR: no_api_key for model={model}")
         await websocket.send_json({"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках."})
         await _send_log(websocket, f"❌ Нет API ключа для {model}", "error")
         return None
 
-    print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, thinking={is_thinking}, project={project_path}")
+    print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, thinking={is_thinking}, project={project_path}, api_base={'yes' if api_base else 'no'}")
+    print(f"  [agent] messages_count={len(messages)}, system_prompt_len={len(system_prompt)}")
     await _send_log(websocket, f"🧠 Модель: {model}", "info")
 
     # Extended Thinking: уведомить клиента и настроить параметры
@@ -680,7 +682,10 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
         except Exception as e:
             duration = (time.time() - start_time) * 1000
+            import traceback
             error_msg = str(e)
+            print(f"  [agent] stream_llm_response ERROR: model={model}, error={error_msg[:300]}")
+            print(f"  [agent] traceback: {traceback.format_exc()[-1500:]}")
             if "401" in error_msg:
                 error_msg = "Ошибка 401: Неверный API ключ."
             elif "429" in error_msg:
@@ -751,6 +756,7 @@ async def _route_with_priority(prompt: str, priority_models: list[str]) -> str |
 
 async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None):
     """Main entry point: get history, build context, stream response with tool calling and fallback."""
+    print(f"  [agent] handle_chat_message: prompt='{prompt[:80]}', project_id={project_id}, model_id={model_id}")
     history = await get_history(project_id)
 
     # Project context
@@ -906,6 +912,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             project_path=project_path, use_tools=True,
             _error_info=error_info
         )
+        print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, no_tools={error_info.get('no_tools')}, no_credits={error_info.get('no_credits')}")
         if error_info.get("no_credits") and model_provider:
             no_credits_providers.add(model_provider)
             await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
@@ -1027,6 +1034,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
     Нет контекста проекта, нет инструментов (read/write/execute).
     Только чат с ИИ + опросный лист + скиллы.
     """
+    print(f"  [agent] handle_hub_message: prompt='{prompt[:80]}', model_id={model_id}")
     from core.memory import get_history as get_hub_history
 
     # История с project_id=None — чат главного экрана
@@ -1051,9 +1059,11 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
             models_to_try.append(m["id"])
 
     if not models_to_try:
+        print(f"  [agent] hub: NO models available! all_models={len(all_models)}")
         await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         return
 
+    print(f"  [agent] hub: models_to_try={len(models_to_try)}, first={models_to_try[0] if models_to_try else 'none'}")
     ai_response = None
     tried_count = 0
     no_credits_providers = set()
@@ -1072,6 +1082,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
             continue
 
         tried_count += 1
+        print(f"  [agent] hub: trying #{i}: {model_to_try} (key={has_key}, local={is_local})")
         m_info = next((m for m in all_models if m["id"] == model_to_try), None)
         display_model = m_info["name"] if m_info else model_to_try
         await websocket.send_json({"type": "typing", "model": display_model})
@@ -1088,6 +1099,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
             use_tools=False,  # На главном экране инструментов НЕТ
             _error_info=error_info,
         )
+        print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
         if error_info.get("no_credits") and model_provider:
             no_credits_providers.add(model_provider)
         if ai_response is not None:

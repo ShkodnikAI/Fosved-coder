@@ -80,10 +80,15 @@ body {
     font-family: var(--font-ui);
     font-size: 13px;
     height: 100vh;
+    height: 100dvh; /* Dynamic viewport height — fixes tablet/mobile address bar */
     overflow: hidden;
     display: flex;
     flex-direction: column;
     line-height: 1.5;
+}
+/* Safari fallback for dvh */
+@supports not (height: 100dvh) {
+    body { height: -webkit-fill-available; }
 }
 
 /* Scrollbar */
@@ -124,6 +129,7 @@ body {
    ═══════════════════════════════════════════ */
 .header {
     height: var(--header-height);
+    flex-shrink: 0;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
     display: flex;
@@ -225,7 +231,7 @@ body {
    MAIN LAYOUT (3-panel)
    ═══════════════════════════════════════════ */
 .main-layout {
-    display: flex; flex: 1; overflow: hidden;
+    display: flex; flex: 1; overflow: hidden; min-height: 0;
 }
 
 /* ═══════════════════════════════════════════
@@ -478,7 +484,7 @@ body {
    CENTER AREA
    ═══════════════════════════════════════════ */
 .center-area {
-    flex: 1; min-width: 0; overflow: hidden;
+    flex: 1; min-width: 0; min-height: 0; overflow: hidden;
     display: flex; flex-direction: column;
     background: var(--bg-primary);
 }
@@ -825,6 +831,7 @@ pre:hover .code-btn-bar { opacity: 1; }
    ═══════════════════════════════════════════ */
 .bottom-bar {
     height: var(--bottom-bar-height);
+    flex-shrink: 0;
     background: var(--accent);
     display: flex; align-items: center;
     padding: 0 6px; gap: 2px; flex-shrink: 0;
@@ -862,6 +869,7 @@ pre:hover .code-btn-bar { opacity: 1; }
    ═══════════════════════════════════════════ */
 .status-bar {
     height: var(--status-bar-height);
+    flex-shrink: 0;
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     display: flex; align-items: center;
@@ -1121,8 +1129,18 @@ pre:hover .code-btn-bar { opacity: 1; }
     .right-panel { display: none; }
     .resize-handle { display: none; }
     .chat-area { padding: 12px; }
-    .input-area { padding: 8px 12px; }
+    .input-area { padding: 6px 10px; }
     .msg { max-width: 95%; }
+    /* Tablet: compact UI to fit on screen */
+    .input-wrapper textarea { min-height: 40px; font-size: 16px; /* Prevents iOS zoom on focus */ }
+    .input-wrapper { max-width: 100%; }
+    .header { height: 38px; }
+    .nav-btn { padding: 2px 8px; font-size: 11px; }
+    .header-logo { font-size: 10px; }
+    .status-bar { height: 22px; font-size: 11px; }
+    .bottom-bar { height: 30px; }
+    .btn-send { padding: 6px 14px; font-size: 13px; }
+    .btn-mic { font-size: 16px; }
 }
 
 /* Hidden utility */
