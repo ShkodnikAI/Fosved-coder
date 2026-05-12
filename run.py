@@ -16,6 +16,7 @@ from core.ideas_injector import IdeasInjector
 from core.context_manager import ContextManager
 from core.intelligent_router import intelligent_router
 from core.action_logger import get_logger
+from core.observation_manager import store_observation, assemble_context, generate_session_summary_async, ensure_observation_tables
 from api.endpoints import router as api_router
 
 logger = get_logger()
@@ -118,6 +119,13 @@ async def lifespan(app: FastAPI):
             print(f"  [startup] Probe failed: {e}")
     asyncio.create_task(_background_probe())
 
+    # Init observation/memory tables (claude-mem inspired)
+    try:
+        await ensure_observation_tables()
+        print(f"  [memory] Observation tables ready")
+    except Exception as e:
+        print(f"  [memory] Warning: {e}")
+
     print(f"  Готово! Откройте приложение в браузере.\n")
     yield
 
@@ -177,12 +185,25 @@ async def websocket_chat(websocket: WebSocket):
     repo_map = None
     current_mode = "manual"  # "manual" or "auto"
     model_id = None
+    ws_session_id = str(__import__('uuid').uuid4())  # Unique session ID for memory
     logger.log("websocket_connected", level="info", source="ws")
     # Задача 2: Отправить клиенту кэшированные результаты probing
     try:
         probed = await get_probed_models()
         if probed:
             await websocket.send_json({"type": "probed_models", "models": probed})
+    except Exception:
+        pass
+
+    # Inject memory context from previous sessions (claude-mem inspired)
+    try:
+        memory_ctx = await assemble_context(project_id=None, max_tokens=300)
+        if memory_ctx:
+            await websocket.send_json({
+                "type": "auto_log",
+                "content": f"🧠 Память загружена",
+                "level": "info",
+            })
     except Exception:
         pass
 
@@ -340,6 +361,14 @@ async def websocket_chat(websocket: WebSocket):
 
     except WebSocketDisconnect:
         logger.log("websocket_disconnected", level="info", source="ws", project_id=current_project_id)
+        # Generate session summary (background, non-blocking)
+        try:
+            import asyncio
+            asyncio.create_task(generate_session_summary_async(
+                ws_session_id, project_id=current_project_id
+            ))
+        except Exception:
+            pass
     except Exception as e:
         logger.log("websocket_error", level="error", source="ws", project_id=current_project_id, error=str(e))
 

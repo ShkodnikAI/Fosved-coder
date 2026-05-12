@@ -2766,3 +2766,93 @@ async def hub_chat_endpoint(req: HubChatRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# MEMORY / OBSERVATIONS (claude-mem inspired)
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/memory/stats")
+async def memory_stats(project_id: int | None = Query(None)):
+    """Статистика системы памяти."""
+    _api("GET", "/api/v1/memory/stats")
+    from core.observation_manager import get_memory_stats
+    return await get_memory_stats(project_id=project_id)
+
+
+@router.get("/memory/search")
+async def memory_search(
+    q: str = Query("", min_length=1),
+    project_id: int | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    type: str | None = Query(None),
+    hours: int | None = Query(None),
+):
+    """Поиск по наблюдениям (Layer 1: compact index)."""
+    _api("GET", "/api/v1/memory/search")
+    from core.observation_manager import search_observations
+    obs_types = [type] if type else None
+    results = await search_observations(
+        query=q, project_id=project_id, limit=limit,
+        obs_types=obs_types, hours=hours,
+    )
+    return {"results": results, "count": len(results)}
+
+
+@router.get("/memory/observations")
+async def memory_get_observations(
+    ids: str = Query("", description="Comma-separated observation IDs"),
+):
+    """Layer 3: полные данные для выбранных наблюдений."""
+    _api("GET", "/api/v1/memory/observations")
+    from core.observation_manager import get_observation_details
+    if not ids:
+        return {"observations": []}
+    try:
+        obs_ids = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid IDs format")
+    results = await get_observation_details(obs_ids)
+    return {"observations": results, "count": len(results)}
+
+
+@router.get("/memory/timeline")
+async def memory_timeline(
+    project_id: int | None = Query(None),
+    around_id: int | None = Query(None),
+    before_hours: int = Query(2),
+    after_hours: int = Query(2),
+    limit: int = Query(30, ge=1, le=100),
+):
+    """Layer 2: хронологический контекст вокруг наблюдения."""
+    _api("GET", "/api/v1/memory/timeline")
+    from core.observation_manager import get_recent_timeline
+    results = await get_recent_timeline(
+        project_id=project_id, around_obs_id=around_id,
+        before_hours=before_hours, after_hours=after_hours, limit=limit,
+    )
+    return {"timeline": results, "count": len(results)}
+
+
+@router.get("/memory/summaries")
+async def memory_summaries(
+    project_id: int | None = Query(None),
+    limit: int = Query(5, ge=1, le=20),
+):
+    """Последние резюме сессий."""
+    _api("GET", "/api/v1/memory/summaries")
+    from core.observation_manager import get_recent_summaries
+    results = await get_recent_summaries(project_id=project_id, limit=limit)
+    return {"summaries": results, "count": len(results)}
+
+
+@router.get("/memory/context")
+async def memory_context(
+    project_id: int | None = Query(None),
+    max_tokens: int = Query(500, ge=100, le=2000),
+):
+    """Собрать контекст из памяти для инъекции в промпт."""
+    _api("GET", "/api/v1/memory/context")
+    from core.observation_manager import assemble_context
+    context = await assemble_context(project_id=project_id, max_tokens=max_tokens)
+    return {"context": context, "tokens_estimate": len(context) // 3}
