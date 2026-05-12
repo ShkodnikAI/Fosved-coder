@@ -58,29 +58,30 @@ async def lifespan(app: FastAPI):
         if restored:
             print(f"  Ключи восстановлены из БД\n")
 
-    # Validate all API keys on startup
-    print("  Проверка API-ключей...")
-    results = await keys_manager.startup_validation()
-
-    # Sync keys to DB after validation (для персистентности)
-    await keys_manager.sync_to_db()
-    for pid, info in results.items():
-        if pid == "local" and isinstance(info, dict):
-            # info — dict of {model_id: {status, name}}
-            count = len(info)
-            print(f"    local: {count} локальных моделей")
-            continue
-        status_icon = {"valid": "+", "rate_limited": "!", "invalid": "x", "available": "*"}.get(info.get("status", "?"), "?")
-        model_count = len(info.get("models", []))
-        print(f"    [{status_icon}] {pid}: {info.get('status', '?')} ({model_count} моделей)")
-    gh = keys_manager.get_github_status()
-    if gh["has_token"]:
-        icon = "+" if gh["enabled"] else "o"
-        print(f"    [{icon}] GitHub: {'активен (' + gh['user'] + ')' if gh['enabled'] else 'отключён'}")
-    print("  Ключи проверены\n")
+    # Validate all API keys in BACKGROUND (не блокирует старт — WS сразу доступен)
+    async def _bg_validate_keys():
+        try:
+            print("  [bg] Проверка API-ключей...")
+            results = await keys_manager.startup_validation()
+            await keys_manager.sync_to_db()
+            for pid, info in results.items():
+                if pid == "local" and isinstance(info, dict):
+                    count = len(info)
+                    print(f"    [bg] local: {count} локальных моделей")
+                    continue
+                status_icon = {"valid": "+", "rate_limited": "!", "invalid": "x", "available": "*"}.get(info.get("status", "?"), "?")
+                model_count = len(info.get("models", []))
+                print(f"    [bg] [{status_icon}] {pid}: {info.get('status', '?')} ({model_count} моделей)")
+            gh = keys_manager.get_github_status()
+            if gh["has_token"]:
+                icon = "+" if gh["enabled"] else "o"
+                print(f"    [bg] [{icon}] GitHub: {'активен (' + gh['user'] + ')' if gh['enabled'] else 'отключён'}")
+            print("  [bg] Ключи проверены")
+        except Exception as e:
+            print(f"  [bg] Key validation error: {e}")
+    asyncio.create_task(_bg_validate_keys())
 
     # Abacus.AI: загрузка моделей в фоне (не блокирует старт)
-    import asyncio
     async def _bg_load_abacus():
         try:
             abacus_cfg = keys_manager.providers.get("abacus", {})

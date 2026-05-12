@@ -83,6 +83,27 @@ PROVIDER_DEFS = {
             "moonshot-v1-8k",
         ],
     },
+    "deepseek": {
+        "name": "DeepSeek",
+        "litellm_prefix": "deepseek",
+        "api_base": "https://api.deepseek.com",
+        "suggested_models": [
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
+    },
+    "qwen": {
+        "name": "Qwen (Alibaba)",
+        "litellm_prefix": "openai",
+        "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "suggested_models": [
+            "qwen3-235b-a22b",
+            "qwen3-coder-plus",
+            "qwen-max",
+            "qwen-plus",
+        ],
+        "is_custom": True,
+    },
     "zai": {
         "name": "Z.AI (GLM)",
         "litellm_prefix": "openai",
@@ -205,6 +226,8 @@ ENV_KEY_MAP = {
     "GEMINI_API_KEY": "gemini",
     "GOOGLE_API_KEY": "gemini",
     "MOONSHOT_API_KEY": "kimi",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "QWEN_API_KEY": "qwen",
     "ZAI_API_KEY": "zai",
     "ABACUS_API_KEY": "abacus",
 }
@@ -980,27 +1003,25 @@ class KeysManager:
 
     async def startup_validation(self) -> dict:
         """
-        Валидация всех сохранённых ключей при запуске.
+        Валидация всех сохранённых ключей при запуске (параллельно).
         Возвращает {provider_id: {status, models}, ...}
         """
         results = {}
 
-        for provider_id, config in list(self.providers.items()):
+        async def _validate_one(provider_id, config):
+            """Validate a single provider — returns (pid, result_dict)."""
             api_key = config.get("api_key", "")
             if not api_key:
                 self.providers[provider_id]["status"] = "invalid"
-                results[provider_id] = {"status": "invalid", "models": config.get("models", [])}
-                continue
+                return provider_id, {"status": "invalid", "models": config.get("models", [])}
 
             test_model = config["models"][0] if config.get("models") else None
             if not test_model:
-                results[provider_id] = {"status": "invalid", "models": []}
-                continue
+                return provider_id, {"status": "invalid", "models": []}
 
             validation = await self.validate_key(provider_id, api_key, test_model)
 
             # Смягчение: при startup не убиваем ключи за временные ошибки
-            # (то же что в add_key — но startup_validation этого не делала)
             if validation["status"] == "invalid":
                 err_lower = validation.get("error", "").lower()
                 if ("не удалось подключиться" in err_lower or "connection" in err_lower
@@ -1010,11 +1031,22 @@ class KeysManager:
                           or "unauthorized" in err_lower
                           or "401" in err_lower
                           or "authentication" in err_lower):
-                    # Неизвестная ошибка (не auth) — не помечаем как invalid
                     validation["status"] = "rate_limited"
 
             self.providers[provider_id]["status"] = validation["status"]
-            results[provider_id] = {"status": validation["status"], "models": config.get("models", [])}
+            return provider_id, {"status": validation["status"], "models": config.get("models", [])}
+
+        # Параллельная валидация всех провайдеров (вместо последовательной)
+        tasks = []
+        for provider_id, config in list(self.providers.items()):
+            tasks.append(_validate_one(provider_id, config))
+        if tasks:
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in task_results:
+                if isinstance(r, Exception):
+                    continue
+                pid, info = r
+                results[pid] = info
 
         # Проверяем локальные модели
         local_results = {}

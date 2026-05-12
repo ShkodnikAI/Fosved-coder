@@ -2021,7 +2021,7 @@ async function loadServerLogs(filter) {
 // НИЖНЯЯ ПАНЕЛЬ
 // ═══════════════════════════════════════════════════════
 function renderBottomBar() {
-    const bar = document.getElementById('bottom-bar");
+    const bar = document.getElementById('bottom-bar');
     const p = currentProjectId ? allProjects.find(x=>x.id===currentProjectId) : null;
     const ma = workMode==='auto'?' auto-active':'';
     const mm = workMode==='manual'?' active':'';
@@ -2389,6 +2389,14 @@ renderSkills();
 renderBottomBar();
 updateStatusBar();
 wsConnect();
+// Safety timeout: force-hide loading screen if init takes too long (server slow start, network issues)
+setTimeout(() => {
+    const el = document.getElementById('loading-screen');
+    if (el && el.style.display !== 'none') {
+        console.warn('[init] Loading timeout — forcing hide');
+        hideLoadingScreen();
+    }
+}, 15000);
 </script>
 </body>
 </html>
