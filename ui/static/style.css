@@ -385,10 +385,13 @@ body {
    RESIZE HANDLE
    ═══════════════════════════════════════════ */
 .resize-handle {
-    width: 4px; cursor: col-resize; background: var(--border);
+    width: 6px; cursor: col-resize; background: var(--border);
     flex-shrink: 0; position: relative; transition: background 0.15s; z-index: 10;
 }
 .resize-handle:hover, .resize-handle.active { background: var(--accent); }
+@media (hover: none) {
+    .resize-handle { width: 12px; }
+}
 
 /* ═══════════════════════════════════════════
    CENTER AREA

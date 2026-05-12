@@ -147,6 +147,111 @@
         transition: all 0.15s;
     }
     .project-input-bar button:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+    /* ─── Левая панель: разделённый layout (проекты сверху, модели снизу) ─── */
+    .hub-sidebar {
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    .hub-projects-section {
+        flex-shrink: 0;
+        max-height: 45%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-bottom: none;
+    }
+    .hub-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        cursor: default;
+    }
+    .hub-section-header span {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .hub-section-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px;
+    }
+    .hub-models-count {
+        font-size: 10px;
+        color: var(--green);
+        font-weight: 700;
+        font-family: var(--font-mono);
+    }
+    .hub-section-divider {
+        height: 1px;
+        background: var(--accent);
+        opacity: 0.3;
+        flex-shrink: 0;
+        margin: 0 8px;
+    }
+    .hub-models-section {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    /* ─── Кнопка ручного приоритета на модели ─── */
+    .model-priority-btn {
+        width: 20px; height: 20px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        color: var(--text-dim);
+        border-radius: var(--radius-sm);
+        font-size: 10px;
+        font-weight: 700;
+        font-family: var(--font-mono);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        transition: all 0.15s;
+        padding: 0;
+    }
+    .model-priority-btn:hover {
+        background: var(--accent);
+        color: #000;
+        border-color: var(--accent);
+    }
+    .model-priority-btn.active {
+        background: var(--green-dim);
+        color: var(--green);
+        border-color: var(--green);
+    }
+    .model-card-with-priority {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 6px 8px;
+        margin-bottom: 4px;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .model-card-with-priority:hover {
+        border-color: var(--border-light);
+        background: var(--bg-hover);
+    }
+    .model-card-with-priority.active {
+        border-color: var(--accent);
+        background: rgba(200,169,126,0.08);
+    }
+    .model-card-with-priority .model-card-info { flex: 1; min-width: 0; }
     </style>
 </head>
 <body>
@@ -210,42 +315,36 @@
      ═══════════════════════════════════════════════════════ -->
 <div class="screen-main active" id="screen-main">
     <div class="main-layout">
-        <!-- ЛЕВАЯ ПАНЕЛЬ: Модели + индикатор зондирования -->
+        <!-- ЛЕВАЯ ПАНЕЛЬ: Проекты (сверху) + Модели/опрос (снизу) -->
         <div class="left-panel hub-sidebar" id="hub-left-panel">
-            <div class="panel-tabs">
-                <div class="panel-tab active" data-tab="hub-models" onclick="switchHubTab('hub-models')">
-                    <span class="tab-icon">🤖</span>Модели
-                </div>
-                <div class="panel-tab" data-tab="hub-projects" onclick="switchHubTab('hub-projects')">
-                    <span class="tab-icon">📁</span>Проекты
-                </div>
-            </div>
-            <div class="tab-content">
-                <!-- Вкладка: Модели (на главном экране) -->
-                <div class="tab-pane active" id="tab-hub-models">
-                    <div class="panel-search">
-                        <input type="text" id="hub-model-search" placeholder="Поиск моделей..." oninput="filterModels(this.value)">
-                    </div>
-                    <div class="panel-list" id="hub-models-list">
-                        <div class="panel-list-empty">Загрузка...</div>
-                    </div>
-                    <button class="add-btn" onclick="showAddLocalModelModal()">+ Локальная модель</button>
-                    <button class="add-btn" onclick="showAddCustomModelModal()">+ Кастомная модель</button>
-                    <!-- Индикатор зондирования -->
-                    <div class="probed-indicator" id="probed-indicator" style="display:none;">
-                        <div class="probed-count" id="probed-count">0/0</div>
-                        <div class="probed-label">Зондировано моделей</div>
-                        <div class="probed-bar"><div class="probed-bar-fill" id="probed-bar-fill" style="width:0%"></div></div>
-                    </div>
-                </div>
-                <!-- Вкладка: Проекты (быстрый доступ с главного экрана) -->
-                <div class="tab-pane" id="tab-hub-projects">
-                    <div class="panel-list" id="hub-project-list">
-                        <div class="panel-list-empty">Нет проектов</div>
-                    </div>
-                    <button class="add-btn" onclick="openProjectModal()">+ Новый проект</button>
-                </div>
-            </div>
+    <!-- Секция проектов (верхняя часть левой панели) -->
+    <div class="hub-projects-section">
+        <div class="hub-section-header">
+            <span>📁 Проекты</span>
+        </div>
+        <div class="hub-section-list" id="hub-project-list">
+            <div class="panel-list-empty">Нет проектов</div>
+        </div>
+        <button class="add-btn" onclick="openProjectModal()">+ Новый проект</button>
+    </div>
+    <!-- Разделитель -->
+    <div class="hub-section-divider"></div>
+    <!-- Секция моделей + опрос (нижняя часть) -->
+    <div class="hub-models-section">
+        <div class="hub-section-header">
+            <span>🤖 Модели</span>
+            <span class="hub-models-count" id="hub-models-count"></span>
+        </div>
+        <div class="hub-section-list" id="hub-models-list">
+            <div class="panel-list-empty">Загрузка...</div>
+        </div>
+        <!-- Индикатор зондирования -->
+        <div class="probed-indicator" id="probed-indicator" style="display:none;">
+            <div class="probed-count" id="probed-count">0/0</div>
+            <div class="probed-label">Зондировано моделей</div>
+            <div class="probed-bar"><div class="probed-bar-fill" id="probed-bar-fill" style="width:0%"></div></div>
+        </div>
+    </div>
         </div>
 
         <!-- Ручка изменения размера (левая) -->
@@ -665,6 +764,8 @@ let lastHubSentMessage = null;
 let lastHubSentPayload = null;
 let autoModeRunning = false;
 let priorityModels = [];
+// Восстановить приоритеты из localStorage
+try { const saved = localStorage.getItem('fosved-priority-models'); if (saved) priorityModels = JSON.parse(saved); } catch(e) {}
 let currentLogFilter = "all";
 let autoLogCount = 0;
 let autoLogPanelVisible = true;
@@ -775,12 +876,6 @@ function switchScreen(screen) {
 // ПЕРЕКЛЮЧЕНИЕ ТАБОВ В ПАНЕЛЯХ
 // ═══════════════════════════════════════════════════════
 
-/** Табы левой панели главного экрана */
-function switchHubTab(tab) {
-    document.querySelectorAll('#hub-left-panel .panel-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
-    document.querySelectorAll('#hub-left-panel .tab-pane').forEach(el => el.classList.toggle('active', el.id === 'tab-' + tab));
-}
-
 /** Табы левой панели проектного экрана */
 function switchProjTab(tab) {
     document.querySelectorAll('#project-left-panel .panel-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
@@ -809,9 +904,31 @@ function setupResize(handleId, panelId, storageKey, minW, maxW) {
     let dragging = false, startX = 0, startW = 0;
     const saved = localStorage.getItem(storageKey);
     if (saved) { const w = parseInt(saved); if (w >= minW && w <= maxW) panel.style.width = w + 'px'; }
-    handle.addEventListener("mousedown", e => { e.preventDefault(); dragging = true; startX = e.clientX; startW = panel.offsetWidth; handle.classList.add("active"); document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; });
-    document.addEventListener("mousemove", e => { if (!dragging) return; const dx = e.clientX - startX; const isRight = handleId.includes('right'); const newW = isRight ? Math.min(Math.max(startW - dx, minW), maxW) : Math.min(Math.max(startW + dx, minW), maxW); panel.style.width = newW + 'px'; });
-    document.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; handle.classList.remove("active"); document.body.style.cursor = ""; document.body.style.userSelect = ""; localStorage.setItem(storageKey, panel.offsetWidth + 'px'); });
+
+    function _startDrag(x) { dragging = true; startX = x; startW = panel.offsetWidth; handle.classList.add("active"); document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; }
+    function _doDrag(x) {
+        if (!dragging) return;
+        const dx = x - startX;
+        const isRight = handleId.includes('right');
+        const newW = isRight ? Math.min(Math.max(startW - dx, minW), maxW) : Math.min(Math.max(startW + dx, minW), maxW);
+        panel.style.width = newW + 'px';
+    }
+    function _endDrag() {
+        if (!dragging) return;
+        dragging = false; handle.classList.remove("active");
+        document.body.style.cursor = ""; document.body.style.userSelect = "";
+        localStorage.setItem(storageKey, panel.offsetWidth + 'px');
+    }
+
+    handle.addEventListener("mousedown", e => { e.preventDefault(); _startDrag(e.clientX); });
+    document.addEventListener("mousemove", e => { _doDrag(e.clientX); });
+    document.addEventListener("mouseup", () => { _endDrag(); });
+
+    // Touch support (mobile/tablet)
+    handle.addEventListener("touchstart", e => { e.preventDefault(); const t = e.touches[0]; _startDrag(t.clientX); }, { passive: false });
+    document.addEventListener("touchmove", e => { if (!dragging) return; const t = e.touches[0]; _doDrag(t.clientX); }, { passive: true });
+    document.addEventListener("touchend", () => { _endDrag(); });
+
     handle.addEventListener("dblclick", () => { panel.style.width = ''; localStorage.removeItem(storageKey); });
 }
 // Инициализация ручек для обоих экранов
@@ -1133,7 +1250,7 @@ function sendHubMessage() {
     addMessageTo("user", displayText, hubChatBox);
     setHubWaitingAI(true);
     // Отправляем как hub_chat
-    let payload = { type: "hub_chat", prompt: text, model: activeModelId };
+    let payload = { type: "hub_chat", prompt: text, model_id: activeModelId };
     if (priorityModels.length) payload.priority_models = priorityModels;
     if (hubAttachedFile) payload.file_content = hubAttachedFile.content;
     wsSend(payload);
@@ -1152,7 +1269,7 @@ function retryHubMessage() {
     if (!activeModelId) return;
     addMessageTo("user", "🔄 [Повтор] " + (lastHubSentMessage||''), hubChatBox);
     setHubWaitingAI(true);
-    let payload = { ...lastHubSentPayload, model: activeModelId };
+    let payload = { ...lastHubSentPayload, model_id: activeModelId };
     if (priorityModels.length) payload.priority_models = priorityModels;
     wsSend(payload);
 }
@@ -1563,19 +1680,22 @@ function buildModelCard(m, type) {
     const isActive = m.id === activeModelId;
     const avColor = getAvatarColor(type);
     const initials = getModelInitials(m.name || m.provider_name || '??');
-    let cls = 'model-card';
-    if (isActive) cls += ' active';
     const sub = m.provider_name ? escapeHtml(m.provider_name) + (m.category?' · '+escapeHtml(m.category):'') : '';
-    const actionLink = (!m.status||m.status==='not_configured') ? '<span class="model-action-link" onclick="event.stopPropagation();showKeysModal()">Настроить →</span>' : '';
     const thinkTag = m.thinking ? '<span class="type-tag thinking">thinking</span>' : '';
-    return `<div class="${cls}" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name||'').toLowerCase()}" onclick="selectModel('${escapeHtml(m.id)}')" oncontextmenu="event.preventDefault();toggleModelPriority('${escapeHtml(m.id)}')">
+    const pIdx = priorityModels.indexOf(m.id);
+    const pLabel = pIdx >= 0 ? (pIdx + 1) : '';
+    const pActive = pIdx >= 0 ? ' active' : '';
+    const statusOk = m.status==='valid'||m.status==='rate_limited'||m.status==='available';
+
+    return `<div class="model-card-with-priority${isActive?' active':''}" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name||'').toLowerCase()}" onclick="selectModel('${escapeHtml(m.id)}')" oncontextmenu="event.preventDefault();toggleModelPriority('${escapeHtml(m.id)}')">
+        <div class="model-priority-btn${pActive}" onclick="event.stopPropagation();cycleModelPriority('${escapeHtml(m.id)}')" title="Приоритет: ${pLabel||'нет'}">${pLabel||'–'}</div>
         <div class="model-card-avatar" style="background:${avColor}">${initials}</div>
         <div class="model-card-info">
             <div class="model-card-name">${escapeHtml(m.name)}</div>
             ${sub?'<div class="model-card-sub">'+sub+'</div>':''}
-            ${getTagHtml(type)} ${thinkTag} ${actionLink}
+            ${getTagHtml(type)} ${thinkTag}
         </div>
-        ${getStatusBadge(m)}
+        ${statusOk ? '' : '<span class="model-action-link" onclick="event.stopPropagation();showKeysModal()">→</span>'}
     </div>`;
 }
 
@@ -1585,20 +1705,31 @@ function renderModels() {
             const el = document.getElementById(id);
             if (el) el.innerHTML = '<div class="panel-list-empty">Нет моделей</div>';
         });
+        const mc = document.getElementById('hub-models-count');
+        if (mc) mc.textContent = '';
         updateStatusBar();
         return;
     }
-    const abacus = allModels.filter(m=>m.provider==='abacus'&&(m.status==='valid'||m.status==='rate_limited'));
-    const paidValid = allModels.filter(m=>m.type==="paid"&&(m.status==='valid'||m.status==='rate_limited')&&m.provider!=='abacus');
-    const free = allModels.filter(m=>m.type==='free');
-    const local = allModels.filter(m=>m.type==='local');
-    const custom = allModels.filter(m=>m.type==='custom');
+    const usable = allModels.filter(m => m.status==='valid'||m.status==='rate_limited'||m.status==='available');
+    const mc = document.getElementById('hub-models-count');
+    if (mc) mc.textContent = usable.length ? usable.length + '/' + allModels.length : '';
+
+    // Сортировка: приоритетные первыми, потом по имени
+    const sorted = [...allModels].sort((a, b) => {
+        const pa = priorityModels.indexOf(a.id);
+        const pb = priorityModels.indexOf(b.id);
+        if (pa >= 0 && pb < 0) return -1;
+        if (pb >= 0 && pa < 0) return 1;
+        if (pa >= 0 && pb >= 0) return pa - pb;
+        return (a.name||'').localeCompare(b.name||'');
+    });
+
+    const abacus = sorted.filter(m=>m.provider==='abacus'&&(m.status==='valid'||m.status==='rate_limited'));
+    const paidValid = sorted.filter(m=>m.type==="paid"&&(m.status==='valid'||m.status==='rate_limited')&&m.provider!=='abacus');
+    const free = sorted.filter(m=>m.type==='free');
+    const local = sorted.filter(m=>m.type==='local');
+    const custom = sorted.filter(m=>m.type==='custom');
     let html = '';
-    if (abacus.length) {
-        html += '<div class="provider-group"><div class="provider-header"><span class="status-icon ok">+</span> ABACUS.AI</div>';
-        abacus.forEach(m => { html += buildModelCard(m,'abacus'); });
-        html += '</div>';
-    }
     if (paidValid.length) {
         html += '<div class="provider-group"><div class="provider-header"><span class="status-icon ok">+</span> Платные</div>';
         paidValid.forEach(m => { html += buildModelCard(m,'paid'); });
@@ -1607,6 +1738,11 @@ function renderModels() {
     if (free.length) {
         html += '<div class="provider-group"><div class="provider-header"><span class="status-icon ok">+</span> Бесплатные</div>';
         free.forEach(m => { html += buildModelCard(m,'free'); });
+        html += '</div>';
+    }
+    if (abacus.length) {
+        html += '<div class="provider-group"><div class="provider-header"><span class="status-icon ok">+</span> ABACUS.AI</div>';
+        abacus.forEach(m => { html += buildModelCard(m,'abacus'); });
         html += '</div>';
     }
     if (local.length || custom.length) {
@@ -1626,15 +1762,29 @@ function renderModels() {
 
 function filterModels(q) {
     q = q.toLowerCase();
-    document.querySelectorAll('#hub-models-list .model-card').forEach(el => {
+    document.querySelectorAll('#hub-models-list .model-card-with-priority').forEach(el => {
         el.style.display = el.dataset.name.includes(q) ? '' : 'none';
     });
 }
 function filterProjModels(q) {
     q = q.toLowerCase();
-    document.querySelectorAll('#proj-models-list .model-card').forEach(el => {
+    document.querySelectorAll('#proj-models-list .model-card-with-priority').forEach(el => {
         el.style.display = el.dataset.name.includes(q) ? '' : 'none';
     });
+}
+
+/** Циклически переключить приоритет модели: нет → 1 → 2 → ... → снять */
+function cycleModelPriority(id) {
+    const idx = priorityModels.indexOf(id);
+    if (idx >= 0) {
+        priorityModels.splice(idx, 1);
+    } else {
+        priorityModels.push(id);
+    }
+    renderModels();
+    updateStatusBar();
+    // Сохранить приоритеты
+    try { localStorage.setItem('fosved-priority-models', JSON.stringify(priorityModels)); } catch(e) {}
 }
 
 async function loadModels() {
