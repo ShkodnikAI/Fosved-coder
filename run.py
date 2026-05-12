@@ -245,205 +245,221 @@ async def websocket_chat(websocket: WebSocket):
                     raise WebSocketDisconnect()
                 continue
 
-            if len(data) > WS_MAX_MESSAGE_BYTES:
-                await safe_ws_send(websocket, {"type": "error", "content": f"Сообщение превышает лимит {WS_MAX_MESSAGE_BYTES // (1024 * 1024)} MB"})
-                continue
-
-            # Handle slash commands
-            if data.startswith("/"):
-                logger.log(f"command: {data[:100]}", level="info", source="ws", project_id=current_project_id)
-                try:
-                    await handle_command(data, current_project_id, websocket, model_id)
-                except Exception as cmd_err:
-                    err_msg = str(cmd_err)[:300]
-                    logger.log("command_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
-                    try:
-                        await safe_ws_send(websocket, {"type": "command_result", "content": f"Ошибка: {err_msg}"})
-                    except Exception:
-                        pass
-                continue
-
-            # Parse JSON payload (chat message with model/priority info)
-            import json
             try:
-                payload = json.loads(data)
-                prompt = payload.get("prompt", data)
-                model_id = payload.get("model")
-                priority = payload.get("priority_models", [])
-                mode = payload.get("mode", current_mode)
-                # Sync project_id from client (critical: keeps project context)
-                client_project_id = payload.get("project_id")
-                if client_project_id is not None:
-                    current_project_id = client_project_id
-            except (json.JSONDecodeError, TypeError):
-                prompt = data
-                model_id = None
-                priority = []
-                payload = {}
+                # ── All message processing is inside this try/except ──
+                # so NO exception can kill the WS handler loop
 
-            # Log incoming ws message
-            logger.ws_message("in", payload, project_id=current_project_id)
+                if len(data) > WS_MAX_MESSAGE_BYTES:
+                    await safe_ws_send(websocket, {"type": "error", "content": f"Сообщение превышает лимит {WS_MAX_MESSAGE_BYTES // (1024 * 1024)} MB"})
+                    continue
 
-            # Handle heartbeat ping
-            if payload.get("type") == "ping":
-                await safe_ws_send(websocket, {"type": "pong"})
-                continue
-
-            # Handle mode change
-            if payload.get("type") == "mode_change":
-                new_mode = payload.get("mode", "manual")
-                current_mode = new_mode
-                logger.user_action(f"mode_change: {new_mode}", project_id=current_project_id)
-                await safe_ws_send(websocket, {"type": "auto_log", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}", "level": "info"})
-                continue
-
-            # Handle stop_generation — abort current LLM call
-            if payload.get("type") == "stop_generation":
-                ws_cancelled = True
-                logger.user_action("stop_generation", project_id=current_project_id)
-                await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
-                continue
-
-            # Handle hub chat (главный экран — без контекста проекта)
-            if payload.get("type") == "hub_chat":
-                hub_prompt = payload.get("prompt", "")
-                hub_model = payload.get("model_id")
-                if hub_prompt:
-                    logger.user_action("hub_chat", details={"model": hub_model})
+                # Handle slash commands
+                if data.startswith("/"):
+                    logger.log(f"command: {data[:100]}", level="info", source="ws", project_id=current_project_id)
                     try:
-                        await handle_hub_message(hub_prompt, websocket, model_id=hub_model, _cancel_check=lambda: ws_cancelled)
+                        await handle_command(data, current_project_id, websocket, model_id)
+                    except Exception as cmd_err:
+                        err_msg = str(cmd_err)[:300]
+                        logger.log("command_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
+                        try:
+                            await safe_ws_send(websocket, {"type": "command_result", "content": f"Ошибка: {err_msg}"})
+                        except Exception:
+                            pass
+                    continue
+
+                # Parse JSON payload (chat message with model/priority info)
+                import json
+                try:
+                    payload = json.loads(data)
+                    prompt = payload.get("prompt", data)
+                    model_id = payload.get("model")
+                    priority = payload.get("priority_models", [])
+                    mode = payload.get("mode", current_mode)
+                    # Sync project_id from client (critical: keeps project context)
+                    client_project_id = payload.get("project_id")
+                    if client_project_id is not None:
+                        current_project_id = client_project_id
+                except (json.JSONDecodeError, TypeError):
+                    prompt = data
+                    model_id = None
+                    priority = []
+                    payload = {}
+
+                # Log incoming ws message
+                logger.ws_message("in", payload, project_id=current_project_id)
+
+                # Handle heartbeat ping
+                if payload.get("type") == "ping":
+                    await safe_ws_send(websocket, {"type": "pong"})
+                    continue
+
+                # Handle mode change
+                if payload.get("type") == "mode_change":
+                    new_mode = payload.get("mode", "manual")
+                    current_mode = new_mode
+                    logger.user_action(f"mode_change: {new_mode}", project_id=current_project_id)
+                    await safe_ws_send(websocket, {"type": "auto_log", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}", "level": "info"})
+                    continue
+
+                # Handle stop_generation — abort current LLM call
+                if payload.get("type") == "stop_generation":
+                    ws_cancelled = True
+                    logger.user_action("stop_generation", project_id=current_project_id)
+                    await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
+                    continue
+
+                # Handle hub chat (главный экран — без контекста проекта)
+                if payload.get("type") == "hub_chat":
+                    hub_prompt = payload.get("prompt", "")
+                    hub_model = payload.get("model_id")
+                    if hub_prompt:
+                        logger.user_action("hub_chat", details={"model": hub_model})
+                        try:
+                            await handle_hub_message(hub_prompt, websocket, model_id=hub_model, _cancel_check=lambda: ws_cancelled)
+                        except Exception as chat_err:
+                            import traceback
+                            err_msg = str(chat_err)[:300]
+                            logger.log("hub_chat_error", level="error", source="ws", error=err_msg)
+                            try:
+                                await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка модели: {err_msg}"})
+                            except Exception:
+                                pass
+                    continue
+
+                # Handle start_questionnaire (создание анкеты из UI)
+                if payload.get("type") == "start_questionnaire":
+                    q_title = payload.get("title", "Новый проект")
+                    q_id = await save_questionnaire({"title": q_title, "project_id": project_id})
+                    await safe_ws_send(websocket, {"type": "questionnaire_created", "id": q_id})
+                    from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
+                    questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {q_title}"
+                    try:
+                        await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
+                    except Exception as q_err:
+                        err_msg = str(q_err)[:300]
+                        logger.log("questionnaire_error", level="error", source="ws", error=err_msg)
+                        try:
+                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка анкетирования: {err_msg}"})
+                        except Exception:
+                            pass
+                    continue
+
+                # Handle refactor requests
+                if payload.get("type") == "refactor":
+                    refactor_code = payload.get("code", "")
+                    refactor_type = payload.get("refactor_type", "optimize")
+                    instructions = payload.get("instructions", "")
+                    type_prompts = {
+                        "optimize": "Оптимизируй этот код для лучшей производительности",
+                        "clean": "Очисти и отформатируй этот код",
+                        "modernize": "Модернизируй этот код, используя современные возможности Python 3.10+",
+                        "simplify": "Упрости логику этого кода",
+                        "document": "Добавь полные docstrings и комментарии к этому коду",
+                        "type_hints": "Добавь аннотации типов ко всем функциям и переменным",
+                        "error_handling": "Улучши обработку ошибок в этом коде",
+                    }
+                    refactor_prompt = f"""{type_prompts.get(refactor_type, 'Рефактори этот код')}.
+    {'Дополнительные инструкции: ' + instructions if instructions else ''}
+    Верни ТОЛЬКО улучшенный код без пояснений, в code block.
+
+    Код для рефакторинга:
+    ```
+    {refactor_code}
+    ```"""
+                    try:
+                        await handle_chat_message(refactor_prompt, current_project_id, repo_map, websocket, _cancel_check=lambda: ws_cancelled)
+                    except Exception as ref_err:
+                        err_msg = str(ref_err)[:300]
+                        logger.log("refactor_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
+                        try:
+                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка рефакторинга: {err_msg}"})
+                        except Exception:
+                            pass
+                    continue
+
+                # Build project context (Repo Map)
+                if current_project_id:
+                    project = await get_project(current_project_id)
+                    if project:
+                        # Override priority models from UI if provided
+                        if priority:
+                            from core.memory import update_project_models
+                            await update_project_models(current_project_id, priority)
+                            try:
+                                logger.log("priority_models_updated", level="debug", source="ws", project_id=current_project_id, details={"models": priority[:5]})
+                            except Exception:
+                                pass
+
+                        cached_map = await get_repo_map(current_project_id)
+                        if cached_map:
+                            repo_map = cached_map["content"]
+                        else:
+                            repo_map = await context_manager.build_repo_map(
+                                project["path"], current_project_id
+                            )
+
+                # Задача 5: Intelligent Router — выбрать модель если не указана
+                if not model_id:
+                    try:
+                        from core.keys_manager import keys_manager
+                        all_models = keys_manager.get_all_models()
+                        route_result = intelligent_router.select_model(prompt, all_models)
+                        if route_result.get("model_id") and route_result.get("overridden"):
+                            model_id = route_result["model_id"]
+                            logger.log("intelligent_router_selected", level="info", source="ws",
+                                       details={"model": model_id, "complexity": route_result.get("complexity"),
+                                                "reason": route_result.get("reason", "")[:200]})
+                            await safe_ws_send(websocket, {
+                                "type": "auto_log",
+                                "content": f"🔀 Маршрутизатор: {route_result.get('reason', '')}",
+                                "level": "info",
+                            })
+                    except Exception as route_err:
+                        try:
+                            logger.log("intelligent_router_error", level="warning", source="ws", error=str(route_err)[:200])
+                        except Exception:
+                            pass
+
+                # Route based on mode
+                if mode == "auto":
+                    logger.user_action("auto_mode_chat", project_id=current_project_id, details={"model": model_id})
+                    from core.auto_agent import run_auto_mode
+                    try:
+                        await run_auto_mode(prompt, current_project_id, repo_map, websocket, model_id=model_id)
+                    except Exception as auto_err:
+                        import traceback
+                        err_msg = str(auto_err)[:300]
+                        logger.log("auto_mode_error", level="error", source="ws", project_id=current_project_id,
+                                   error=err_msg, model=model_id)
+                        try:
+                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка авто-режима: {err_msg}"})
+                        except Exception:
+                            pass
+                else:
+                    logger.user_action("manual_chat", project_id=current_project_id, details={"model": model_id})
+                    try:
+                        await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
                     except Exception as chat_err:
                         import traceback
                         err_msg = str(chat_err)[:300]
-                        logger.log("hub_chat_error", level="error", source="ws", error=err_msg)
+                        logger.log("manual_chat_error", level="error", source="ws", project_id=current_project_id,
+                                   error=err_msg, model=model_id)
                         try:
-                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка модели: {err_msg}"})
-                        except Exception:
-                            pass
-                continue
-
-            # Handle start_questionnaire (создание анкеты из UI)
-            if payload.get("type") == "start_questionnaire":
-                q_title = payload.get("title", "Новый проект")
-                q_id = await save_questionnaire({"title": q_title, "project_id": project_id})
-                await safe_ws_send(websocket, {"type": "questionnaire_created", "id": q_id})
-                from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
-                questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {q_title}"
-                try:
-                    await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
-                except Exception as q_err:
-                    err_msg = str(q_err)[:300]
-                    logger.log("questionnaire_error", level="error", source="ws", error=err_msg)
-                    try:
-                        await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка анкетирования: {err_msg}"})
-                    except Exception:
-                        pass
-                continue
-
-            # Handle refactor requests
-            if payload.get("type") == "refactor":
-                refactor_code = payload.get("code", "")
-                refactor_type = payload.get("refactor_type", "optimize")
-                instructions = payload.get("instructions", "")
-                type_prompts = {
-                    "optimize": "Оптимизируй этот код для лучшей производительности",
-                    "clean": "Очисти и отформатируй этот код",
-                    "modernize": "Модернизируй этот код, используя современные возможности Python 3.10+",
-                    "simplify": "Упрости логику этого кода",
-                    "document": "Добавь полные docstrings и комментарии к этому коду",
-                    "type_hints": "Добавь аннотации типов ко всем функциям и переменным",
-                    "error_handling": "Улучши обработку ошибок в этом коде",
-                }
-                refactor_prompt = f"""{type_prompts.get(refactor_type, 'Рефактори этот код')}.
-{'Дополнительные инструкции: ' + instructions if instructions else ''}
-Верни ТОЛЬКО улучшенный код без пояснений, в code block.
-
-Код для рефакторинга:
-```
-{refactor_code}
-```"""
-                try:
-                    await handle_chat_message(refactor_prompt, current_project_id, repo_map, websocket, _cancel_check=lambda: ws_cancelled)
-                except Exception as ref_err:
-                    err_msg = str(ref_err)[:300]
-                    logger.log("refactor_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
-                    try:
-                        await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка рефакторинга: {err_msg}"})
-                    except Exception:
-                        pass
-                continue
-
-            # Build project context (Repo Map)
-            if current_project_id:
-                project = await get_project(current_project_id)
-                if project:
-                    # Override priority models from UI if provided
-                    if priority:
-                        from core.memory import update_project_models
-                        await update_project_models(current_project_id, priority)
-                        try:
-                            logger.log("priority_models_updated", level="debug", source="ws", project_id=current_project_id, details={"models": priority[:5]})
+                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка модели ({model_id}): {err_msg}"})
                         except Exception:
                             pass
 
-                    cached_map = await get_repo_map(current_project_id)
-                    if cached_map:
-                        repo_map = cached_map["content"]
-                    else:
-                        repo_map = await context_manager.build_repo_map(
-                            project["path"], current_project_id
-                        )
-
-            # Задача 5: Intelligent Router — выбрать модель если не указана
-            if not model_id:
+            except Exception as iter_err:
+                import traceback
+                logger.log("ws_loop_error", level="warning", source="ws",
+                           error=str(iter_err)[:500],
+                           stack_trace=traceback.format_exc()[-1000:])
                 try:
-                    from core.keys_manager import keys_manager
-                    all_models = keys_manager.get_all_models()
-                    route_result = intelligent_router.select_model(prompt, all_models)
-                    if route_result.get("model_id") and route_result.get("overridden"):
-                        model_id = route_result["model_id"]
-                        logger.log("intelligent_router_selected", level="info", source="ws",
-                                   details={"model": model_id, "complexity": route_result.get("complexity"),
-                                            "reason": route_result.get("reason", "")[:200]})
-                        await safe_ws_send(websocket, {
-                            "type": "auto_log",
-                            "content": f"🔀 Маршрутизатор: {route_result.get('reason', '')}",
-                            "level": "info",
-                        })
-                except Exception as route_err:
-                    try:
-                        logger.log("intelligent_router_error", level="warning", source="ws", error=str(route_err)[:200])
-                    except Exception:
-                        pass
-
-            # Route based on mode
-            if mode == "auto":
-                logger.user_action("auto_mode_chat", project_id=current_project_id, details={"model": model_id})
-                from core.auto_agent import run_auto_mode
-                try:
-                    await run_auto_mode(prompt, current_project_id, repo_map, websocket, model_id=model_id)
-                except Exception as auto_err:
-                    import traceback
-                    err_msg = str(auto_err)[:300]
-                    logger.log("auto_mode_error", level="error", source="ws", project_id=current_project_id,
-                               error=err_msg, model=model_id)
-                    try:
-                        await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка авто-режима: {err_msg}"})
-                    except Exception:
-                        pass
-            else:
-                logger.user_action("manual_chat", project_id=current_project_id, details={"model": model_id})
-                try:
-                    await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
-                except Exception as chat_err:
-                    import traceback
-                    err_msg = str(chat_err)[:300]
-                    logger.log("manual_chat_error", level="error", source="ws", project_id=current_project_id,
-                               error=err_msg, model=model_id)
-                    try:
-                        await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка модели ({model_id}): {err_msg}"})
-                    except Exception:
-                        pass
+                    await safe_ws_send(websocket, {"type": "error", "content": f"Внутренняя ошибка: {str(iter_err)[:200]}"})
+                except Exception:
+                    pass
+                ws_cancelled = False  # Reset cancel flag after error
+                continue
 
     except WebSocketDisconnect:
         keepalive_task.cancel()

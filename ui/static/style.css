@@ -702,7 +702,7 @@ pre:hover .code-btn-bar { opacity: 1; }
     padding: 8px 10px; gap: 8px;
 }
 .input-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.input-center { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.input-center { display: flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 6px; }
 .input-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
 .file-label {

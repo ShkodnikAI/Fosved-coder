@@ -532,7 +532,6 @@ async def stream_llm_response(prompt: str, history: list, websocket,
         return None
 
     print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, thinking={is_thinking}, project={project_path}, api_base={'yes' if api_base else 'no'}")
-    print(f"  [agent] messages_count={len(messages)}, system_prompt_len={len(system_prompt)}")
     await _send_log(websocket, f"🧠 Модель: {model}", "info")
 
     # Extended Thinking: уведомить клиента и настроить параметры
@@ -546,6 +545,8 @@ async def stream_llm_response(prompt: str, history: list, websocket,
         mapped_role = role_map.get(msg.get("role", ""), msg.get("role", "user"))
         api_messages.append({"role": mapped_role, "content": msg.get("content", "")})
     messages = [{"role": "system", "content": system_prompt}] + api_messages + [{"role": "user", "content": prompt}]
+
+    print(f"  [agent] messages_count={len(messages)}, system_prompt_len={len(system_prompt)}")
 
     # Anthropic Claude 4+ не поддерживает temperature — убираем для этих моделей
     anthropic_no_temp_models = ("claude-opus-4-", "claude-sonnet-4-")

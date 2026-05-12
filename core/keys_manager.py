@@ -1199,19 +1199,21 @@ class KeysManager:
                 "base_url": lm.get("base_url", ""),
             })
 
-        # 3. Бесплатные модели (OpenRouter :free)
-        or_key = self.providers.get("openrouter", {}).get("api_key", "")
-        or_status = self.providers.get("openrouter", {}).get("status", "not_configured")
-        for fm in FREE_MODELS:
-            models.append({
-                "id": fm["id"],
-                "name": fm["name"],
-                "model": fm["model"],
-                "provider": "openrouter",
-                "provider_name": "OpenRouter",
-                "type": "free",
-                "status": or_status if or_key else "no_key",
-            })
+        # 3. Бесплатные модели (OpenRouter :free) — только если провайдер включён
+        or_config = self.providers.get("openrouter", {})
+        if or_config.get("enabled", True):
+            or_key = or_config.get("api_key", "")
+            or_status = or_config.get("status", "not_configured")
+            for fm in FREE_MODELS:
+                models.append({
+                    "id": fm["id"],
+                    "name": fm["name"],
+                    "model": fm["model"],
+                    "provider": "openrouter",
+                    "provider_name": "OpenRouter",
+                    "type": "free",
+                    "status": or_status if or_key else "no_key",
+                })
 
         # 4. Кастомные модели (force connect)
         for cm in self.custom_models:
