@@ -162,6 +162,21 @@ body {
 .hdr-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .hdr-btn .btn-text { font-size: 12px; }
 .hdr-btn.active { background: var(--bg-active); color: var(--text-primary); }
+/* Questionnaire button — bigger, accent */
+.hdr-btn-questionnaire {
+    background: var(--bg-active) !important;
+    color: var(--accent) !important;
+    font-size: 16px !important;
+    padding: 6px 12px !important;
+    border: 1px solid var(--accent) !important;
+    border-radius: var(--radius-md) !important;
+    gap: 4px !important;
+}
+.hdr-btn-questionnaire:hover {
+    background: rgba(200,169,126,0.15) !important;
+    box-shadow: 0 0 8px rgba(200,169,126,0.2);
+}
+
 
 /* Key button — prominent */
 .hdr-btn-keys {
@@ -364,6 +379,11 @@ body {
     color: var(--accent) !important;
     font-weight: 700 !important;
 }
+.model-card-with-priority.active .model-card-avatar {
+    box-shadow: 0 0 0 2px var(--accent);
+    transform: scale(1.05);
+}
+
 .model-card-avatar {
     width: 28px; height: 28px; border-radius: var(--radius-md);
     display: flex; align-items: center; justify-content: center;
@@ -662,6 +682,20 @@ pre:hover .code-btn-bar { opacity: 1; }
     display: flex; align-items: center; gap: 4px; white-space: nowrap;
 }
 .file-label:hover { color: var(--text-primary); }
+/* Attachment label — bigger, highlighted */
+.file-label-attach {
+    font-size: 18px !important;
+    padding: 4px 8px !important;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    transition: all 0.2s;
+}
+.file-label-attach:hover {
+    color: var(--accent) !important;
+    border-color: var(--accent);
+    background: rgba(200,169,126,0.1);
+}
+
 .file-preview {
     font-size: 11px; color: var(--green); max-width: 200px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1171,4 +1205,18 @@ button, [role="button"], .panel-tab, .right-panel-tab,
 .code-btn, .btn-retry, .btn-mic, .btn-send,
 .input-left label, .file-label {
     cursor: pointer !important;
+}
+
+/* Model badge states */
+#header-model-dot.idle {
+    background: var(--green) !important;
+    box-shadow: 0 0 4px var(--green);
+}
+#header-model-dot.thinking {
+    background: var(--accent) !important;
+    animation: pulse-dot 1s infinite;
+}
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
 }
