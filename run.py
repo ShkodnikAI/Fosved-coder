@@ -228,7 +228,7 @@ async def websocket_chat(websocket: WebSocket):
                 new_mode = payload.get("mode", "manual")
                 current_mode = new_mode
                 logger.user_action(f"mode_change: {new_mode}", project_id=current_project_id)
-                await websocket.send_json({"type": "system", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}"})
+                await websocket.send_json({"type": "auto_log", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}", "level": "info"})
                 continue
 
             # Handle hub chat (главный экран — без контекста проекта)
@@ -308,8 +308,9 @@ async def websocket_chat(websocket: WebSocket):
                                    details={"model": model_id, "complexity": route_result.get("complexity"),
                                             "reason": route_result.get("reason", "")[:200]})
                         await websocket.send_json({
-                            "type": "system",
+                            "type": "auto_log",
                             "content": f"🔀 Маршрутизатор: {route_result.get('reason', '')}",
+                            "level": "info",
                         })
                 except Exception as route_err:
                     try:
@@ -338,7 +339,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
     command = parts[0]
     args = parts[1] if len(parts) > 1 else ""
 
-    await websocket.send_json({"type": "system", "content": f"Выполняю: {cmd}"})
+    await websocket.send_json({"type": "auto_log", "content": f"Выполняю: {cmd}", "level": "info"})
     try:
         logger.log(f"slash_command: {command} {args[:80]}", level="info", source="ws", project_id=project_id)
     except Exception:
@@ -374,7 +375,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         request_id = args.strip()
         if request_id in pending_approvals:
             pending = pending_approvals.pop(request_id)
-            await websocket.send_json({"type": "system", "content": f"Подтверждаю: {pending['cmd']}"})
+            await websocket.send_json({"type": "auto_log", "content": f"Подтверждаю: {pending['cmd']}", "level": "info"})
             result = await executor.execute_approved(pending["cmd"], request_id)
             output = f"Exit code: {result['exit_code']}\n\n{result['stdout']}"
             if result.get("stderr"):
@@ -382,15 +383,15 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             await websocket.send_json({"type": "command_result", "content": output})
             await websocket.send_json({"type": "done"})
         else:
-            await websocket.send_json({"type": "system", "content": "Нет ожидающих подтверждения команд."})
+            await websocket.send_json({"type": "auto_log", "content": "Нет ожидающих подтверждения команд.", "level": "info"})
 
     elif command == "/reject":
         request_id = args.strip()
         if request_id in pending_approvals:
             pending_approvals.pop(request_id)
-            await websocket.send_json({"type": "system", "content": "Команда отклонена."})
+            await websocket.send_json({"type": "auto_log", "content": "Команда отклонена.", "level": "info"})
         else:
-            await websocket.send_json({"type": "system", "content": "Нет ожидающих команд."})
+            await websocket.send_json({"type": "auto_log", "content": "Нет ожидающих команд.", "level": "info"})
 
     elif command == "/git_pull":
         try:
@@ -409,7 +410,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             # Извлечь полезную инфу: "Already up to date" или "Updating X..Y"
             lines = [l.strip() for l in stdout.split("\n") if l.strip() and not l.startswith("From ")]
             summary = lines[0] if lines else "Already up to date"
-            await websocket.send_json({"type": "system", "content": f"📥 Pull OK: {summary}"})
+            await websocket.send_json({"type": "auto_log", "content": f"📥 Pull OK: {summary}", "level": "info"})
         else:
             await websocket.send_json({"type": "error", "content": f"📥 Pull failed: {result.get('stderr', 'unknown error')[:200]}"})
             try:
@@ -439,11 +440,11 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             except Exception:
                 pass
         elif "Everything up-to-date" in push_out_stripped:
-            await websocket.send_json({"type": "system", "content": "📤 Push: уже актуально"})
+            await websocket.send_json({"type": "auto_log", "content": "📤 Push: уже актуально", "level": "info"})
         else:
             lines = [l for l in push_out_stripped.split("\n") if l.strip()]
             summary = lines[-1] if lines else "OK"
-            await websocket.send_json({"type": "system", "content": f"📤 Push OK: {summary}"})
+            await websocket.send_json({"type": "auto_log", "content": f"📤 Push OK: {summary}", "level": "info"})
         await websocket.send_json({"type": "done"})
 
     elif command == "/quick_push":
@@ -460,7 +461,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
                 project_path = project["path"]
                 project_token = project.get("github_token") or None
         if not project_path:
-            await websocket.send_json({"type": "system", "content": "Выберите проект для Quick Push"})
+            await websocket.send_json({"type": "auto_log", "content": "Выберите проект для Quick Push", "level": "info"})
             await websocket.send_json({"type": "done"})
             return
 
@@ -471,20 +472,20 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         commit_result = await executor.execute(f"git commit -m {shlex.quote(msg)} --allow-empty", cwd=project_path)
         commit_out = (commit_result.get("stdout", "") + commit_result.get("stderr", "")).strip()
         if "nothing to commit" in commit_out.lower():
-            await websocket.send_json({"type": "system", "content": "📤 Quick Push: нет изменений для коммита"})
+            await websocket.send_json({"type": "auto_log", "content": "📤 Quick Push: нет изменений для коммита", "level": "info"})
         else:
             # push with project PAT token
             push_out = await git_push_with_token(executor, project_path, project_token)
             push_out_stripped = push_out.strip()
             if "error" in push_out_stripped.lower() or "fatal" in push_out_stripped.lower() or "denied" in push_out_stripped.lower():
-                await websocket.send_json({"type": "system", "content": f"📤 Committed, push failed: {push_out_stripped[:100]}"})
+                await websocket.send_json({"type": "auto_log", "content": f"📤 Committed, push failed: {push_out_stripped[:100]}", "level": "info"})
             else:
-                await websocket.send_json({"type": "system", "content": f"📤 Quick Push OK: {msg}"})
+                await websocket.send_json({"type": "auto_log", "content": f"📤 Quick Push OK: {msg}", "level": "info"})
         await websocket.send_json({"type": "done"})
 
     elif command == "/clear":
         await clear_history(project_id)
-        await websocket.send_json({"type": "system", "content": "История чата очищена."})
+        await websocket.send_json({"type": "auto_log", "content": "История чата очищена.", "level": "info"})
 
     elif command == "/test":
         try:
@@ -498,7 +499,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             if project:
                 project_path = project["path"]
         if not project_path:
-            await websocket.send_json({"type": "system", "content": "Выберите проект для проверки"})
+            await websocket.send_json({"type": "auto_log", "content": "Выберите проект для проверки", "level": "info"})
             await websocket.send_json({"type": "done"})
             return
         from core.code_tester import run_full_check
@@ -512,7 +513,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         except Exception:
             pass
         if not args.strip():
-            await websocket.send_json({"type": "system", "content": "Использование: /ideas <github_url>"})
+            await websocket.send_json({"type": "auto_log", "content": "Использование: /ideas <github_url>", "level": "info"})
             return
         result = await ideas_injector.process_idea(args.strip())
         await websocket.send_json({"type": "idea_result", "content": result})
@@ -526,17 +527,17 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
                 await websocket.send_json({"type": "command_result", "content": repo_map})
                 await websocket.send_json({"type": "done"})
             else:
-                await websocket.send_json({"type": "system", "content": "Проект не найден."})
+                await websocket.send_json({"type": "auto_log", "content": "Проект не найден.", "level": "info"})
         else:
-            await websocket.send_json({"type": "system", "content": "Выберите проект для построения Repo Map."})
+            await websocket.send_json({"type": "auto_log", "content": "Выберите проект для построения Repo Map.", "level": "info"})
 
     elif command == "/probe":
         probed = await get_probed_models()
         await websocket.send_json({"type": "probed_models", "models": probed})
         if probed:
-            await websocket.send_json({"type": "system", "content": f"Зондировано моделей: {len(probed)}"})
+            await websocket.send_json({"type": "auto_log", "content": f"Зондировано моделей: {len(probed)}", "level": "info"})
         else:
-            await websocket.send_json({"type": "system", "content": "Нет результатов зондирования. Попробуйте позже."})
+            await websocket.send_json({"type": "auto_log", "content": "Нет результатов зондирования. Попробуйте позже.", "level": "info"})
 
     elif command == "/questionnaire":
         title = args.strip() or "Новый проект"
@@ -563,14 +564,14 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             "/clear — очистить историю чата\n"
             "/help — эта справка"
         )
-        await websocket.send_json({"type": "system", "content": help_text})
+        await websocket.send_json({"type": "auto_log", "content": help_text, "level": "info"})
 
     else:
         try:
             logger.log(f"unknown_command: {command}", level="warning", source="ws", project_id=project_id)
         except Exception:
             pass
-        await websocket.send_json({"type": "system", "content": f"Неизвестная команда: {command}. Введите /help"})
+        await websocket.send_json({"type": "auto_log", "content": f"Неизвестная команда: {command}. Введите /help", "level": "info"})
 
 
 @app.websocket("/ws/executor")

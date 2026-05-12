@@ -1513,7 +1513,7 @@ function wsConnect() {
             return;
         }
 
-        // ─── Ошибка ───
+        // ─── Ошибка — в чат И в панель логов ───
         if (data.type === "error") {
             const ctx = getActiveAiContext();
             if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
@@ -1523,13 +1523,19 @@ function wsConnect() {
             if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
             else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
             addMessage("error", data.content || "Произошла ошибка");
+            addLogEntryToPanel({level:'error',source:'error',action:data.content||'Произошла ошибка',time:new Date().toLocaleTimeString()});
             return;
         }
 
-        // ─── Системное сообщение ───
+        // ─── Системное сообщение — ТОЛЬКО в панель логов (не в чат) ───
         if (data.type === "system") {
-            addMessage("system", data.content);
-            if (data.content && data.content.length < 200) addLogEntryToPanel({level:'info',source:'system',action:data.content,time:new Date().toLocaleTimeString()});
+            addLogEntryToPanel({level:'info',source:'system',action:data.content,time:new Date().toLocaleTimeString()});
+            return;
+        }
+
+        // ─── Info — ТОЛЬКО в панель логов (не в чат) ───
+        if (data.type === "info") {
+            addLogEntryToPanel({level:'info',source:'info',action:data.content,time:new Date().toLocaleTimeString()});
             return;
         }
 
@@ -2186,7 +2192,7 @@ function addLogEntryToPanel(entry) {
 }
 
 function handleAutoLog(data) {
-    const entry = {level:data.level||'info',source:data.source||'',action:data.message||data.action||'',time:data.time||new Date().toLocaleTimeString()};
+    const entry = {level:data.level||'info',source:data.source||'',action:data.content||data.message||data.action||'',time:data.time||new Date().toLocaleTimeString()};
     addLogEntryToPanel(entry);
 }
 

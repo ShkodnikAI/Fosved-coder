@@ -526,7 +526,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
     # Extended Thinking: уведомить клиента и настроить параметры
     if is_thinking:
-        await websocket.send_json({"type": "info", "content": "Extended Thinking включён — модель будет рассуждать глубже"})
+        await websocket.send_json({"type": "auto_log", "content": "Extended Thinking включён — модель будет рассуждать глубже", "level": "info"})
 
     # Build messages
     api_messages = []
@@ -798,13 +798,13 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     if project_id and compressor.should_compress(history):
         try:
             comp_model = ContextCompressor.get_compression_model_config()
-            await websocket.send_json({"type": "info", "content": "Автосжатие контекста..."})
+            await websocket.send_json({"type": "auto_log", "content": "Автосжатие контекста...", "level": "info"})
             compressed_summary, remaining, was_llm = await compressor.compress_and_cleanup(history, project_id, model_config=comp_model)
             if compressed_summary:
                 compressed_context_text = compressed_summary
                 method = "LLM" if was_llm else "regex"
                 removed = len(history) - len(remaining)
-                await websocket.send_json({"type": "info", "content": f"Автосжатие ({method}): {removed} сообщений сжато"})
+                await websocket.send_json({"type": "auto_log", "content": f"Автосжатие ({method}): {removed} сообщений сжато", "level": "info"})
                 history = remaining
         except Exception as e:
             print(f"  [agent] compression error: {e}")
@@ -896,7 +896,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if i > 0:
             m_info = next((m for m in all_models if m["id"] == model_to_try), None)
             model_name = m_info["name"] if m_info else model_to_try
-            await websocket.send_json({"type": "info", "content": f"Переключаюсь на {model_name} (попытка {tried_count})..."})
+            await websocket.send_json({"type": "auto_log", "content": f"Переключаюсь на {model_name} (попытка {tried_count})...", "level": "info"})
             await _send_log(websocket, f"🔄 Переключаюсь на {model_name} (попытка {tried_count})", "warning")
 
         error_info = {}
@@ -1077,7 +1077,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
         await websocket.send_json({"type": "typing", "model": display_model})
 
         if i > 0:
-            await websocket.send_json({"type": "info", "content": f"Переключаюсь на {display_model} (попытка {tried_count})..."})
+            await websocket.send_json({"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
 
         error_info = {}
         ai_response = await stream_llm_response(
@@ -1259,7 +1259,7 @@ async def handle_project_with_injection(
         await websocket.send_json({"type": "typing", "model": display_model})
 
         if i > 0:
-            await websocket.send_json({"type": "info", "content": f"Переключаюсь на {display_model} (попытка {tried_count})..."})
+            await websocket.send_json({"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
 
         error_info = {}
 
