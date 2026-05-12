@@ -307,7 +307,7 @@
         <button class="hdr-btn" onclick="clearChat()" title="Очистить чат">🗑</button>
         <button class="hdr-btn" onclick="showSettings()" title="Настройки">⚙</button>
         <button class="hdr-btn" onclick="showHelp()" title="Справка">❓</button>
-        <button class="hdr-btn" onclick="showKeysModal()" title="Ключи" style="margin-left:4px;">🔑</button>
+        <button class="hdr-btn-keys" onclick="showKeysModal()" title="Ключи">🔑 Ключи</button>
     </div>
 </header>
 
@@ -373,9 +373,12 @@
                             <button id="hub-file-remove" class="file-remove" onclick="removeHubAttachedFile()" style="display:none" title="Убрать">✕</button>
                             <button id="hub-retry-btn" class="btn-retry" onclick="retryHubMessage()" style="display:none">🔄</button>
                         </div>
+                        <div class="input-center">
+                            <button class="btn-send" id="hub-send-btn" onclick="sendHubMessage()">Отправить</button>
+                        </div>
                         <div class="input-right">
                             <button class="btn-mic" onclick="startVoice('hub')" title="Голосовой ввод">🎤</button>
-                            <button class="btn-send" id="hub-send-btn" onclick="sendHubMessage()">Отправить ➤</button>
+                            <button id="hub-retry-btn-visible" class="btn-retry" onclick="retryHubMessage()" title="Повторить">🔄</button>
                         </div>
                     </div>
                 </div>
@@ -491,9 +494,12 @@
                             <button id="project-file-remove" class="file-remove" onclick="removeProjectAttachedFile()" style="display:none" title="Убрать">✕</button>
                             <button id="project-retry-btn" class="btn-retry" onclick="retryLastMessage()" style="display:none">🔄</button>
                         </div>
+                        <div class="input-center">
+                            <button class="btn-send" id="project-send-btn" onclick="sendMessage()">Отправить</button>
+                        </div>
                         <div class="input-right">
                             <button class="btn-mic" onclick="startVoice('project')" title="Голосовой ввод">🎤</button>
-                            <button class="btn-send" id="project-send-btn" onclick="sendMessage()">Отправить ➤</button>
+                            <button id="project-retry-btn-visible" class="btn-retry" onclick="retryLastMessage()" title="Повторить">🔄</button>
                         </div>
                     </div>
                 </div>
@@ -1991,6 +1997,8 @@ async function selectProject(id) {
     }
     // Переключиться на экран проекта
     switchScreen('project');
+    // Переключить на вкладку моделей
+    switchProjTab('proj-models');
     if (p) {
         projectChatBox.innerHTML = "";
         addMessageTo("system", `Проект: ${p.name}`, projectChatBox);
@@ -2219,6 +2227,11 @@ function addLogEntryToPanel(entry) {
 function handleAutoLog(data) {
     const entry = {level:data.level||'info',source:data.source||'',action:data.content||data.message||data.action||'',time:data.time||new Date().toLocaleTimeString()};
     addLogEntryToPanel(entry);
+    // Auto-switch to Logs tab when first log arrives
+    if (autoLogCount === 1) {
+        if (currentScreen === 'main') switchHubRightTab('hub-logs');
+        else switchProjRightTab('proj-logs');
+    }
 }
 
 function updateLogBadge() {

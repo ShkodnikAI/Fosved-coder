@@ -70,7 +70,7 @@
     --shadow-xl: 0 12px 40px rgba(0,0,0,0.4);
     --shadow-focus: 0 0 0 2px var(--accent);
     --left-panel-width: 260px;
-    --right-panel-width: 280px;
+    --right-panel-width: 240px;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -162,6 +162,22 @@ body {
 .hdr-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .hdr-btn .btn-text { font-size: 12px; }
 .hdr-btn.active { background: var(--bg-active); color: var(--text-primary); }
+
+/* Key button — prominent */
+.hdr-btn-keys {
+    background: linear-gradient(135deg, var(--accent), #d4a853);
+    color: #000; border: none;
+    cursor: pointer; padding: 6px 14px; border-radius: var(--radius-md);
+    font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 5px;
+    transition: all 0.2s; white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(200,169,126,0.35);
+}
+.hdr-btn-keys:hover {
+    background: linear-gradient(135deg, #d4a853, var(--accent));
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(200,169,126,0.5);
+}
+.hdr-btn-keys:active { transform: translateY(0); box-shadow: 0 2px 6px rgba(200,169,126,0.3); }
 
 /* Title */
 .header-title {
@@ -437,7 +453,7 @@ body {
    ═══════════════════════════════════════════ */
 .center-area {
     flex: 1 1 0%;
-    max-width: calc((100% - var(--left-panel-width) - var(--right-panel-width) - 12px) * 0.8);
+    max-width: calc((100% - var(--left-panel-width) - var(--right-panel-width) - 12px) * 0.64);
     display: flex; flex-direction: column;
     background: var(--bg-primary); min-width: 0; overflow: hidden;
 }
@@ -620,10 +636,11 @@ pre:hover .code-btn-bar { opacity: 1; }
     box-shadow: 0 0 0 2px rgba(200,169,126,0.3);
 }
 .input-actions {
-    display: flex; justify-content: space-between; align-items: center;
+    display: flex; justify-content: center; align-items: center;
     padding: 8px 10px; gap: 8px;
 }
 .input-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.input-center { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .input-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
 .file-label {
