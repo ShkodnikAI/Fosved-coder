@@ -1573,8 +1573,7 @@ async def probe_models(websocket=None) -> list[dict]:
     all_models = keys_manager.get_all_models()
     candidates = [
         m for m in all_models
-        if m.get("status") in ("valid", "rate_limited")
-        and m.get("api_key")
+        if m.get("status") in ("valid", "rate_limited", "available")
     ]
 
     if websocket:

@@ -98,11 +98,22 @@ async def lifespan(app: FastAPI):
     # Тихое зондирование моделей при старте (фоновая задача)
     async def _background_probe():
         try:
+            # Сначала восстановить кэш probing из БД (если есть)
+            try:
+                cached = await get_probed_models()
+                if cached:
+                    keys_manager.update_probed_model_ids(cached)
+                    print(f"  [startup] Restored probe cache: {len(cached)} models")
+            except Exception:
+                pass
+
             from core.agent import probe_models
             results = await probe_models()
             if results:
                 await save_probed_models(results)
                 print(f"  [startup] Probed {len(results)} models successfully")
+            else:
+                print(f"  [startup] No models responded to probing")
         except Exception as e:
             print(f"  [startup] Probe failed: {e}")
     asyncio.create_task(_background_probe())

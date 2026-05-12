@@ -1020,7 +1020,10 @@ class KeysManager:
             if not test_model:
                 return provider_id, {"status": "invalid", "models": []}
 
-            validation = await self.validate_key(provider_id, api_key, test_model)
+            validation = await self.validate_key(
+                provider_id, api_key, test_model,
+                api_base=config.get("api_base"),
+            )
 
             # Смягчение: при startup не убиваем ключи за временные ошибки
             if validation["status"] == "invalid":

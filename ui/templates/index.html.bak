@@ -2478,7 +2478,7 @@ async function showKeysModal() {
             html += `<div class="key-card" style="${dis}"><div class="key-card-header"><span class="key-provider">${pdef.name}${offBadge}</span><span class="key-status ${sCls}">${sLabel}</span></div>
                 ${cfg.has_key?'<div class="key-value">●●●●●●●●●</div>':''}
                 <div class="key-actions">
-                    ${cfg.has_key?`<button class="btn btn-sm btn-ghost" onclick="toggleProvider('${pid}',${cfg.enabled===false})">${cfg.enabled!==false?'⏸ Выкл':'▶ Вкл'}</button><button class="btn btn-sm btn-danger" onclick="removeKey('${pid}')">Удалить</button><button class="btn btn-sm btn-ghost" onclick="revalidateKey('${pid}')">Проверить</button>`:`<button class="btn btn-sm btn-primary" onclick="showAddKeyForm('${pid}','${pdef.name}')">Добавить</button>`}
+                    ${cfg.has_key?`<button class="btn btn-sm btn-ghost" onclick="toggleProvider('${pid}',${cfg.enabled!==false})">${cfg.enabled!==false?'⏸ Выкл':'▶ Вкл'}</button><button class="btn btn-sm btn-danger" onclick="removeKey('${pid}')">Удалить</button><button class="btn btn-sm btn-ghost" onclick="revalidateKey('${pid}')">Проверить</button>`:`<button class="btn btn-sm btn-primary" onclick="showAddKeyForm('${pid}','${pdef.name}')">Добавить</button>`}
                 </div></div>`;
         }
         html += `<div class="key-card"><div class="key-card-header"><span class="key-provider">GitHub</span><span class="key-status ${ghData.has_token?'valid':'none'}">${ghData.has_token?(ghData.enabled?'OK':'OFF'):'—'}</span></div>
