@@ -289,6 +289,7 @@
         <button class="nav-btn" id="nav-project" onclick="switchScreen('project')">📁 Проект</button>
     </div>
     <div class="header-center">
+        <span class="header-title" id="header-project-name" style="display:none;"></span>
         <div class="progress-mini" id="header-progress" style="display:none">
             <div class="progress-mini-fill" id="header-progress-fill"></div>
             <span class="progress-mini-text" id="header-progress-text">0%</span>
@@ -299,6 +300,7 @@
         </span>
     </div>
     <div class="header-right">
+        <button class="hdr-btn" onclick="startQuestionnaire()" title="Анкетирование">📝</button>
         <!-- Режим авто/ручной (только в проектном экране) -->
         <div class="mode-toggle project-only" id="mode-toggle" onclick="toggleWorkMode()" title="Переключить режим" style="display:none;">
             <span class="mode-toggle-label" id="mode-label-manual">✋ Ручной</span>
@@ -384,7 +386,6 @@
                 </div>
                 <!-- Дополнительные кнопки под инпутом -->
                 <div class="hub-input-extra">
-                    <button onclick="startQuestionnaire()" title="Начать опрос для создания проекта">📝 Анкета</button>
                     <button onclick="insertHubCommand('/probe ')" title="Зондировать модели">🔍 /probe</button>
                 </div>
             </div>
@@ -408,6 +409,16 @@
                 </div>
                 <!-- Вкладка: Логи -->
                 <div class="right-panel-pane" id="rp-hub-logs">
+                    <div class="right-panel-header" style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+                        <div class="right-panel-title">
+                            Логи <span class="log-badge" id="hub-log-badge" style="display:none">0</span>
+                        </div>
+                        <div class="right-panel-actions">
+                            <button class="log-btn" onclick="copyAllLogs()" title="Копировать">📋</button>
+                            <button class="log-btn" onclick="saveAllLogs()" title="Сохранить">💾</button>
+                            <button class="log-btn" onclick="clearAutoLog();fetch('/api/v1/logs',{method:'DELETE'})" title="Очистить">🗑</button>
+                        </div>
+                    </div>
                     <div class="log-filter">
                         <button class="log-filter-btn active" data-filter="all" onclick="filterLogs('all',this)">Все</button>
                         <button class="log-filter-btn" data-filter="info" onclick="filterLogs('info',this)">ℹ️</button>
@@ -417,7 +428,7 @@
                     </div>
                     <div class="log-entries" id="hub-log-entries"></div>
                     <div class="log-footer">
-                        <span class="hub-log-count">0 записей</span>
+                        <span id="hub-log-count">0 записей</span>
                         <span></span>
                     </div>
                 </div>
@@ -728,23 +739,6 @@
     </div>
 </div>
 
-<!-- МОДАЛКА: Подтверждение удаления -->
-<div class="modal-overlay" id="confirm-modal" onclick="if(event.target===this){resolveConfirm(false);this.classList.remove('open')}">
-    <div class="modal" style="width:420px;" onclick="event.stopPropagation()">
-        <div class="modal-header">
-            <h2 style="color:var(--red);font-size:15px;" id="confirm-modal-title">Подтверждение</h2>
-            <button class="modal-close" onclick="resolveConfirm(false);document.getElementById('confirm-modal').classList.remove('open')">✕</button>
-        </div>
-        <div class="modal-body">
-            <p id="confirm-modal-text" style="font-size:13px;color:var(--text-secondary);line-height:1.6;"></p>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-ghost" onclick="resolveConfirm(false);document.getElementById('confirm-modal').classList.remove('open')">Отмена</button>
-            <button class="btn btn-danger" onclick="resolveConfirm(true);document.getElementById('confirm-modal').classList.remove('open')">Удалить</button>
-        </div>
-    </div>
-</div>
-
 <!-- МОДАЛКА: Diff просмотрщик -->
 <div class="modal-overlay" id="diff-modal" onclick="if(event.target===this)closeDiffModal()">
     <div class="modal" style="width:90vw;max-width:1200px;" onclick="event.stopPropagation()">
@@ -824,6 +818,38 @@ const projectChatBox = document.getElementById("project-chat-box");
 // (single chat box per screen)
 
 // ═══════════════════════════════════════════════════════
+// КЛИЕНТСКИЙ ЛОГГЕР
+// ═══════════════════════════════════════════════════════
+const CATEGORY_EMOJIS = {
+    select_model: '🤖', hub_message: '💬', project_message: '💬',
+    select_project: '📁', switch_screen: '🖥', toggle_mode: '🔄',
+    ws_send: '📡', ws: '🔗', start_questionnaire: '📝',
+    skill: '⚡', git: '🔀', search: '🔍', clear: '🗑',
+    copy: '📋', save: '💾', error: '❌', default: 'ℹ️'
+};
+function addClientLog(category, message, level) {
+    level = level || 'info';
+    const emoji = CATEGORY_EMOJIS[category] || CATEGORY_EMOJIS['default'];
+    const time = new Date().toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const formatted = '[' + time + '] [' + category.toUpperCase() + '] ' + message;
+    const containers = [
+        document.getElementById('log-entries'),
+        document.getElementById('hub-log-entries')
+    ].filter(Boolean);
+    containers.forEach(container => {
+        const el = document.createElement('div');
+        el.className = 'log-entry ' + level + ' client-log';
+        el.dataset.level = level;
+        el.innerHTML = '<span class="log-icon">' + emoji + '</span><span class="log-time">' + time + '</span><span class="log-text">' + escapeHtml(formatted) + '</span><button class="log-copy" onclick="navigator.clipboard.writeText(this.parentElement.querySelector(\'.log-text\').textContent);this.textContent=\'OK\';">📋</button>';
+        if (currentLogFilter !== 'all' && level !== currentLogFilter) el.style.display = 'none';
+        container.appendChild(el);
+        container.scrollTop = container.scrollHeight;
+    });
+    autoLogCount++;
+    updateLogBadge();
+}
+
+// ═══════════════════════════════════════════════════════
 // УТИЛИТЫ
 // ═══════════════════════════════════════════════════════
 /** Экранирование HTML-символов */
@@ -900,6 +926,7 @@ function showToast(message, type) {
 // ═══════════════════════════════════════════════════════
 function switchScreen(screen) {
     currentScreen = screen;
+    addClientLog('switch_screen', 'Switched to: ' + screen);
     // Переключить видимость экранов
     document.getElementById("screen-main").classList.toggle("active", screen === "main");
     document.getElementById("screen-project").classList.toggle("active", screen === "project");
@@ -911,6 +938,9 @@ function switchScreen(screen) {
     if (modeToggle) modeToggle.style.display = screen === "project" ? "flex" : "none";
     // Обновить статус-бар
     document.getElementById("status-screen").textContent = screen === "main" ? "Главная" : "Проект";
+    // Show/hide project name in header
+    const hpn = document.getElementById('header-project-name');
+    if (hpn) hpn.style.display = (screen === 'project' && currentProjectId) ? '' : 'none';
     // Обновить нижнюю панель
     renderBottomBar();
 }
@@ -1266,6 +1296,7 @@ function sendMessage() {
     if (!text && !attachedFile) return;
     if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
     if (!activeModelId) { showToast("Выберите модель", "error"); return; }
+    addClientLog('project_message', 'Sent project message: ' + text.substring(0, 80));
     let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
     addMessage("user", displayText);
     setWaitingAI(true);
@@ -1302,6 +1333,7 @@ function sendHubMessage() {
     if (!text && !hubAttachedFile) return;
     if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
     if (!activeModelId) { showToast("Выберите модель", "error"); return; }
+    addClientLog('hub_message', 'Sent hub message: ' + text.substring(0, 80));
     let displayText = hubAttachedFile ? "📎 " + hubAttachedFile.filename + "\n" + text : text;
     addMessageTo("user", displayText);
     setHubWaitingAI(true);
@@ -1436,6 +1468,7 @@ function startVoice(target) {
 // ═══════════════════════════════════════════════════════
 function toggleWorkMode() {
     workMode = workMode === "manual" ? "auto" : "manual";
+    addClientLog('toggle_mode', 'Mode: ' + workMode);
     updateModeUI();
     renderBottomBar();
     showToast(workMode === "auto" ? "Авто-режим" : "Ручной режим", "info");
@@ -1453,14 +1486,17 @@ setTimeout(updateModeUI, 100);
 // WEBSOCKET — Подключение и обработка сообщений
 // ═══════════════════════════════════════════════════════
 let wsReconnectAttempts = 0;
-const WS_MAX_RECONNECTS = 5;
+const WS_MAX_RECONNECTS = 10;
 let wsIsConnected = false;
+let wsConnecting = false;
+let wsEverConnected = false;
 let wsMessageQueue = [];
 try { const s = localStorage.getItem("fosved-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
 function persistQ() { try { localStorage.setItem("fosved-ws-q", JSON.stringify(wsMessageQueue.slice(-50))); } catch(e) {} }
 
 function wsSend(data) {
     const msg = typeof data === 'string' ? data : JSON.stringify(data);
+    addClientLog('ws_send', 'Data sent via WS: ' + msg.substring(0, 100));
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(msg);
     } else {
@@ -1470,18 +1506,28 @@ function wsSend(data) {
 }
 
 function wsConnect() {
+    if (wsConnecting) return; // Prevent concurrent connection attempts
+    wsConnecting = true;
     updateLoadingBar(20, 'Подключение...');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(protocol + "//" + window.location.host + "/ws");
     ws.onopen = () => {
-        wsReconnectAttempts = 0; wsIsConnected = true;
+        wsReconnectAttempts = 0; wsIsConnected = true; wsConnecting = false;
+        const isFirstConnect = !wsEverConnected;
+        wsEverConnected = true;
+        addClientLog('ws', isFirstConnect ? 'WebSocket connected' : 'WebSocket reconnected');
         updateLoadingBar(50, 'Загрузка моделей...');
-        hubChatBox.innerHTML = "";
-        projectChatBox.innerHTML = "";
-        addMessageTo("system", "Fosved Coder V2.0 готов. Добро пожаловать!", hubChatBox);
-        
-        addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
-        loadModels(); loadProjects(); loadServerLogs({limit: 200});
+        // Do NOT clear chat boxes on reconnect — only on first connect
+        if (isFirstConnect) {
+            hubChatBox.innerHTML = "";
+            projectChatBox.innerHTML = "";
+            addMessageTo("system", "Fosved Coder V2.0 готов. Добро пожаловать!", hubChatBox);
+            addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
+        }
+        // Only reload data if we don't have it yet
+        if (allModels.length === 0) loadModels();
+        if (allProjects.length === 0) loadProjects();
+        loadServerLogs({limit: 200});
         while (wsMessageQueue.length > 0) { ws.send(wsMessageQueue.shift()); }
         persistQ();
     };
@@ -1608,19 +1654,9 @@ function wsConnect() {
             return;
         }
 
-        // ─── Авто-лог ───
+        // ─── Авто-лог — ТОЛЬКО в панель логов (не в чат) ───
         if (data.type === "auto_log") {
             handleAutoLog(data);
-            // Also show a subtle log message in the active chat
-            const chatBox = getActiveChatBox();
-            if (chatBox) {
-                const logDiv = document.createElement('div');
-                logDiv.className = 'msg system auto-log-msg';
-                logDiv.style.cssText = 'font-size:11px; opacity:0.7; padding:3px 12px; max-width:95%;';
-                logDiv.textContent = data.content || '';
-                chatBox.appendChild(logDiv);
-                chatBox.scrollTop = chatBox.scrollHeight;
-            }
             return;
         }
 
@@ -1653,13 +1689,17 @@ function wsConnect() {
     };
 
     ws.onclose = () => {
-        wsIsConnected = false;
-        addMessageTo("error", "Соединение потеряно. Переподключение...", hubChatBox);
-        addMessageTo("error", "Соединение потеряно. Переподключение...", projectChatBox);
+        wsIsConnected = false; wsConnecting = false;
+        addClientLog('ws', 'WebSocket disconnected (attempt ' + (wsReconnectAttempts + 1) + '/' + WS_MAX_RECONNECTS + ')');
+        // Do NOT add error messages to chat boxes — only subtle log entries
         if (wsReconnectAttempts < WS_MAX_RECONNECTS) {
-            setTimeout(wsConnect, Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000));
+            const baseDelay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000);
+            const jitter = Math.random() * baseDelay * 0.3;
+            const delay = baseDelay + jitter;
+            setTimeout(wsConnect, delay);
             wsReconnectAttempts++;
         } else {
+            addClientLog('ws', 'Max reconnect attempts reached. Reload page (F5).', 'error');
             addMessageTo("error", "Не удалось подключиться. Перезагрузите (F5).", hubChatBox);
             addMessageTo("error", "Не удалось подключиться. Перезагрузите (F5).", projectChatBox);
         }
@@ -1905,7 +1945,10 @@ function selectModel(id) {
     renderModels();
     updateStatusBar();
     const m = allModels.find(x=>x.id===id);
-    if (m) showToast('Модель: ' + m.name, 'success');
+    if (m) {
+        addClientLog('select_model', 'Model selected: ' + m.name);
+        showToast('Модель: ' + m.name, 'success');
+    }
 }
 
 function toggleModelPriority(id) {
@@ -2007,6 +2050,7 @@ async function selectProject(id) {
     updateStatusBar();
     const p = allProjects.find(x=>x.id===id);
     if (p) {
+        addClientLog('select_project', 'Project selected: ' + p.name);
         priorityModels = p.model_ids || [];
     } else {
         priorityModels = [];
@@ -2017,6 +2061,9 @@ async function selectProject(id) {
         projectChatBox.innerHTML = "";
         addMessageTo("system", `Проект: ${p.name}`, projectChatBox);
         showToast('Проект: ' + p.name, 'info');
+        // Show project name in header center
+        const hpn = document.getElementById('header-project-name');
+        if (hpn) { hpn.textContent = p.name; hpn.style.display = ''; }
         // Загрузить файловое дерево
         loadProjectFileTree();
     } else {

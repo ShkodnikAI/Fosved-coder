@@ -624,7 +624,7 @@ pre:hover .code-btn-bar { opacity: 1; }
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     display: flex; flex-direction: column; overflow: hidden;
-    max-width: 720px;
+    max-width: 66.67%;
     width: 100%;
 }
 .input-wrapper {
