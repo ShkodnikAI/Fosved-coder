@@ -240,7 +240,15 @@ async def websocket_chat(websocket: WebSocket):
             # Handle slash commands
             if data.startswith("/"):
                 logger.log(f"command: {data[:100]}", level="info", source="ws", project_id=current_project_id)
-                await handle_command(data, current_project_id, websocket, model_id)
+                try:
+                    await handle_command(data, current_project_id, websocket, model_id)
+                except Exception as cmd_err:
+                    err_msg = str(cmd_err)[:300]
+                    logger.log("command_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
+                    try:
+                        await websocket.send_json({"type": "command_result", "content": f"Ошибка: {err_msg}"})
+                    except Exception:
+                        pass
                 continue
 
             # Parse JSON payload (chat message with model/priority info)
@@ -283,7 +291,16 @@ async def websocket_chat(websocket: WebSocket):
                 hub_model = payload.get("model_id")
                 if hub_prompt:
                     logger.user_action("hub_chat", details={"model": hub_model})
-                    await handle_hub_message(hub_prompt, websocket, model_id=hub_model)
+                    try:
+                        await handle_hub_message(hub_prompt, websocket, model_id=hub_model)
+                    except Exception as chat_err:
+                        import traceback
+                        err_msg = str(chat_err)[:300]
+                        logger.log("hub_chat_error", level="error", source="ws", error=err_msg)
+                        try:
+                            await websocket.send_json({"type": "error", "content": f"Ошибка модели: {err_msg}"})
+                        except Exception:
+                            pass
                 continue
 
             # Handle start_questionnaire (создание анкеты из UI)
@@ -293,7 +310,15 @@ async def websocket_chat(websocket: WebSocket):
                 await websocket.send_json({"type": "questionnaire_created", "id": q_id})
                 from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
                 questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {q_title}"
-                await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id)
+                try:
+                    await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id)
+                except Exception as q_err:
+                    err_msg = str(q_err)[:300]
+                    logger.log("questionnaire_error", level="error", source="ws", error=err_msg)
+                    try:
+                        await websocket.send_json({"type": "error", "content": f"Ошибка анкетирования: {err_msg}"})
+                    except Exception:
+                        pass
                 continue
 
             # Handle refactor requests
@@ -318,7 +343,15 @@ async def websocket_chat(websocket: WebSocket):
 ```
 {refactor_code}
 ```"""
-                await handle_chat_message(refactor_prompt, current_project_id, repo_map, websocket)
+                try:
+                    await handle_chat_message(refactor_prompt, current_project_id, repo_map, websocket)
+                except Exception as ref_err:
+                    err_msg = str(ref_err)[:300]
+                    logger.log("refactor_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
+                    try:
+                        await websocket.send_json({"type": "error", "content": f"Ошибка рефакторинга: {err_msg}"})
+                    except Exception:
+                        pass
                 continue
 
             # Build project context (Repo Map)
@@ -368,10 +401,30 @@ async def websocket_chat(websocket: WebSocket):
             if mode == "auto":
                 logger.user_action("auto_mode_chat", project_id=current_project_id, details={"model": model_id})
                 from core.auto_agent import run_auto_mode
-                await run_auto_mode(prompt, current_project_id, repo_map, websocket, model_id=model_id)
+                try:
+                    await run_auto_mode(prompt, current_project_id, repo_map, websocket, model_id=model_id)
+                except Exception as auto_err:
+                    import traceback
+                    err_msg = str(auto_err)[:300]
+                    logger.log("auto_mode_error", level="error", source="ws", project_id=current_project_id,
+                               error=err_msg, model=model_id)
+                    try:
+                        await websocket.send_json({"type": "error", "content": f"Ошибка авто-режима: {err_msg}"})
+                    except Exception:
+                        pass
             else:
                 logger.user_action("manual_chat", project_id=current_project_id, details={"model": model_id})
-                await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id)
+                try:
+                    await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id)
+                except Exception as chat_err:
+                    import traceback
+                    err_msg = str(chat_err)[:300]
+                    logger.log("manual_chat_error", level="error", source="ws", project_id=current_project_id,
+                               error=err_msg, model=model_id)
+                    try:
+                        await websocket.send_json({"type": "error", "content": f"Ошибка модели ({model_id}): {err_msg}"})
+                    except Exception:
+                        pass
 
     except WebSocketDisconnect:
         keepalive_task.cancel()
