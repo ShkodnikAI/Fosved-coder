@@ -880,7 +880,10 @@ function setActiveAiContext(div, text, chatBox, typingDiv) {
 // ═══════════════════════════════════════════════════════
 // ЭКРАН ЗАГРУЗКИ
 // ═══════════════════════════════════════════════════════
+let _loadingHidden = false;
 function hideLoadingScreen() {
+    if (_loadingHidden) return;
+    _loadingHidden = true;
     const el = document.getElementById('loading-screen');
     if (!el) return;
     el.style.opacity = '0';
@@ -1473,6 +1476,9 @@ function updateModeUI() {
 setTimeout(updateModeUI, 100);
 
 // ═══════════════════════════════════════════════════════
+// Safety: force-hide loading screen after 12s even if APIs hang
+setTimeout(() => { hideLoadingScreen(); }, 12000);
+
 // WEBSOCKET — Подключение и обработка сообщений
 // ═══════════════════════════════════════════════════════
 let wsReconnectAttempts = 0;
