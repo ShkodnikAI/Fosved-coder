@@ -514,8 +514,9 @@ def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
 async def stream_llm_response(prompt: str, history: list, websocket,
                               model: str = None, system_prompt: str = None,
                               project_path: str | None = None, use_tools: bool = True,
-                              _error_info: dict = None):
-    """Stream AI response with tool calling support. Loops until no more tool calls."""
+                              _error_info: dict = None, _cancel_check=None):
+    """Stream AI response with tool calling support. Loops until no more tool calls.
+    _cancel_check: optional callable() -> bool, if True → abort immediately."""
     if model is None:
         model = CONFIG["llm"].get("default_model")
     if system_prompt is None:
@@ -555,6 +556,12 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     max_tool_iterations = 10  # Prevent infinite loops
 
     for iteration in range(max_tool_iterations):
+        # Check cancellation before each iteration
+        if _cancel_check and _cancel_check():
+            await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
+            await _send_log(websocket, "⏹ Генерация отменена пользователем", "warning")
+            return None
+
         current_tool_calls = {}  # Accumulate tool call chunks: {index: {id, name, arguments}}
         current_content = ""
 
@@ -605,6 +612,12 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             # Process streamed chunks
             finish_reason = None
             async for chunk in response:
+                # Check cancellation during streaming
+                if _cancel_check and _cancel_check():
+                    await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
+                    await _send_log(websocket, "⏹ Генерация отменена пользователем", "warning")
+                    return full_response or None
+
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
@@ -762,7 +775,7 @@ async def _route_with_priority(prompt: str, priority_models: list[str]) -> str |
 # MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════
 
-async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None):
+async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None):
     """Main entry point: get history, build context, stream response with tool calling and fallback."""
     print(f"  [agent] handle_chat_message: prompt='{prompt[:80]}', project_id={project_id}, model_id={model_id}")
     history = await get_history(project_id)
@@ -918,7 +931,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             prompt, history, websocket,
             model=model_to_try, system_prompt=system_prompt,
             project_path=project_path, use_tools=True,
-            _error_info=error_info
+            _error_info=error_info, _cancel_check=_cancel_check
         )
         print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, no_tools={error_info.get('no_tools')}, no_credits={error_info.get('no_credits')}")
         if error_info.get("no_credits") and model_provider:
@@ -1036,7 +1049,7 @@ QUESTIONNAIRE_SYSTEM_PROMPT = """Ты Fosved Coder — аналитик треб
 """
 
 
-async def handle_hub_message(prompt: str, websocket, model_id: str = None):
+async def handle_hub_message(prompt: str, websocket, model_id: str = None, _cancel_check=None):
     """
     Обработчик сообщений ГЛАВНОГО ЭКРАНА.
     Нет контекста проекта, нет инструментов (read/write/execute).
@@ -1106,6 +1119,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
             project_path=None,
             use_tools=False,  # На главном экране инструментов НЕТ
             _error_info=error_info,
+            _cancel_check=_cancel_check,
         )
         print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
         if error_info.get("no_credits") and model_provider:

@@ -197,6 +197,9 @@ async def websocket_chat(websocket: WebSocket):
     ws_session_id = str(__import__('uuid').uuid4())  # Unique session ID for memory
     logger.log("websocket_connected", level="info", source="ws")
 
+    # ── Cancellation flag: set by client to abort current generation ──
+    ws_cancelled = False
+
     # ── Server-side keepalive: ping every 4 sec to prevent proxy idle kill ──
     async def _ws_keepalive():
         try:
@@ -294,6 +297,13 @@ async def websocket_chat(websocket: WebSocket):
                 await safe_ws_send(websocket, {"type": "auto_log", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}", "level": "info"})
                 continue
 
+            # Handle stop_generation — abort current LLM call
+            if payload.get("type") == "stop_generation":
+                ws_cancelled = True
+                logger.user_action("stop_generation", project_id=current_project_id)
+                await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
+                continue
+
             # Handle hub chat (главный экран — без контекста проекта)
             if payload.get("type") == "hub_chat":
                 hub_prompt = payload.get("prompt", "")
@@ -301,7 +311,7 @@ async def websocket_chat(websocket: WebSocket):
                 if hub_prompt:
                     logger.user_action("hub_chat", details={"model": hub_model})
                     try:
-                        await handle_hub_message(hub_prompt, websocket, model_id=hub_model)
+                        await handle_hub_message(hub_prompt, websocket, model_id=hub_model, _cancel_check=lambda: ws_cancelled)
                     except Exception as chat_err:
                         import traceback
                         err_msg = str(chat_err)[:300]
@@ -320,7 +330,7 @@ async def websocket_chat(websocket: WebSocket):
                 from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
                 questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {q_title}"
                 try:
-                    await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id)
+                    await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
                 except Exception as q_err:
                     err_msg = str(q_err)[:300]
                     logger.log("questionnaire_error", level="error", source="ws", error=err_msg)
@@ -353,7 +363,7 @@ async def websocket_chat(websocket: WebSocket):
 {refactor_code}
 ```"""
                 try:
-                    await handle_chat_message(refactor_prompt, current_project_id, repo_map, websocket)
+                    await handle_chat_message(refactor_prompt, current_project_id, repo_map, websocket, _cancel_check=lambda: ws_cancelled)
                 except Exception as ref_err:
                     err_msg = str(ref_err)[:300]
                     logger.log("refactor_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
@@ -424,7 +434,7 @@ async def websocket_chat(websocket: WebSocket):
             else:
                 logger.user_action("manual_chat", project_id=current_project_id, details={"model": model_id})
                 try:
-                    await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id)
+                    await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
                 except Exception as chat_err:
                     import traceback
                     err_msg = str(chat_err)[:300]
@@ -664,7 +674,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         await safe_ws_send(websocket, {"type": "questionnaire_created", "id": q_id})
         from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
         questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {title}"
-        await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id)
+        await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
 
     elif command == "/help":
         help_text = (

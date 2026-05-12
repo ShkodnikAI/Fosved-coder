@@ -376,6 +376,7 @@
                             <button id="hub-retry-btn" class="btn-retry" onclick="retryHubMessage()" style="display:none">🔄</button>
                         </div>
                         <div class="input-center">
+                            <button class="btn-stop" id="hub-stop-btn" onclick="stopGeneration()" style="display:none" title="Остановить">⏹ Стоп</button>
                             <button class="btn-send" id="hub-send-btn" onclick="sendHubMessage()">Отправить</button>
                         </div>
                         <div class="input-right">
@@ -499,6 +500,7 @@
                                 <button id="project-retry-btn" class="btn-retry" onclick="retryLastMessage()" style="display:none">🔄</button>
                             </div>
                             <div class="input-center">
+                                <button class="btn-stop" id="project-stop-btn" onclick="stopGeneration()" style="display:none" title="Остановить">⏹ Стоп</button>
                                 <button class="btn-send" id="project-send-btn" onclick="sendMessage()">Отправить</button>
                             </div>
                             <div class="input-right">
@@ -1248,7 +1250,9 @@ function setWaitingAI(state) {
     const fill = document.getElementById('header-progress-fill');
     const retryBtn = document.getElementById('project-retry-btn');
     const sendBtn = document.getElementById('project-send-btn');
+    const stopBtn = document.getElementById('project-stop-btn');
     if (sendBtn) { sendBtn.disabled = !!state; sendBtn.classList.toggle('is-loading', !!state); }
+    if (stopBtn) stopBtn.style.display = state ? 'flex' : 'none';
     if (state) {
         if (input) input.classList.add('waiting');
         if (retryBtn) retryBtn.style.display = 'none';
@@ -1270,7 +1274,9 @@ function setHubWaitingAI(state) {
     const input = document.getElementById('hub-user-input');
     const sendBtn = document.getElementById('hub-send-btn');
     const retryBtn = document.getElementById('hub-retry-btn');
+    const stopBtn = document.getElementById('hub-stop-btn');
     if (sendBtn) { sendBtn.disabled = !!state; sendBtn.classList.toggle('is-loading', !!state); }
+    if (stopBtn) stopBtn.style.display = state ? 'flex' : 'none';
     if (state) {
         if (input) input.classList.add('waiting');
         if (retryBtn) retryBtn.style.display = 'none';
@@ -1278,6 +1284,16 @@ function setHubWaitingAI(state) {
         if (input) input.classList.remove('waiting');
         if (retryBtn && lastHubSentMessage) retryBtn.style.display = 'flex';
     }
+}
+
+function stopGeneration() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({type: "stop_generation"}));
+        addClientLog('ws', '⛔ Stop generation requested');
+    }
+    // Immediately hide stop button, reset waiting state
+    setWaitingAI(false);
+    setHubWaitingAI(false);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1591,6 +1607,20 @@ function wsConnect() {
             else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
             setTimeout(() => { updateHeaderModelBadge(null); }, 3000);
             if (currentProjectId) autoIncrementProgress();
+            return;
+        }
+
+        // ─── Генерация остановлена пользователем ───
+        if (data.type === "generation_stopped") {
+            const ctx = getActiveAiContext();
+            if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            flushAiRender();
+            setWaitingAI(false);
+            setHubWaitingAI(false);
+            updateHeaderModelBadge(null);
+            if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
+            else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
+            addLogEntryToPanel({level:'warning',source:'system',action:data.content||'Генерация остановлена',time:new Date().toLocaleTimeString()});
             return;
         }
 

@@ -743,6 +743,21 @@ pre:hover .code-btn-bar { opacity: 1; }
 .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-send.is-loading { position: relative; }
 
+/* Stop button — red, pulsing */
+.btn-stop {
+    background: var(--red); color: #fff; border: none;
+    padding: 6px 14px; border-radius: var(--radius-md); cursor: pointer;
+    font-weight: 700; font-size: 12px; transition: all 0.15s;
+    display: flex; align-items: center; gap: 4px;
+    animation: stopPulse 1.5s ease-in-out infinite;
+}
+.btn-stop:hover { background: #dc2626; transform: scale(1.05); }
+.btn-stop:active { transform: scale(0.95); }
+@keyframes stopPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
+    50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+}
+
 .btn-retry {
     background: var(--red-dim); color: var(--red);
     border: 1px solid rgba(244,71,71,0.3); padding: 6px 12px;
@@ -1166,6 +1181,7 @@ pre:hover .code-btn-bar { opacity: 1; }
     .bottom-bar { height: 28px; }
     .bottom-btn { padding: 3px 6px; font-size: 10px; }
     .btn-send { padding: 5px 12px; font-size: 12px; }
+    .btn-stop { padding: 5px 10px; font-size: 11px; }
     .btn-mic { font-size: 14px; padding: 2px; }
     .hub-input-extra button { padding: 3px 6px; font-size: 10px; }
     .project-input-bar button { padding: 3px 6px; font-size: 10px; }
