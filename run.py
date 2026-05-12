@@ -384,12 +384,10 @@ async def websocket_chat(websocket: WebSocket):
         except Exception:
             pass
     except Exception as e:
-HEAD
         keepalive_task.cancel()
         import traceback
         logger.log("websocket_error", level="error", source="ws", project_id=current_project_id,
                    error=str(e)[:500], stack_trace=traceback.format_exc()[-2000:])
-ac3d53d (fix: textarea rows 6 → 4 (both hub and project inputs))
 
 
 async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
