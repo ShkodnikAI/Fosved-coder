@@ -89,7 +89,7 @@
     .right-panel-tab:hover { color: var(--text-secondary); background: var(--bg-hover); }
     .right-panel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     .right-panel-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-    .right-panel-pane { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .right-panel-pane { display: none; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; }
     .right-panel-pane.active { display: flex; }
 
     /* Вкладка "Скиллы" в правой панели (главный экран) */
@@ -1477,9 +1477,6 @@ function wsConnect() {
             // Определяем, куда направлять — в зависимости от текущего экрана или источника
             const ctx = getActiveAiContext();
             if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
-            // Сбросить ожидание обоих чатов
-            setWaitingAI(false);
-            setHubWaitingAI(false);
             if (!ctx.div) {
                 const newDiv = document.createElement("div");
                 newDiv.className = "msg ai";
@@ -1669,11 +1666,29 @@ function updateHeaderModelBadge(name, state) {
 /** Результаты зондирования моделей */
 function handleProbedModels(models) {
     const indicator = document.getElementById('probed-indicator');
-    if (!indicator || !models.length) return;
-    indicator.style.display = 'block';
-    document.getElementById('probed-count').textContent = models.length;
-    // Обновить статус в интерфейсе
-    showToast(`Зондировано ${models.length} моделей`, 'success');
+    if (!indicator) return;
+    const total = allModels.length;
+    indicator.style.display = models && models.length ? 'block' : 'none';
+    document.getElementById('probed-count').textContent = (models ? models.length : 0) + '/' + total;
+    // Обновить прогресс-бар
+    const barFill = document.getElementById('probed-bar-fill');
+    if (barFill && total > 0) {
+        barFill.style.width = Math.round(((models ? models.length : 0) / total) * 100) + '%';
+    }
+    // Обновить статусы моделей в allModels и перерисовать
+    if (models && models.length) {
+        models.forEach(probed => {
+            const mid = probed.model_id || probed.id;
+            const m = allModels.find(x => x.id === mid);
+            if (m) {
+                if (probed.status) m.status = probed.status;
+            }
+        });
+        renderModels();
+    }
+    if (models && models.length) {
+        showToast(`Зондировано ${models.length}/${total} моделей`, 'success');
+    }
 }
 
 /** Анкета создана */
@@ -2213,6 +2228,8 @@ function updateLogBadge() {
     });
     const count = document.getElementById('log-count');
     if (count) count.textContent = autoLogCount + ' записей';
+    // Обновить счётчик в hub-панели (используется класс)
+    document.querySelectorAll('.hub-log-count').forEach(el => { el.textContent = autoLogCount + ' записей'; });
 }
 
 function filterLogs(level, btn) {
@@ -2233,13 +2250,13 @@ function clearAutoLog() {
 }
 
 function copyAllLogs() {
-    const entries = document.querySelectorAll('#log-entries .log-text');
+    const entries = document.querySelectorAll('#log-entries .log-text, #hub-log-entries .log-text');
     const text = Array.from(entries).map(e=>e.textContent).join('\n');
     navigator.clipboard.writeText(text).then(()=>showToast("Скопировано","success"));
 }
 
 function saveAllLogs() {
-    const entries = document.querySelectorAll('#log-entries .log-text');
+    const entries = document.querySelectorAll('#log-entries .log-text, #hub-log-entries .log-text');
     const text = Array.from(entries).map(e=>e.textContent).join('\n');
     const blob = new Blob([text], {type:'text/plain'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -2515,26 +2532,26 @@ async function doAddKey(pid) {
 }
 async function removeKey(pid) {
     if (!confirm('Удалить ключ?')) return;
-    await fetch('/api/v1/keys/'+pid, {method:'DELETE'});
+    const resp = await fetch('/api/v1/keys/'+pid, {method:'DELETE'});
+    if (!resp.ok) { const d = await resp.json().catch(()=>({})); showToast(d.detail||'Ошибка','error'); return; }
     await loadModels(); showKeysModal(); showToast("Удалено","success");
 }
 async function toggleProvider(pid, enabled) {
     try {
-        await fetch('/api/v1/keys/'+pid+'/toggle', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled}) });
+        const resp = await fetch('/api/v1/keys/'+pid+'/toggle', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled}) });
+        if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error(errData.detail || errData.error || `Ошибка ${resp.status}`);
+        }
         showToast(enabled ? 'Провайдер включён' : 'Провайдер выключен', enabled ? 'success' : 'warning');
-        // Update local allModels to reflect toggle immediately
-        allModels.forEach(m => {
-            if (m.provider === pid) {
-                m.enabled = enabled;
-            }
-        });
         await loadModels();
         showKeysModal();
     } catch(e) { showToast('Ошибка: ' + e.message, 'error'); }
 }
 async function revalidateKey(pid) {
     showToast("Проверка...","info");
-    await fetch('/api/v1/models/validate/'+pid, {method:'POST'});
+    const resp = await fetch('/api/v1/models/validate/'+pid, {method:'POST'});
+    if (!resp.ok) { showToast('Ошибка валидации','error'); return; }
     await loadModels(); showKeysModal(); showToast("Готово","success");
 }
 function showAddGithubToken() {
