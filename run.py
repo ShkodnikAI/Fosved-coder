@@ -21,6 +21,15 @@ from api.endpoints import router as api_router
 
 logger = get_logger()
 
+
+async def safe_ws_send(websocket, data: dict):
+    """Send JSON to websocket, silently ignoring any errors (closed conn, etc.)."""
+    try:
+        await websocket.send_json(data)
+    except Exception:
+        pass
+
+
 # Global instances
 executor = CommandExecutor()
 ideas_injector = IdeasInjector()
@@ -194,7 +203,7 @@ async def websocket_chat(websocket: WebSocket):
             while True:
                 await asyncio.sleep(4)
                 try:
-                    await websocket.send_json({"type": "ping"})
+                    await safe_ws_send(websocket, {"type": "ping"})
                 except Exception:
                     break
         except asyncio.CancelledError:
@@ -205,7 +214,7 @@ async def websocket_chat(websocket: WebSocket):
     try:
         probed = await get_probed_models()
         if probed:
-            await websocket.send_json({"type": "probed_models", "models": probed})
+            await safe_ws_send(websocket, {"type": "probed_models", "models": probed})
     except Exception:
         pass
 
@@ -213,7 +222,7 @@ async def websocket_chat(websocket: WebSocket):
     try:
         memory_ctx = await assemble_context(project_id=None, max_tokens=300)
         if memory_ctx:
-            await websocket.send_json({
+            await safe_ws_send(websocket, {
                 "type": "auto_log",
                 "content": f"🧠 Память загружена",
                 "level": "info",
@@ -228,13 +237,13 @@ async def websocket_chat(websocket: WebSocket):
             except asyncio.TimeoutError:
                 # Idle: send a ping; if peer is gone, the next iteration will raise
                 try:
-                    await websocket.send_json({"type": "ping"})
+                    await safe_ws_send(websocket, {"type": "ping"})
                 except Exception:
                     raise WebSocketDisconnect()
                 continue
 
             if len(data) > WS_MAX_MESSAGE_BYTES:
-                await websocket.send_json({"type": "error", "content": f"Сообщение превышает лимит {WS_MAX_MESSAGE_BYTES // (1024 * 1024)} MB"})
+                await safe_ws_send(websocket, {"type": "error", "content": f"Сообщение превышает лимит {WS_MAX_MESSAGE_BYTES // (1024 * 1024)} MB"})
                 continue
 
             # Handle slash commands
@@ -246,7 +255,7 @@ async def websocket_chat(websocket: WebSocket):
                     err_msg = str(cmd_err)[:300]
                     logger.log("command_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
                     try:
-                        await websocket.send_json({"type": "command_result", "content": f"Ошибка: {err_msg}"})
+                        await safe_ws_send(websocket, {"type": "command_result", "content": f"Ошибка: {err_msg}"})
                     except Exception:
                         pass
                 continue
@@ -274,7 +283,7 @@ async def websocket_chat(websocket: WebSocket):
 
             # Handle heartbeat ping
             if payload.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
+                await safe_ws_send(websocket, {"type": "pong"})
                 continue
 
             # Handle mode change
@@ -282,7 +291,7 @@ async def websocket_chat(websocket: WebSocket):
                 new_mode = payload.get("mode", "manual")
                 current_mode = new_mode
                 logger.user_action(f"mode_change: {new_mode}", project_id=current_project_id)
-                await websocket.send_json({"type": "auto_log", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}", "level": "info"})
+                await safe_ws_send(websocket, {"type": "auto_log", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}", "level": "info"})
                 continue
 
             # Handle hub chat (главный экран — без контекста проекта)
@@ -298,7 +307,7 @@ async def websocket_chat(websocket: WebSocket):
                         err_msg = str(chat_err)[:300]
                         logger.log("hub_chat_error", level="error", source="ws", error=err_msg)
                         try:
-                            await websocket.send_json({"type": "error", "content": f"Ошибка модели: {err_msg}"})
+                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка модели: {err_msg}"})
                         except Exception:
                             pass
                 continue
@@ -307,7 +316,7 @@ async def websocket_chat(websocket: WebSocket):
             if payload.get("type") == "start_questionnaire":
                 q_title = payload.get("title", "Новый проект")
                 q_id = await save_questionnaire({"title": q_title, "project_id": project_id})
-                await websocket.send_json({"type": "questionnaire_created", "id": q_id})
+                await safe_ws_send(websocket, {"type": "questionnaire_created", "id": q_id})
                 from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
                 questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {q_title}"
                 try:
@@ -316,7 +325,7 @@ async def websocket_chat(websocket: WebSocket):
                     err_msg = str(q_err)[:300]
                     logger.log("questionnaire_error", level="error", source="ws", error=err_msg)
                     try:
-                        await websocket.send_json({"type": "error", "content": f"Ошибка анкетирования: {err_msg}"})
+                        await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка анкетирования: {err_msg}"})
                     except Exception:
                         pass
                 continue
@@ -349,7 +358,7 @@ async def websocket_chat(websocket: WebSocket):
                     err_msg = str(ref_err)[:300]
                     logger.log("refactor_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
                     try:
-                        await websocket.send_json({"type": "error", "content": f"Ошибка рефакторинга: {err_msg}"})
+                        await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка рефакторинга: {err_msg}"})
                     except Exception:
                         pass
                 continue
@@ -386,7 +395,7 @@ async def websocket_chat(websocket: WebSocket):
                         logger.log("intelligent_router_selected", level="info", source="ws",
                                    details={"model": model_id, "complexity": route_result.get("complexity"),
                                             "reason": route_result.get("reason", "")[:200]})
-                        await websocket.send_json({
+                        await safe_ws_send(websocket, {
                             "type": "auto_log",
                             "content": f"🔀 Маршрутизатор: {route_result.get('reason', '')}",
                             "level": "info",
@@ -409,7 +418,7 @@ async def websocket_chat(websocket: WebSocket):
                     logger.log("auto_mode_error", level="error", source="ws", project_id=current_project_id,
                                error=err_msg, model=model_id)
                     try:
-                        await websocket.send_json({"type": "error", "content": f"Ошибка авто-режима: {err_msg}"})
+                        await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка авто-режима: {err_msg}"})
                     except Exception:
                         pass
             else:
@@ -422,7 +431,7 @@ async def websocket_chat(websocket: WebSocket):
                     logger.log("manual_chat_error", level="error", source="ws", project_id=current_project_id,
                                error=err_msg, model=model_id)
                     try:
-                        await websocket.send_json({"type": "error", "content": f"Ошибка модели ({model_id}): {err_msg}"})
+                        await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка модели ({model_id}): {err_msg}"})
                     except Exception:
                         pass
 
@@ -449,7 +458,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
     command = parts[0]
     args = parts[1] if len(parts) > 1 else ""
 
-    await websocket.send_json({"type": "auto_log", "content": f"Выполняю: {cmd}", "level": "info"})
+    await safe_ws_send(websocket, {"type": "auto_log", "content": f"Выполняю: {cmd}", "level": "info"})
     try:
         logger.log(f"slash_command: {command} {args[:80]}", level="info", source="ws", project_id=project_id)
     except Exception:
@@ -464,7 +473,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         if result.get("approval_required"):
             request_id = result["request_id"]
             pending_approvals[request_id] = {"cmd": args, "websocket": websocket}
-            await websocket.send_json({
+            await safe_ws_send(websocket, {
                 "type": "approval_required",
                 "content": result["message"],
                 "request_id": request_id,
@@ -474,8 +483,8 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             output = f"Exit code: {result['exit_code']}\n\n{result['stdout']}"
             if result.get("stderr"):
                 output += f"\n\nSTDERR:\n{result['stderr']}"
-            await websocket.send_json({"type": "command_result", "content": output})
-        await websocket.send_json({"type": "done"})
+            await safe_ws_send(websocket, {"type": "command_result", "content": output})
+        await safe_ws_send(websocket, {"type": "done"})
         try:
             logger.log("terminal_done", level="success", source="ws", project_id=project_id, details={"exit_code": result.get("exit_code"), "approved": False})
         except Exception:
@@ -485,23 +494,23 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         request_id = args.strip()
         if request_id in pending_approvals:
             pending = pending_approvals.pop(request_id)
-            await websocket.send_json({"type": "auto_log", "content": f"Подтверждаю: {pending['cmd']}", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Подтверждаю: {pending['cmd']}", "level": "info"})
             result = await executor.execute_approved(pending["cmd"], request_id)
             output = f"Exit code: {result['exit_code']}\n\n{result['stdout']}"
             if result.get("stderr"):
                 output += f"\n\nSTDERR:\n{result['stderr']}"
-            await websocket.send_json({"type": "command_result", "content": output})
-            await websocket.send_json({"type": "done"})
+            await safe_ws_send(websocket, {"type": "command_result", "content": output})
+            await safe_ws_send(websocket, {"type": "done"})
         else:
-            await websocket.send_json({"type": "auto_log", "content": "Нет ожидающих подтверждения команд.", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Нет ожидающих подтверждения команд.", "level": "info"})
 
     elif command == "/reject":
         request_id = args.strip()
         if request_id in pending_approvals:
             pending_approvals.pop(request_id)
-            await websocket.send_json({"type": "auto_log", "content": "Команда отклонена.", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Команда отклонена.", "level": "info"})
         else:
-            await websocket.send_json({"type": "auto_log", "content": "Нет ожидающих команд.", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Нет ожидающих команд.", "level": "info"})
 
     elif command == "/git_pull":
         try:
@@ -520,14 +529,14 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             # Извлечь полезную инфу: "Already up to date" или "Updating X..Y"
             lines = [l.strip() for l in stdout.split("\n") if l.strip() and not l.startswith("From ")]
             summary = lines[0] if lines else "Already up to date"
-            await websocket.send_json({"type": "auto_log", "content": f"📥 Pull OK: {summary}", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"📥 Pull OK: {summary}", "level": "info"})
         else:
-            await websocket.send_json({"type": "error", "content": f"📥 Pull failed: {result.get('stderr', 'unknown error')[:200]}"})
+            await safe_ws_send(websocket, {"type": "error", "content": f"📥 Pull failed: {result.get('stderr', 'unknown error')[:200]}"})
             try:
                 logger.log("git_pull_failed", level="error", source="ws", project_id=project_id, error=result.get('stderr', '')[:200])
             except Exception:
                 pass
-        await websocket.send_json({"type": "done"})
+        await safe_ws_send(websocket, {"type": "done"})
 
     elif command == "/git_push":
         try:
@@ -544,18 +553,18 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         push_out = await git_push_with_token(executor, project_path, project_token)
         push_out_stripped = push_out.strip()
         if "error" in push_out_stripped.lower() or "fatal" in push_out_stripped.lower() or "denied" in push_out_stripped.lower():
-            await websocket.send_json({"type": "error", "content": f"📤 Push failed: {push_out_stripped[:200]}"})
+            await safe_ws_send(websocket, {"type": "error", "content": f"📤 Push failed: {push_out_stripped[:200]}"})
             try:
                 logger.log("git_push_failed", level="error", source="ws", project_id=project_id, error=push_out_stripped[:200])
             except Exception:
                 pass
         elif "Everything up-to-date" in push_out_stripped:
-            await websocket.send_json({"type": "auto_log", "content": "📤 Push: уже актуально", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "📤 Push: уже актуально", "level": "info"})
         else:
             lines = [l for l in push_out_stripped.split("\n") if l.strip()]
             summary = lines[-1] if lines else "OK"
-            await websocket.send_json({"type": "auto_log", "content": f"📤 Push OK: {summary}", "level": "info"})
-        await websocket.send_json({"type": "done"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"📤 Push OK: {summary}", "level": "info"})
+        await safe_ws_send(websocket, {"type": "done"})
 
     elif command == "/quick_push":
         try:
@@ -571,8 +580,8 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
                 project_path = project["path"]
                 project_token = project.get("github_token") or None
         if not project_path:
-            await websocket.send_json({"type": "auto_log", "content": "Выберите проект для Quick Push", "level": "info"})
-            await websocket.send_json({"type": "done"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Выберите проект для Quick Push", "level": "info"})
+            await safe_ws_send(websocket, {"type": "done"})
             return
 
         msg = args.strip() or "sync"
@@ -582,20 +591,20 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         commit_result = await executor.execute(f"git commit -m {shlex.quote(msg)} --allow-empty", cwd=project_path)
         commit_out = (commit_result.get("stdout", "") + commit_result.get("stderr", "")).strip()
         if "nothing to commit" in commit_out.lower():
-            await websocket.send_json({"type": "auto_log", "content": "📤 Quick Push: нет изменений для коммита", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "📤 Quick Push: нет изменений для коммита", "level": "info"})
         else:
             # push with project PAT token
             push_out = await git_push_with_token(executor, project_path, project_token)
             push_out_stripped = push_out.strip()
             if "error" in push_out_stripped.lower() or "fatal" in push_out_stripped.lower() or "denied" in push_out_stripped.lower():
-                await websocket.send_json({"type": "auto_log", "content": f"📤 Committed, push failed: {push_out_stripped[:100]}", "level": "info"})
+                await safe_ws_send(websocket, {"type": "auto_log", "content": f"📤 Committed, push failed: {push_out_stripped[:100]}", "level": "info"})
             else:
-                await websocket.send_json({"type": "auto_log", "content": f"📤 Quick Push OK: {msg}", "level": "info"})
-        await websocket.send_json({"type": "done"})
+                await safe_ws_send(websocket, {"type": "auto_log", "content": f"📤 Quick Push OK: {msg}", "level": "info"})
+        await safe_ws_send(websocket, {"type": "done"})
 
     elif command == "/clear":
         await clear_history(project_id)
-        await websocket.send_json({"type": "auto_log", "content": "История чата очищена.", "level": "info"})
+        await safe_ws_send(websocket, {"type": "auto_log", "content": "История чата очищена.", "level": "info"})
 
     elif command == "/test":
         try:
@@ -609,8 +618,8 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             if project:
                 project_path = project["path"]
         if not project_path:
-            await websocket.send_json({"type": "auto_log", "content": "Выберите проект для проверки", "level": "info"})
-            await websocket.send_json({"type": "done"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Выберите проект для проверки", "level": "info"})
+            await safe_ws_send(websocket, {"type": "done"})
             return
         from core.code_tester import run_full_check
         # Determine if user wants to skip tests (--no-tests flag)
@@ -623,36 +632,36 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         except Exception:
             pass
         if not args.strip():
-            await websocket.send_json({"type": "auto_log", "content": "Использование: /ideas <github_url>", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Использование: /ideas <github_url>", "level": "info"})
             return
         result = await ideas_injector.process_idea(args.strip())
-        await websocket.send_json({"type": "idea_result", "content": result})
-        await websocket.send_json({"type": "done"})
+        await safe_ws_send(websocket, {"type": "idea_result", "content": result})
+        await safe_ws_send(websocket, {"type": "done"})
 
     elif command == "/repo_map":
         if project_id:
             project = await get_project(project_id)
             if project:
                 repo_map = await context_manager.build_repo_map(project["path"], project_id)
-                await websocket.send_json({"type": "command_result", "content": repo_map})
-                await websocket.send_json({"type": "done"})
+                await safe_ws_send(websocket, {"type": "command_result", "content": repo_map})
+                await safe_ws_send(websocket, {"type": "done"})
             else:
-                await websocket.send_json({"type": "auto_log", "content": "Проект не найден.", "level": "info"})
+                await safe_ws_send(websocket, {"type": "auto_log", "content": "Проект не найден.", "level": "info"})
         else:
-            await websocket.send_json({"type": "auto_log", "content": "Выберите проект для построения Repo Map.", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Выберите проект для построения Repo Map.", "level": "info"})
 
     elif command == "/probe":
         probed = await get_probed_models()
-        await websocket.send_json({"type": "probed_models", "models": probed})
+        await safe_ws_send(websocket, {"type": "probed_models", "models": probed})
         if probed:
-            await websocket.send_json({"type": "auto_log", "content": f"Зондировано моделей: {len(probed)}", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Зондировано моделей: {len(probed)}", "level": "info"})
         else:
-            await websocket.send_json({"type": "auto_log", "content": "Нет результатов зондирования. Попробуйте позже.", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Нет результатов зондирования. Попробуйте позже.", "level": "info"})
 
     elif command == "/questionnaire":
         title = args.strip() or "Новый проект"
         q_id = await save_questionnaire({"title": title, "project_id": project_id})
-        await websocket.send_json({"type": "questionnaire_created", "id": q_id})
+        await safe_ws_send(websocket, {"type": "questionnaire_created", "id": q_id})
         from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
         questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {title}"
         await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id)
@@ -674,14 +683,14 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             "/clear — очистить историю чата\n"
             "/help — эта справка"
         )
-        await websocket.send_json({"type": "auto_log", "content": help_text, "level": "info"})
+        await safe_ws_send(websocket, {"type": "auto_log", "content": help_text, "level": "info"})
 
     else:
         try:
             logger.log(f"unknown_command: {command}", level="warning", source="ws", project_id=project_id)
         except Exception:
             pass
-        await websocket.send_json({"type": "auto_log", "content": f"Неизвестная команда: {command}. Введите /help", "level": "info"})
+        await safe_ws_send(websocket, {"type": "auto_log", "content": f"Неизвестная команда: {command}. Введите /help", "level": "info"})
 
 
 @app.websocket("/ws/executor")
@@ -699,12 +708,12 @@ async def websocket_executor(websocket: WebSocket):
             request_id = data.get("request_id", "")
 
             async for chunk in executor.execute_stream(cmd):
-                await websocket.send_json({
+                await safe_ws_send(websocket, {
                     "type": "stream",
                     "request_id": request_id,
                     "data": chunk
                 })
-            await websocket.send_json({"type": "stream_done", "request_id": request_id})
+            await safe_ws_send(websocket, {"type": "stream_done", "request_id": request_id})
     except WebSocketDisconnect:
         try:
             logger.log("executor_ws_disconnected", level="info", source="ws")

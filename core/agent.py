@@ -64,6 +64,14 @@ def _now():
     return datetime.now(timezone.utc).strftime("%H:%M:%S")
 
 
+async def safe_ws_send(websocket, data: dict):
+    """Send JSON to websocket, silently ignoring any errors (closed conn, etc.)."""
+    try:
+        await websocket.send_json(data)
+    except Exception:
+        pass
+
+
 async def _send_log(websocket, content: str, level: str = "info"):
     """Send auto_log message to frontend log panel."""
     try:
@@ -307,7 +315,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             if len(content) > 30000:
                 content = content[:30000] + "\n\n... (файл обрезан, всего " + str(len(content)) + " символов)"
             logger.log(f"tool: read_file {path}", level="info", source="agent")
-            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": path}, "status": "done"})
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": path}, "status": "done"})
             await _send_log(websocket, f"📖 Читаю: {path} ({len(content)} симв.)", "info")
             return content
 
@@ -325,7 +333,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
             logger.log(f"tool: write_file {path} ({len(content)} chars)", level="info", source="agent")
-            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": path, "size": len(content)}, "status": "done"})
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": path, "size": len(content)}, "status": "done"})
             await _send_log(websocket, f"💾 Записываю: {path} ({len(content)} симв.)", "file")
             return f"Файл {path} сохранён ({len(content)} символов)"
 
@@ -357,7 +365,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 return "Ошибка: нет доступа к директории"
             result = "\n".join(entries) if entries else "(пустая директория)"
             logger.log(f"tool: list_files {rel_path} ({len(entries)} entries)", level="info", source="agent")
-            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"path": rel_path}, "status": "done"})
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": rel_path}, "status": "done"})
             await _send_log(websocket, f"📁 Список файлов: {rel_path} ({len(entries)} элементов)", "info")
             return result
 
@@ -401,7 +409,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             else:
                 result = f"Найдено {len(results)} совпадений:\n" + "\n".join(results[:30])
             logger.log(f"tool: search_files '{pattern}' -> {len(results)} results", level="info", source="agent")
-            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"pattern": pattern}, "status": "done"})
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"pattern": pattern}, "status": "done"})
             await _send_log(websocket, f"🔍 Поиск '{pattern}': {len(results)} совпадений", "info")
             return result
 
@@ -414,7 +422,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             if not exec_cwd and any(cmd in command.lower() for cmd in ["git ", "git\n", "npm ", "pip ", "python "]):
                 return f"Ошибка: нет пути к проекту (project_path is None). Команда '{command[:50]}' требует рабочую директорию. Откройте проект перед выполнением."
             logger.log(f"tool: execute_command '{command[:100]}'", level="info", source="agent")
-            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
             await _send_log(websocket, f"⚡ Выполняю: $ {command[:120]}", "command")
             result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=60)
             output = ""
@@ -426,7 +434,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 output = "(команда выполнена без вывода)"
             exit_code = result.get("exit_code", -1)
             status = "OK" if exit_code == 0 else f"exit code {exit_code}"
-            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"command": command}, "status": "done", "exit_code": exit_code})
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"command": command}, "status": "done", "exit_code": exit_code})
             log_level = "success" if exit_code == 0 else "error"
             log_text = f"Команда завершена ({status})" if exit_code == 0 else f"Команда: {status}"
             if output:
@@ -440,7 +448,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             if not project_path:
                 return "Ошибка: нет пути к проекту"
             logger.log(f"tool: git_commit_push '{message}'", level="info", source="agent")
-            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"message": message}, "status": "running"})
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"message": message}, "status": "running"})
             await _send_log(websocket, f"🚀 Git commit: {message}", "command")
             # Stage all
             r1 = await executor.execute("git add -A", cwd=project_path, need_approval=False)
@@ -451,7 +459,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             # Push with project PAT token if available
             project_token = await get_project_token_by_path(project_path)
             push_out = await git_push_with_token(executor, project_path, project_token)
-            await websocket.send_json({"type": "tool_call", "tool": name, "args": {"message": message}, "status": "done"})
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"message": message}, "status": "done"})
             await _send_log(websocket, f"🚀 Push: {push_out.strip()[:100]}", "success")
             return f"Commit: {commit_out.strip()}\nPush: {push_out.strip()}"
 
@@ -460,7 +468,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
 
     except Exception as e:
         logger.log(f"tool_error: {name} -> {str(e)[:200]}", level="error", source="agent")
-        await websocket.send_json({"type": "tool_call", "tool": name, "status": "error", "error": str(e)[:200]})
+        await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "status": "error", "error": str(e)[:200]})
         await _send_log(websocket, f"❌ Ошибка {name}: {str(e)[:150]}", "error")
         return f"Ошибка выполнения {name}: {str(e)[:500]}"
 
@@ -518,7 +526,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     if not api_key:
         logger.log(f"no_api_key: {model}", level="error", source="agent")
         print(f"  [agent] ERROR: no_api_key for model={model}")
-        await websocket.send_json({"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках."})
+        await safe_ws_send(websocket, {"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках."})
         await _send_log(websocket, f"❌ Нет API ключа для {model}", "error")
         return None
 
@@ -528,7 +536,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
     # Extended Thinking: уведомить клиента и настроить параметры
     if is_thinking:
-        await websocket.send_json({"type": "auto_log", "content": "Extended Thinking включён — модель будет рассуждать глубже", "level": "info"})
+        await safe_ws_send(websocket, {"type": "auto_log", "content": "Extended Thinking включён — модель будет рассуждать глубже", "level": "info"})
 
     # Build messages
     api_messages = []
@@ -603,7 +611,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
                 # Stream content chunks to client in real-time
                 if delta.content:
-                    await websocket.send_json({"type": "chunk", "content": delta.content})
+                    await safe_ws_send(websocket, {"type": "chunk", "content": delta.content})
                     full_response += delta.content
                     current_content += delta.content
 
@@ -654,7 +662,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                     except json.JSONDecodeError:
                         fn_args = {}
 
-                    await websocket.send_json({
+                    await safe_ws_send(websocket, {
                         "type": "tool_call",
                         "tool": fn_name,
                         "args": fn_args,
@@ -673,7 +681,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                 continue
 
             # Normal text response completed (or finish_reason is stop/length/end_turn)
-            await websocket.send_json({"type": "done"})
+            await safe_ws_send(websocket, {"type": "done"})
             duration = (time.time() - start_time) * 1000
             tokens = len(full_response) // 4
             logger.ai_response(model=model, tokens=tokens, success=True, duration_ms=duration)
@@ -699,7 +707,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             else:
                 error_msg = f"Ошибка ИИ: {error_msg}"
             logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
-            await websocket.send_json({"type": "error", "content": error_msg})
+            await safe_ws_send(websocket, {"type": "error", "content": error_msg})
             await _send_log(websocket, f"❌ {model}: {error_msg}", "error")
             # Signal 402 to caller for provider skipping in fallback
             if _error_info is not None and ("402" in error_msg or "insufficient credits" in error_msg.lower()):
@@ -707,7 +715,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             return None
 
     # Max iterations reached
-    await websocket.send_json({"type": "done"})
+    await safe_ws_send(websocket, {"type": "done"})
     await _send_log(websocket, f"⚠️ Достигнут лимит {max_tool_iterations} итераций tool calling", "warning")
     return full_response
 
@@ -804,13 +812,13 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     if project_id and compressor.should_compress(history):
         try:
             comp_model = ContextCompressor.get_compression_model_config()
-            await websocket.send_json({"type": "auto_log", "content": "Автосжатие контекста...", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Автосжатие контекста...", "level": "info"})
             compressed_summary, remaining, was_llm = await compressor.compress_and_cleanup(history, project_id, model_config=comp_model)
             if compressed_summary:
                 compressed_context_text = compressed_summary
                 method = "LLM" if was_llm else "regex"
                 removed = len(history) - len(remaining)
-                await websocket.send_json({"type": "auto_log", "content": f"Автосжатие ({method}): {removed} сообщений сжато", "level": "info"})
+                await safe_ws_send(websocket, {"type": "auto_log", "content": f"Автосжатие ({method}): {removed} сообщений сжато", "level": "info"})
                 history = remaining
         except Exception as e:
             print(f"  [agent] compression error: {e}")
@@ -849,7 +857,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             models_to_try.append(m["id"])
 
     if not models_to_try:
-        await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
+        await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         await _send_log(websocket, "❌ Нет доступных моделей", "error")
         return
 
@@ -897,12 +905,12 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         # Send display name (not raw ID) to frontend
         m_info = next((m for m in all_models if m["id"] == model_to_try), None)
         display_model = m_info["name"] if m_info else model_to_try
-        await websocket.send_json({"type": "typing", "model": display_model})
+        await safe_ws_send(websocket, {"type": "typing", "model": display_model})
 
         if i > 0:
             m_info = next((m for m in all_models if m["id"] == model_to_try), None)
             model_name = m_info["name"] if m_info else model_to_try
-            await websocket.send_json({"type": "auto_log", "content": f"Переключаюсь на {model_name} (попытка {tried_count})...", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {model_name} (попытка {tried_count})...", "level": "info"})
             await _send_log(websocket, f"🔄 Переключаюсь на {model_name} (попытка {tried_count})", "warning")
 
         error_info = {}
@@ -935,10 +943,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     if ai_response:
         await save_message(project_id, "ai", ai_response)
     elif tried_count == 0:
-        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом."})
+        await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
         await _send_log(websocket, "❌ Нет модели с API ключом", "error")
     else:
-        await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили."})
+        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
         await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
 
 
@@ -1060,7 +1068,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
 
     if not models_to_try:
         print(f"  [agent] hub: NO models available! all_models={len(all_models)}")
-        await websocket.send_json({"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
+        await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         return
 
     print(f"  [agent] hub: models_to_try={len(models_to_try)}, first={models_to_try[0] if models_to_try else 'none'}")
@@ -1085,10 +1093,10 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
         print(f"  [agent] hub: trying #{i}: {model_to_try} (key={has_key}, local={is_local})")
         m_info = next((m for m in all_models if m["id"] == model_to_try), None)
         display_model = m_info["name"] if m_info else model_to_try
-        await websocket.send_json({"type": "typing", "model": display_model})
+        await safe_ws_send(websocket, {"type": "typing", "model": display_model})
 
         if i > 0:
-            await websocket.send_json({"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
 
         error_info = {}
         ai_response = await stream_llm_response(
@@ -1110,9 +1118,9 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None):
         # Проверяем есть ли <skill> теги в ответе — парсим и выполняем
         await _process_skill_tags(ai_response, websocket)
     elif tried_count == 0:
-        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом."})
+        await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
     else:
-        await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили."})
+        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
 
 
 async def _process_skill_tags(response_text: str, websocket):
@@ -1128,7 +1136,7 @@ async def _process_skill_tags(response_text: str, websocket):
         skill_name = skill_name.strip()
         task_desc = task_desc.strip()
         logger.log(f"hub: skill requested: {skill_name} — {task_desc[:80]}", level="info", source="agent")
-        await websocket.send_json({
+        await safe_ws_send(websocket, {
             "type": "skill_request",
             "skill": skill_name,
             "task": task_desc,
@@ -1201,7 +1209,7 @@ async def handle_project_with_injection(
 
     project = await get_project(project_id)
     if not project:
-        await websocket.send_json({"type": "error", "content": "Проект не найден"})
+        await safe_ws_send(websocket, {"type": "error", "content": "Проект не найден"})
         return
 
     project_path = project.get("path", "")
@@ -1244,7 +1252,7 @@ async def handle_project_with_injection(
             models_to_try.append(m["id"])
 
     if not models_to_try:
-        await websocket.send_json({"type": "error", "content": "Нет доступных моделей."})
+        await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей."})
         return
 
     ai_response = None
@@ -1268,10 +1276,10 @@ async def handle_project_with_injection(
         tried_count += 1
         m_info = next((m for m in all_models if m["id"] == model_to_try), None)
         display_model = m_info["name"] if m_info else model_to_try
-        await websocket.send_json({"type": "typing", "model": display_model})
+        await safe_ws_send(websocket, {"type": "typing", "model": display_model})
 
         if i > 0:
-            await websocket.send_json({"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
 
         error_info = {}
 
@@ -1325,7 +1333,7 @@ async def handle_project_with_injection(
                     clean_text = parse_result.clean_text.strip()
                     if clean_text:
                         # Отправляем как итоговый ответ
-                        await websocket.send_json({"type": "chunk", "content": clean_text})
+                        await safe_ws_send(websocket, {"type": "chunk", "content": clean_text})
                     ai_response = clean_text or injection_response
                     used_injection = True
 
@@ -1342,9 +1350,9 @@ async def handle_project_with_injection(
     if ai_response:
         await save_message(project_id, "ai", ai_response)
     elif tried_count == 0:
-        await websocket.send_json({"type": "error", "content": "Нет модели с API ключом."})
+        await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
     else:
-        await websocket.send_json({"type": "error", "content": f"Все {tried_count} моделей не ответили."})
+        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
 
 
 # ═══════════════════════════════════════════════════════
@@ -1539,9 +1547,9 @@ async def stream_with_prompt_injection(
 
         # ── Stream clean text to websocket in real-time ──
         if clean_text:
-            await websocket.send_json({"type": "chunk", "content": clean_text})
+            await safe_ws_send(websocket, {"type": "chunk", "content": clean_text})
 
-        await websocket.send_json({"type": "done"})
+        await safe_ws_send(websocket, {"type": "done"})
 
         duration = (time.time() - start_time) * 1000
         tokens = len(clean_text) // 4
