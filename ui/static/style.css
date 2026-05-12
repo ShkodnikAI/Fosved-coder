@@ -74,12 +74,17 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+}
 body {
     background: var(--bg-primary);
     color: var(--text-primary);
     font-family: var(--font-ui);
     font-size: 13px;
-    height: 100vh;
+    height: 100%;
     height: 100dvh; /* Dynamic viewport height — fixes tablet/mobile address bar */
     overflow: hidden;
     display: flex;
@@ -88,7 +93,24 @@ body {
 }
 /* Safari fallback for dvh */
 @supports not (height: 100dvh) {
+    html { height: -webkit-fill-available; }
     body { height: -webkit-fill-available; }
+}
+/* Safe area insets for tablets with notches/system UI */
+@supports (padding: env(safe-area-inset-bottom)) {
+    .bottom-bar {
+        padding-bottom: env(safe-area-inset-bottom);
+        height: calc(var(--bottom-bar-height) + env(safe-area-inset-bottom));
+    }
+    .status-bar {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .input-area {
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    }
+    .header {
+        padding-top: env(safe-area-inset-top);
+    }
 }
 
 /* Scrollbar */
@@ -1128,19 +1150,40 @@ pre:hover .code-btn-bar { opacity: 1; }
     .left-panel { display: none; }
     .right-panel { display: none; }
     .resize-handle { display: none; }
-    .chat-area { padding: 12px; }
-    .input-area { padding: 6px 10px; }
+    .chat-area { padding: 10px; }
+    .input-area { padding: 4px 8px 6px; }
     .msg { max-width: 95%; }
     /* Tablet: compact UI to fit on screen */
-    .input-wrapper textarea { min-height: 40px; font-size: 16px; /* Prevents iOS zoom on focus */ }
+    .input-wrapper textarea { min-height: 36px; max-height: 120px; font-size: 16px; /* Prevents iOS zoom on focus */ }
     .input-wrapper { max-width: 100%; }
-    .header { height: 38px; }
-    .nav-btn { padding: 2px 8px; font-size: 11px; }
-    .header-logo { font-size: 10px; }
-    .status-bar { height: 22px; font-size: 11px; }
-    .bottom-bar { height: 30px; }
-    .btn-send { padding: 6px 14px; font-size: 13px; }
-    .btn-mic { font-size: 16px; }
+    .input-actions { padding: 4px 6px; gap: 4px; }
+    .header { height: 36px; }
+    .nav-btn { padding: 2px 6px; font-size: 10px; }
+    .header-logo { font-size: 9px; letter-spacing: 1px; }
+    .hdr-btn { font-size: 14px; padding: 2px 4px; }
+    .hdr-btn .btn-text { display: none; }
+    .status-bar { height: 20px; font-size: 10px; }
+    .bottom-bar { height: 28px; }
+    .bottom-btn { padding: 3px 6px; font-size: 10px; }
+    .btn-send { padding: 5px 12px; font-size: 12px; }
+    .btn-mic { font-size: 14px; padding: 2px; }
+    .hub-input-extra button { padding: 3px 6px; font-size: 10px; }
+    .project-input-bar button { padding: 3px 6px; font-size: 10px; }
+    .file-label-attach { font-size: 16px; }
+}
+@media (max-width: 600px) {
+    .header { height: 32px; }
+    .header-logo { font-size: 8px; }
+    .nav-btn { padding: 1px 5px; font-size: 9px; }
+    .hdr-btn { font-size: 13px; padding: 1px 3px; }
+    .status-bar { display: none; }
+    .bottom-bar { height: 24px; }
+    .bottom-btn { padding: 2px 5px; font-size: 9px; }
+    .input-area { padding: 3px 6px 4px; }
+    .input-wrapper textarea { min-height: 32px; max-height: 100px; }
+    .btn-send { padding: 4px 10px; font-size: 11px; }
+    .chat-area { padding: 6px; gap: 8px; }
+    .msg { font-size: 13px; max-width: 98%; }
 }
 
 /* Hidden utility */

@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import Text, select, delete, func, String, Boolean, Integer, Float, Index, and_, or_, desc, asc, text as sa_text
+from sqlalchemy import Text, select, delete, func, String, Boolean, Integer, Float, Index, and_, or_, desc, asc, text as sa_text, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,7 +54,7 @@ class Observation(Base):
     relevance_score: Mapped[float] = mapped_column(Float, default=0.0)
 
     created_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
@@ -76,7 +76,7 @@ class SessionSummary(Base):
     tokens_total: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
@@ -103,7 +103,7 @@ async def ensure_observation_tables():
                     is_compressed BOOLEAN DEFAULT FALSE,
                     is_private BOOLEAN DEFAULT FALSE,
                     relevance_score FLOAT DEFAULT 0.0,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
             await conn.execute(sa_text("""
@@ -118,7 +118,7 @@ async def ensure_observation_tables():
                     observation_count INTEGER DEFAULT 0,
                     message_count INTEGER DEFAULT 0,
                     tokens_total INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
             for idx_sql in [

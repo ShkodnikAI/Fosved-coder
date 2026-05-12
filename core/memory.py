@@ -1,7 +1,7 @@
 import os
 import re
 import uuid
-from sqlalchemy import Text, select, delete, func, String, Boolean, ForeignKey, Column
+from sqlalchemy import Text, select, delete, func, String, Boolean, ForeignKey, Column, DateTime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from datetime import datetime, timedelta, timezone
@@ -128,7 +128,7 @@ class Project(Base):
     apk_config: Mapped[str] = mapped_column(Text, default="")  # JSON config for APK building
     logo: Mapped[str] = mapped_column(Text, default="")  # base64 image or URL
     design: Mapped[str] = mapped_column(Text, default="")  # JSON with design preferences
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class Idea(Base):
     __tablename__ = "ideas"
@@ -137,7 +137,7 @@ class Idea(Base):
     name: Mapped[str]
     summary: Mapped[str] = mapped_column(Text, default="")
     raw_data: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class ChatHistory(Base):
     __tablename__ = "chat_history"
@@ -146,7 +146,7 @@ class ChatHistory(Base):
     thread_id: Mapped[int | None] = mapped_column(nullable=True, index=True, default=None)
     role: Mapped[str]
     content: Mapped[str] = mapped_column(Text)
-    timestamp: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class ChatThread(Base):
     __tablename__ = "chat_threads"
@@ -154,7 +154,7 @@ class ChatThread(Base):
     project_id: Mapped[int] = mapped_column(index=True)
     parent_id: Mapped[int | None] = mapped_column(nullable=True, default=None)
     title: Mapped[str] = mapped_column(default="Новый поток")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class ContextSnapshot(Base):
     __tablename__ = "context_snapshots"
@@ -169,7 +169,7 @@ class ContextSnapshot(Base):
     errors_fixed: Mapped[str] = mapped_column(Text, default="")
     message_count_before: Mapped[int] = mapped_column(default=0)
     message_count_after: Mapped[int] = mapped_column(default=0)
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class RepoMap(Base):
     __tablename__ = "repo_maps"
@@ -177,7 +177,7 @@ class RepoMap(Base):
     project_id: Mapped[int] = mapped_column(unique=True, index=True)
     content: Mapped[str] = mapped_column(Text, default="")
     file_hash: Mapped[str] = mapped_column(default="")
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class RoutingStat(Base):
     __tablename__ = "routing_stats"
@@ -186,7 +186,7 @@ class RoutingStat(Base):
     model: Mapped[str] = mapped_column(default="")
     reason: Mapped[str] = mapped_column(Text, default="")
     success: Mapped[bool] = mapped_column(default=True)
-    timestamp: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class ProjectArchive(Base):
     __tablename__ = "project_archives"
@@ -198,7 +198,7 @@ class ProjectArchive(Base):
     file_list: Mapped[str] = mapped_column(Text, default="[]")
     file_count: Mapped[int] = mapped_column(default=0)
     archive_path: Mapped[str] = mapped_column(default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class PromptDraft(Base):
     """Черновик промпта-анкеты — подготовка перед созданием проекта."""
@@ -215,15 +215,15 @@ class PromptDraft(Base):
     discussion: Mapped[str] = mapped_column(Text, default="[]")
     # Текущий шаг анкеты (0-based)
     current_step: Mapped[int] = mapped_column(default=0)
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class SystemSetting(Base):
     """Системные настройки — персистентное хранилище ключей и конфигов в БД."""
     __tablename__ = "system_settings"
     key: Mapped[str] = mapped_column(primary_key=True)  # уникальный ключ
     value: Mapped[str] = mapped_column(Text, default="")  # JSON или текст
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class Questionnaire(Base):
     """Анкета проекта — динамический чат-опросник для создания проекта (Фаза 3.1)."""
@@ -502,6 +502,27 @@ async def migrate_db():
                     updated_at TEXT DEFAULT ''
                 )
             """))
+            # Migrate TIMESTAMP → TIMESTAMPTZ for all datetime columns
+            _tz_migrations = [
+                "ALTER TABLE projects ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE ideas ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE chat_history ALTER COLUMN timestamp TYPE TIMESTAMPTZ USING timestamp AT TIME ZONE 'UTC'",
+                "ALTER TABLE chat_threads ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE context_snapshots ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE repo_maps ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE routing_stats ALTER COLUMN timestamp TYPE TIMESTAMPTZ USING timestamp AT TIME ZONE 'UTC'",
+                "ALTER TABLE project_archives ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE prompt_drafts ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE prompt_drafts ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE system_settings ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE observations ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+                "ALTER TABLE session_summaries ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+            ]
+            for mig_sql in _tz_migrations:
+                try:
+                    await conn.execute(text(mig_sql))
+                except Exception:
+                    pass  # Column may already be TIMESTAMPTZ or table doesn't exist
     else:
         import sqlite3
         db_file = DB_URL.split(":///")[-1] if ":///" in DB_URL else "fosved_coder.db"
