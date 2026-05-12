@@ -351,41 +351,62 @@
         <!-- Ручка изменения размера (левая) -->
         <div class="resize-handle" id="hub-left-resize-handle"></div>
 
-        <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ: Hub-чат -->
+        <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ: User Panel + Response Panel -->
         <div class="center-area">
-            <div class="chat-area" id="hub-chat-box">
-                <div class="msg system">Fosved Coder V2.0 — Главная. Выберите модель и начните обсуждение.</div>
-            </div>
-            <!-- Панель анкетирования (скрыта по умолчанию) -->
-            <div class="questionnaire-panel" id="questionnaire-panel">
-                <div class="q-title">📝 Анкетирование</div>
-                <div class="q-progress" id="q-progress-text">Вопрос 0/0</div>
-                <div class="q-progress-bar"><div class="q-progress-bar-fill" id="q-progress-fill" style="width:0%"></div></div>
-            </div>
-            <div class="input-area">
-                <div class="input-wrapper" id="hub-input-wrapper">
-                    <textarea id="hub-user-input" placeholder="Задайте вопрос ИИ, обсудите идею..." rows="3" onkeydown="handleHubKeyDown(event)"></textarea>
-                    <div class="input-actions">
-                        <div class="input-left">
-                            <label class="file-label">📎 <input type="file" id="hub-file-input" style="display:none" onchange="handleHubFile(event)" multiple>
-                                <span id="hub-file-preview" style="display:none" class="file-preview"></span>
-                            </label>
-                            <button id="hub-file-remove" class="file-remove" onclick="removeHubAttachedFile()" style="display:none" title="Убрать">✕</button>
-                            <button id="hub-retry-btn" class="btn-retry" onclick="retryHubMessage()" style="display:none">🔄</button>
-                        </div>
-                        <div class="input-center">
-                            <button class="btn-send" id="hub-send-btn" onclick="sendHubMessage()">Отправить</button>
-                        </div>
-                        <div class="input-right">
-                            <button class="btn-mic" onclick="startVoice('hub')" title="Голосовой ввод">🎤</button>
-                            <button id="hub-retry-btn-visible" class="btn-retry" onclick="retryHubMessage()" title="Повторить">🔄</button>
+            <!-- ПАНЕЛЬ ВВОДА ПОЛЬЗОВАТЕЛЯ -->
+            <div class="user-panel" id="hub-user-panel">
+                <div class="panel-header-bar">
+                    <span class="panel-header-title">💬 Ввод</span>
+                    <span class="panel-header-badge" id="hub-user-msg-count"></span>
+                </div>
+                <div class="chat-area" id="hub-user-chat">
+                    <div class="msg system">Введите сообщение для ИИ...</div>
+                </div>
+                <!-- Панель анкетирования (скрыта по умолчанию) -->
+                <div class="questionnaire-panel" id="questionnaire-panel">
+                    <div class="q-title">📝 Анкетирование</div>
+                    <div class="q-progress" id="q-progress-text">Вопрос 0/0</div>
+                    <div class="q-progress-bar"><div class="q-progress-bar-fill" id="q-progress-fill" style="width:0%"></div></div>
+                </div>
+                <div class="input-area">
+                    <div class="input-wrapper" id="hub-input-wrapper">
+                        <textarea id="hub-user-input" placeholder="Задайте вопрос ИИ, обсудите идею..." rows="3" onkeydown="handleHubKeyDown(event)"></textarea>
+                        <div class="input-actions">
+                            <div class="input-left">
+                                <label class="file-label">📎 <input type="file" id="hub-file-input" style="display:none" onchange="handleHubFile(event)" multiple>
+                                    <span id="hub-file-preview" style="display:none" class="file-preview"></span>
+                                </label>
+                                <button id="hub-file-remove" class="file-remove" onclick="removeHubAttachedFile()" style="display:none" title="Убрать">✕</button>
+                                <button id="hub-retry-btn" class="btn-retry" onclick="retryHubMessage()" style="display:none">🔄</button>
+                            </div>
+                            <div class="input-center">
+                                <button class="btn-send" id="hub-send-btn" onclick="sendHubMessage()">Отправить</button>
+                            </div>
+                            <div class="input-right">
+                                <button class="btn-mic" onclick="startVoice('hub')" title="Голосовой ввод">🎤</button>
+                                <button id="hub-retry-btn-visible" class="btn-retry" onclick="retryHubMessage()" title="Повторить">🔄</button>
+                            </div>
                         </div>
                     </div>
+                    <!-- Дополнительные кнопки под инпутом -->
+                    <div class="hub-input-extra">
+                        <button onclick="startQuestionnaire()" title="Начать опрос для создания проекта">📝 Анкета</button>
+                        <button onclick="insertHubCommand('/probe ')" title="Зондировать модели">🔍 /probe</button>
+                    </div>
                 </div>
-                <!-- Дополнительные кнопки под инпутом -->
-                <div class="hub-input-extra">
-                    <button onclick="startQuestionnaire()" title="Начать опрос для создания проекта">📝 Анкета</button>
-                    <button onclick="insertHubCommand('/probe ')" title="Зондировать модели">🔍 /probe</button>
+            </div>
+
+            <!-- Ручка изменения размера (центр) -->
+            <div class="resize-handle" id="hub-center-resize-handle"></div>
+
+            <!-- ПАНЕЛЬ ОТВЕТА МОДЕЛИ -->
+            <div class="response-panel" id="hub-response-panel">
+                <div class="panel-header-bar">
+                    <span class="panel-header-title">🤖 Ответ модели</span>
+                    <span class="panel-header-badge" id="hub-model-name-bar"></span>
+                </div>
+                <div class="chat-area" id="hub-chat-box">
+                    <div class="msg system">Fosved Coder V2.0 — Главная. Выберите модель и начните обсуждение.</div>
                 </div>
             </div>
         </div>
@@ -478,38 +499,59 @@
         <!-- Ручка изменения размера (левая) -->
         <div class="resize-handle" id="proj-left-resize-handle"></div>
 
-        <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ: Чат проекта -->
+        <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ: User Panel + Response Panel -->
         <div class="center-area">
-            <div class="chat-area" id="project-chat-box">
-                <div class="msg system">Выберите проект для начала работы</div>
-            </div>
-            <div class="input-area">
-                <div class="input-wrapper" id="project-input-wrapper">
-                    <textarea id="project-user-input" placeholder="Опишите задачу для ИИ..." rows="3" onkeydown="handleProjectKeyDown(event)"></textarea>
-                    <div class="input-actions">
-                        <div class="input-left">
-                            <label class="file-label">📎 <input type="file" id="project-file-input" style="display:none" onchange="handleProjectFile(event)" multiple>
-                                <span id="project-file-preview" style="display:none" class="file-preview"></span>
-                            </label>
-                            <button id="project-file-remove" class="file-remove" onclick="removeProjectAttachedFile()" style="display:none" title="Убрать">✕</button>
-                            <button id="project-retry-btn" class="btn-retry" onclick="retryLastMessage()" style="display:none">🔄</button>
-                        </div>
-                        <div class="input-center">
-                            <button class="btn-send" id="project-send-btn" onclick="sendMessage()">Отправить</button>
-                        </div>
-                        <div class="input-right">
-                            <button class="btn-mic" onclick="startVoice('project')" title="Голосовой ввод">🎤</button>
-                            <button id="project-retry-btn-visible" class="btn-retry" onclick="retryLastMessage()" title="Повторить">🔄</button>
+            <!-- ПАНЕЛЬ ВВОДА ПОЛЬЗОВАТЕЛЯ -->
+            <div class="user-panel" id="project-user-panel">
+                <div class="panel-header-bar">
+                    <span class="panel-header-title">💬 Ввод</span>
+                    <span class="panel-header-badge" id="proj-user-msg-count"></span>
+                </div>
+                <div class="chat-area" id="project-user-chat">
+                    <div class="msg system">Опишите задачу для ИИ...</div>
+                </div>
+                <div class="input-area">
+                    <div class="input-wrapper" id="project-input-wrapper">
+                        <textarea id="project-user-input" placeholder="Опишите задачу для ИИ..." rows="3" onkeydown="handleProjectKeyDown(event)"></textarea>
+                        <div class="input-actions">
+                            <div class="input-left">
+                                <label class="file-label">📎 <input type="file" id="project-file-input" style="display:none" onchange="handleProjectFile(event)" multiple>
+                                    <span id="project-file-preview" style="display:none" class="file-preview"></span>
+                                </label>
+                                <button id="project-file-remove" class="file-remove" onclick="removeProjectAttachedFile()" style="display:none" title="Убрать">✕</button>
+                                <button id="project-retry-btn" class="btn-retry" onclick="retryLastMessage()" style="display:none">🔄</button>
+                            </div>
+                            <div class="input-center">
+                                <button class="btn-send" id="project-send-btn" onclick="sendMessage()">Отправить</button>
+                            </div>
+                            <div class="input-right">
+                                <button class="btn-mic" onclick="startVoice('project')" title="Голосовой ввод">🎤</button>
+                                <button id="project-retry-btn-visible" class="btn-retry" onclick="retryLastMessage()" title="Повторить">🔄</button>
+                            </div>
                         </div>
                     </div>
+                    <!-- Дополнительные кнопки под инпутом -->
+                    <div class="project-input-bar">
+                        <button onclick="insertCommand('/terminal ')" title="Терминал">🛠 Терминал</button>
+                        <button onclick="insertCommand('/clear')" title="Очистить">🗑 /clear</button>
+                        <button onclick="insertCommand('/test')" title="Тест">🧪 /test</button>
+                        <button onclick="insertCommand('/repo_map')" title="Карта">🗺 /map</button>
+                        <button onclick="wsSend('/git_push')" title="Push">📤 Push</button>
+                    </div>
                 </div>
-                <!-- Дополнительные кнопки под инпутом -->
-                <div class="project-input-bar">
-                    <button onclick="insertCommand('/terminal ')" title="Терминал">🛠 Терминал</button>
-                    <button onclick="insertCommand('/clear')" title="Очистить">🗑 /clear</button>
-                    <button onclick="insertCommand('/test')" title="Тест">🧪 /test</button>
-                    <button onclick="insertCommand('/repo_map')" title="Карта">🗺 /map</button>
-                    <button onclick="wsSend('/git_push')" title="Push">📤 Push</button>
+            </div>
+
+            <!-- Ручка изменения размера (центр) -->
+            <div class="resize-handle" id="proj-center-resize-handle"></div>
+
+            <!-- ПАНЕЛЬ ОТВЕТА МОДЕЛИ -->
+            <div class="response-panel" id="project-response-panel">
+                <div class="panel-header-bar">
+                    <span class="panel-header-title">🤖 Ответ модели</span>
+                    <span class="panel-header-badge" id="proj-model-name-bar"></span>
+                </div>
+                <div class="chat-area" id="project-chat-box">
+                    <div class="msg system">Выберите проект для начала работы</div>
                 </div>
             </div>
         </div>
@@ -822,7 +864,9 @@ let tokenCount = 0;                // Счётчик токенов
 
 // Ссылки на DOM-элементы чатов
 const hubChatBox = document.getElementById("hub-chat-box");
+const hubUserChatBox = document.getElementById("hub-user-chat");
 const projectChatBox = document.getElementById("project-chat-box");
+const projectUserChatBox = document.getElementById("project-user-chat");
 
 // ═══════════════════════════════════════════════════════
 // УТИЛИТЫ
@@ -835,7 +879,13 @@ function escapeHtml(t) {
 
 /** Получить активный чат-бокс в зависимости от экрана */
 function getActiveChatBox() {
+    // Returns the AI response panel
     return currentScreen === "main" ? hubChatBox : projectChatBox;
+}
+
+/** Get the user input panel chat box */
+function getActiveUserChatBox() {
+    return currentScreen === "main" ? hubUserChatBox : projectUserChatBox;
 }
 
 /** Получить активный AI-див и текст */
@@ -951,7 +1001,16 @@ function setupResize(handleId, panelId, storageKey, minW, maxW) {
         if (!dragging) return;
         const dx = x - startX;
         const isRight = handleId.includes('right');
-        const newW = isRight ? Math.min(Math.max(startW - dx, minW), maxW) : Math.min(Math.max(startW + dx, minW), maxW);
+        const isCenter = handleId.includes('center');
+        let newW;
+        if (isCenter) {
+            // Center handle: resize the panel before it by adding dx (drag right = wider)
+            newW = Math.min(Math.max(startW + dx, minW), maxW);
+        } else if (isRight) {
+            newW = Math.min(Math.max(startW - dx, minW), maxW);
+        } else {
+            newW = Math.min(Math.max(startW + dx, minW), maxW);
+        }
         panel.style.width = newW + 'px';
     }
     function _endDrag() {
@@ -973,10 +1032,12 @@ function setupResize(handleId, panelId, storageKey, minW, maxW) {
     handle.addEventListener("dblclick", () => { panel.style.width = ''; localStorage.removeItem(storageKey); });
 }
 // Инициализация ручек для обоих экранов
-setupResize("hub-left-resize-handle", "hub-left-panel", "fosved-hub-left-w", 200, 420);
-setupResize("hub-right-resize-handle", "hub-right-panel", "fosved-hub-right-w", 200, 450);
-setupResize("proj-left-resize-handle", "project-left-panel", "fosved-proj-left-w", 200, 420);
-setupResize("proj-right-resize-handle", "project-right-panel", "fosved-proj-right-w", 200, 450);
+setupResize("hub-left-resize-handle", "hub-left-panel", "fosved-hub-left-w", 140, 400);
+setupResize("hub-right-resize-handle", "hub-right-panel", "fosved-hub-right-w", 140, 400);
+setupResize("hub-center-resize-handle", "hub-user-panel", "fosved-hub-center-w", 200, 800);
+setupResize("proj-left-resize-handle", "project-left-panel", "fosved-proj-left-w", 140, 400);
+setupResize("proj-right-resize-handle", "project-right-panel", "fosved-proj-right-w", 140, 400);
+setupResize("proj-center-resize-handle", "project-user-panel", "fosved-proj-center-w", 200, 800);
 
 // ═══════════════════════════════════════════════════════
 // MARKED + HIGHLIGHT (Markdown + подсветка синтаксиса)
@@ -1008,7 +1069,11 @@ function renderMarkdown(text) {
 // ═══════════════════════════════════════════════════════
 /** Добавить сообщение в указанный чат-бокс */
 function addMessageTo(type, text, targetChatBox) {
-    const chatBox = targetChatBox || getActiveChatBox();
+    // Auto-route: user messages → user panel, everything else → response panel
+    if (!targetChatBox) {
+        targetChatBox = (type === 'user') ? getActiveUserChatBox() : getActiveChatBox();
+    }
+    const chatBox = targetChatBox;
     const div = document.createElement("div");
     div.className = "msg " + type;
     if (type === "ai") { div.innerHTML = renderMarkdown(text); addCopyButtons(div); }
@@ -1017,11 +1082,23 @@ function addMessageTo(type, text, targetChatBox) {
     else { div.textContent = text; }
     chatBox.appendChild(div);
     chatBox.scrollTop = chatBox.scrollHeight;
+    // Update user message count badge
+    updateUserMsgCount();
 }
 
 /** Обёртка для совместимости — добавляет в активный чат */
 function addMessage(type, text) {
     addMessageTo(type, text);
+}
+
+/** Update user message count badge */
+function updateUserMsgCount() {
+    const hubCount = hubUserChatBox.querySelectorAll('.msg.user').length;
+    const projCount = projectUserChatBox.querySelectorAll('.msg.user').length;
+    const hubBadge = document.getElementById('hub-user-msg-count');
+    const projBadge = document.getElementById('proj-user-msg-count');
+    if (hubBadge) hubBadge.textContent = hubCount > 0 ? hubCount + ' сообщ.' : '';
+    if (projBadge) projBadge.textContent = projCount > 0 ? projCount + ' сообщ.' : '';
 }
 
 // ─── Стриминг AI-ответа ───
@@ -1288,7 +1365,7 @@ function sendHubMessage() {
     if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
     if (!activeModelId) { showToast("Выберите модель", "error"); return; }
     let displayText = hubAttachedFile ? "📎 " + hubAttachedFile.filename + "\n" + text : text;
-    addMessageTo("user", displayText, hubChatBox);
+    addMessageTo("user", displayText);
     setHubWaitingAI(true);
     // Отправляем как hub_chat
     let payload = { type: "hub_chat", prompt: text, model_id: activeModelId };
@@ -1461,9 +1538,10 @@ function wsConnect() {
     ws.onopen = () => {
         wsReconnectAttempts = 0; wsIsConnected = true;
         updateLoadingBar(50, 'Загрузка моделей...');
-        hubChatBox.innerHTML = "";
+        hubChatBox.innerHTML = ""; hubUserChatBox.innerHTML = "";
         projectChatBox.innerHTML = "";
         addMessageTo("system", "Fosved Coder V2.0 готов. Добро пожаловать!", hubChatBox);
+        addMessageTo("system", "Введите сообщение для ИИ...", hubUserChatBox);
         addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
         loadModels(); loadProjects();
         while (wsMessageQueue.length > 0) { ws.send(wsMessageQueue.shift()); }
@@ -2642,13 +2720,18 @@ function showHelp() {
 // УТИЛИТЫ ЧАТА
 // ═══════════════════════════════════════════════════════
 function clearChat() {
-    // Очищаем оба чата
+    // Очищаем все панели обоих экранов
     hubChatBox.querySelectorAll(".msg").forEach(m=>m.remove());
+    hubUserChatBox.querySelectorAll(".msg").forEach(m=>m.remove());
     projectChatBox.querySelectorAll(".msg").forEach(m=>m.remove());
+    projectUserChatBox.querySelectorAll(".msg").forEach(m=>m.remove());
     addMessageTo("system", "Чат очищен.", hubChatBox);
     addMessageTo("system", "Чат очищен.", projectChatBox);
+    addMessageTo("system", "Чат очищен.", hubUserChatBox);
+    addMessageTo("system", "Чат очищен.", projectUserChatBox);
     tokenCount = 0;
     updateTokenCount();
+    updateUserMsgCount();
 }
 
 function goHome() {
