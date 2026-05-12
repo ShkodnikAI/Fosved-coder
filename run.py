@@ -142,7 +142,7 @@ async def get_index():
 app.mount("/static", StaticFiles(directory="ui/static"), name="static")
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
-WS_RECEIVE_TIMEOUT = 600  # seconds — drop idle WS connections
+WS_RECEIVE_TIMEOUT = 30  # seconds — drop idle WS connections (proxy keepalive is separate)
 WS_MAX_MESSAGE_BYTES = 2 * 1024 * 1024  # 2 MB per message
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._\- ]")
 
@@ -187,6 +187,20 @@ async def websocket_chat(websocket: WebSocket):
     model_id = None
     ws_session_id = str(__import__('uuid').uuid4())  # Unique session ID for memory
     logger.log("websocket_connected", level="info", source="ws")
+
+    # ── Server-side keepalive: ping every 4 sec to prevent proxy idle kill ──
+    async def _ws_keepalive():
+        try:
+            while True:
+                await asyncio.sleep(4)
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+        except asyncio.CancelledError:
+            pass
+    keepalive_task = asyncio.create_task(_ws_keepalive())
+
     # Задача 2: Отправить клиенту кэшированные результаты probing
     try:
         probed = await get_probed_models()
@@ -360,19 +374,20 @@ async def websocket_chat(websocket: WebSocket):
                 await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id)
 
     except WebSocketDisconnect:
+        keepalive_task.cancel()
         logger.log("websocket_disconnected", level="info", source="ws", project_id=current_project_id)
         # Generate session summary (background, non-blocking)
         try:
-            import asyncio
             asyncio.create_task(generate_session_summary_async(
                 ws_session_id, project_id=current_project_id
             ))
         except Exception:
             pass
     except Exception as e:
+        keepalive_task.cancel()
         import traceback
         logger.log("websocket_error", level="error", source="ws", project_id=current_project_id,
-                   error=str(e), stack_trace=traceback.format_exc())
+                   error=str(e)[:500], stack_trace=traceback.format_exc()[-2000:])
 
 
 async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
