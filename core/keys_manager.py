@@ -255,6 +255,7 @@ class KeysManager:
         self.expo_token: str = ""
         self.expo_enabled: bool = False
         self._db_restore_pending: bool = False  # Флаг восстановления из БД
+        self._probed_model_ids: set = set()  # Кэш ID моделей, прошедших probe
         # Serializes mutations to providers/_db_pending_yaml across coroutines.
         # Lazily created to avoid binding to a loop that hasn't started yet.
         self._lock: asyncio.Lock | None = None
@@ -1102,6 +1103,14 @@ class KeysManager:
         except Exception:
             return status  # При ошибке валидации — оставляем текущий статус
 
+    # ─── Probe Cache ───────────────────────────────────────
+
+    def update_probed_model_ids(self, probed_models: list[dict]):
+        """Обновить in-memory кэш ID моделей, успешно прошедших probe.
+        Вызывается из save_probed_models() в memory.py.
+        """
+        self._probed_model_ids = {m.get("model_id") or m.get("id", "") for m in probed_models if m}
+
     # ─── Model Access ────────────────────────────────────────
 
     def get_all_models(self) -> list[dict]:
@@ -1110,6 +1119,9 @@ class KeysManager:
         Returns: [{id, name, model, provider, provider_name, type, status, category, thinking}]
         """
         models = []
+
+        # Определяем: были ли результаты probing (кэш не пуст)
+        _has_probe_results = bool(self._probed_model_ids)
 
         # 1. Платные модели из настроенных провайдеров (с валидными ключами и включённых)
         for provider_id, config in self.providers.items():
@@ -1131,8 +1143,14 @@ class KeysManager:
                         category = cat_info.get("label", cat_id)
                         break
 
+                mid = f"{provider_id}__{model_name}"
+                # Задача 3: Фильтр по probe-статусу
+                # Если probe был запущен — показывать только модели, прошедшие probe
+                if _has_probe_results and mid not in self._probed_model_ids:
+                    continue  # Модель не прошла probe — скрываем
+
                 models.append({
-                    "id": f"{provider_id}__{model_name}",
+                    "id": mid,
                     "name": model_name,
                     "model": f"{prefix}/{model_name}",
                     "provider": provider_id,
@@ -1148,8 +1166,13 @@ class KeysManager:
                 abacus_models = config.get("models", [])
                 for tm in thinking_models:
                     if tm in abacus_models:
+                        tm_id = f"{provider_id}__{tm}-thinking"
+                        # Фильтр по probe: для -thinking варианта проверяем базовую модель
+                        base_id = f"{provider_id}__{tm}"
+                        if _has_probe_results and base_id not in self._probed_model_ids:
+                            continue
                         models.append({
-                            "id": f"{provider_id}__{tm}-thinking",
+                            "id": tm_id,
                             "name": f"{tm}-thinking",
                             "model": f"{prefix}/{tm}-thinking",
                             "provider": provider_id,

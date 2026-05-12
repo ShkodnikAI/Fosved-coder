@@ -1749,13 +1749,19 @@ function renderModels() {
     const mc = document.getElementById('hub-models-count');
     if (mc) mc.textContent = usable.length ? usable.length + '/' + allModels.length : '';
 
-    // Сортировка: приоритетные первыми, потом по имени
+    // Задача 4: Сортировка — valid → rate_limited(в низ) → available
+    const _probeRank = (s) => s === 'valid' ? 0 : s === 'rate_limited' ? 2 : s === 'available' ? 1 : 0;
     const sorted = [...allModels].sort((a, b) => {
+        // Приоритетные модели всегда первые
         const pa = priorityModels.indexOf(a.id);
         const pb = priorityModels.indexOf(b.id);
         if (pa >= 0 && pb < 0) return -1;
         if (pb >= 0 && pa < 0) return 1;
         if (pa >= 0 && pb >= 0) return pa - pb;
+        // Группировка по probe-статусу: valid(0) → available(1) → rate_limited(2)
+        const ra = _probeRank(a.status);
+        const rb = _probeRank(b.status);
+        if (ra !== rb) return ra - rb;
         return (a.name||'').localeCompare(b.name||'');
     });
 

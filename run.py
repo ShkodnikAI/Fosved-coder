@@ -14,7 +14,7 @@ from core.agent import handle_chat_message, handle_hub_message
 from core.executor import CommandExecutor
 from core.ideas_injector import IdeasInjector
 from core.context_manager import ContextManager
-from core.router import HybridRouter
+from core.intelligent_router import intelligent_router
 from core.action_logger import get_logger
 from api.endpoints import router as api_router
 
@@ -24,7 +24,7 @@ logger = get_logger()
 executor = CommandExecutor()
 ideas_injector = IdeasInjector()
 context_manager = ContextManager()
-hybrid_router = HybridRouter()
+# hybrid_router removed — see core/intelligent_router.py
 
 # Track pending approvals: {request_id: {"cmd": str, "websocket": WebSocket}}
 pending_approvals: dict = {}
@@ -167,6 +167,13 @@ async def websocket_chat(websocket: WebSocket):
     current_mode = "manual"  # "manual" or "auto"
     model_id = None
     logger.log("websocket_connected", level="info", source="ws")
+    # Задача 2: Отправить клиенту кэшированные результаты probing
+    try:
+        probed = await get_probed_models()
+        if probed:
+            await websocket.send_json({"type": "probed_models", "models": probed})
+    except Exception:
+        pass
 
     try:
         while True:
@@ -288,6 +295,27 @@ async def websocket_chat(websocket: WebSocket):
                         repo_map = await context_manager.build_repo_map(
                             project["path"], current_project_id
                         )
+
+            # Задача 5: Intelligent Router — выбрать модель если не указана
+            if not model_id:
+                try:
+                    from core.keys_manager import keys_manager
+                    all_models = keys_manager.get_all_models()
+                    route_result = intelligent_router.select_model(prompt, all_models)
+                    if route_result.get("model_id") and route_result.get("overridden"):
+                        model_id = route_result["model_id"]
+                        logger.log("intelligent_router_selected", level="info", source="ws",
+                                   details={"model": model_id, "complexity": route_result.get("complexity"),
+                                            "reason": route_result.get("reason", "")[:200]})
+                        await websocket.send_json({
+                            "type": "system",
+                            "content": f"🔀 Маршрутизатор: {route_result.get('reason', '')}",
+                        })
+                except Exception as route_err:
+                    try:
+                        logger.log("intelligent_router_error", level="warning", source="ws", error=str(route_err)[:200])
+                    except Exception:
+                        pass
 
             # Route based on mode
             if mode == "auto":

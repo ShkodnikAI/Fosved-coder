@@ -1174,9 +1174,15 @@ async def delete_questionnaire(q_id: str) -> bool:
 # ═══════════════════════════════════════════════════════════════
 
 async def save_probed_models(models: list[dict]):
-    """Сохранить результаты silent model probing в SystemSetting."""
+    """Сохранить результаты silent model probing в SystemSetting + обновить кэш KeysManager."""
     import json
     await set_system_setting("probed_models", json.dumps(models, ensure_ascii=False))
+    # Задача 3: Обновить in-memory кэш для фильтрации в get_all_models()
+    try:
+        from core.keys_manager import keys_manager
+        keys_manager.update_probed_model_ids(models)
+    except Exception:
+        pass
 
 
 async def get_probed_models() -> list[dict]:
