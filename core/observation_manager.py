@@ -202,6 +202,12 @@ async def store_observation(
     tokens_used: int = 0,
 ) -> int:
     """Сохранить наблюдение. Возвращает ID."""
+    # Strip <private> content before saving for privacy
+    content, _has_private = strip_private_tags(content)
+    if raw_content:
+        raw_content, _ = strip_private_tags(raw_content)
+    if _has_private:
+        is_private = True
     async with async_session() as session:
         async with session.begin():
             obs = Observation(
@@ -622,9 +628,17 @@ async def cleanup_old_observations(days: int = 30) -> int:
     async with async_session() as session:
         async with session.begin():
             result = await session.execute(
+
                 delete(Observation).where(Observation.created_at < cutoff)
             )
             return result.rowcount
+
+
+_PRIVACY_TAG_RE = re.compile(r'<private>.*?</private>', re.DOTALL)
+
+def strip_private_content(text: str) -> str:
+    """Strip <private>...</private> tagged content for privacy."""
+    return _PRIVACY_TAG_RE.sub('[PRIVATE]', text)
 
 
 def strip_private_tags(text: str) -> tuple[str, bool]:

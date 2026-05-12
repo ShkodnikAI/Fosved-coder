@@ -337,6 +337,14 @@ body {
 }
 .model-card:hover { border-color: var(--border-light); background: var(--bg-hover); }
 .model-card.active { border-color: var(--accent); background: rgba(200,169,126,0.08); }
+/* Active model card pulse */
+.model-card.active, .model-card-with-priority.active {
+    animation: modelCardPulse 2s ease-in-out infinite;
+}
+@keyframes modelCardPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(200,169,126,0); }
+    50% { box-shadow: 0 0 0 3px rgba(200,169,126,0.15); }
+}
 .model-card-avatar {
     width: 28px; height: 28px; border-radius: var(--radius-md);
     display: flex; align-items: center; justify-content: center;
@@ -607,6 +615,10 @@ pre:hover .code-btn-bar { opacity: 1; }
 }
 .input-wrapper textarea::placeholder { color: var(--text-dim); }
 .input-wrapper textarea.waiting { opacity: 0.6; }
+/* Smooth focus ring for input areas */
+.input-wrapper textarea:focus {
+    box-shadow: 0 0 0 2px rgba(200,169,126,0.3);
+}
 .input-actions {
     display: flex; justify-content: space-between; align-items: center;
     padding: 8px 10px; gap: 8px;
@@ -965,11 +977,23 @@ pre:hover .code-btn-bar { opacity: 1; }
 .toast {
     padding: 10px 16px; border-radius: var(--radius-md);
     font-size: 12px; max-width: 360px; pointer-events: auto;
-    transform: translateX(100%); transition: all 0.3s ease;
     box-shadow: 0 4px 12px var(--shadow);
+    animation: toastEnter var(--transition-enter) forwards;
 }
-.toast.toast-visible { transform: translateX(0); }
-.toast.toast-hiding { opacity: 0; transform: translateX(100%); }
+.toast.toast-visible {
+    animation: toastEnter var(--transition-enter) forwards;
+}
+.toast.toast-hiding {
+    animation: toastExit var(--transition-exit) forwards;
+}
+@keyframes toastEnter {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+@keyframes toastExit {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
+}
 .toast-success { background: var(--toast-success); color: var(--green); border: 1px solid rgba(78,201,176,0.3); }
 .toast-error { background: var(--toast-error); color: var(--red); border: 1px solid rgba(244,71,71,0.3); }
 .toast-info { background: var(--toast-info); color: var(--blue); border: 1px solid rgba(86,156,214,0.3); }

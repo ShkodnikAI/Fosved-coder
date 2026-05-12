@@ -1669,10 +1669,19 @@ async def probe_models(websocket=None) -> list[dict]:
     # Запускаем все зондирования параллельно (ограничено семафором)
     tasks = [_probe_one(m) for m in candidates]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for r in results:
+    # Collect successful and failed model IDs
+    _failed_ids = []
+    for i, r in enumerate(results):
         if isinstance(r, dict) and r is not None:
             _probed.append(r)
+        elif r is None and i < len(candidates):
+            _failed_ids.append(candidates[i]["id"])
+        elif isinstance(r, Exception) and i < len(candidates):
+            _failed_ids.append(candidates[i]["id"])
+
+    # Update failed probe IDs cache in keys_manager
+    if _failed_ids:
+        keys_manager.update_failed_probe_ids(_failed_ids)
 
     # Сортируем по времени ответа (быстрые первые)
     _probed.sort(key=lambda x: x.get("response_time_ms", 999999))

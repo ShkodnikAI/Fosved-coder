@@ -257,6 +257,7 @@ class KeysManager:
         self._db_restore_pending: bool = False  # Флаг восстановления из БД
         self._probed_model_ids: set = set()  # Кэш ID моделей, прошедших probe
         # Serializes mutations to providers/_db_pending_yaml across coroutines.
+        self._failed_probe_ids: set = set()  # Кэш ID моделей, НЕ прошедших probe
         # Lazily created to avoid binding to a loop that hasn't started yet.
         self._lock: asyncio.Lock | None = None
         self._load_keys()
@@ -1114,6 +1115,10 @@ class KeysManager:
         """
         self._probed_model_ids = {m.get("model_id") or m.get("id", "") for m in probed_models if m}
 
+
+    def update_failed_probe_ids(self, failed_ids: list[str]):
+        """Обновить кэш ID моделей, которые НЕ прошли probe."""
+        self._failed_probe_ids = set(failed_ids)
     # ─── Model Access ────────────────────────────────────────
 
     def get_all_models(self) -> list[dict]:
@@ -1122,9 +1127,6 @@ class KeysManager:
         Returns: [{id, name, model, provider, provider_name, type, status, category, thinking}]
         """
         models = []
-
-        # Определяем: были ли результаты probing (кэш не пуст)
-        _has_probe_results = bool(self._probed_model_ids)
 
         # 1. Платные модели из настроенных провайдеров (с валидными ключами и включённых)
         for provider_id, config in self.providers.items():
@@ -1147,11 +1149,9 @@ class KeysManager:
                         break
 
                 mid = f"{provider_id}__{model_name}"
-                # Задача 3: Фильтр по probe-статусу
-                # Если probe был запущен — показывать только модели, прошедшие probe
-                if _has_probe_results and mid not in self._probed_model_ids:
-                    continue  # Модель не прошла probe — скрываем
-
+                # Фильтр по probe: только скрываем модели, явно не прошедшие probe
+                if mid in self._failed_probe_ids:
+                    continue  # Модель явно не прошла probe — скрываем
                 models.append({
                     "id": mid,
                     "name": model_name,
@@ -1172,7 +1172,7 @@ class KeysManager:
                         tm_id = f"{provider_id}__{tm}-thinking"
                         # Фильтр по probe: для -thinking варианта проверяем базовую модель
                         base_id = f"{provider_id}__{tm}"
-                        if _has_probe_results and base_id not in self._probed_model_ids:
+                        if base_id in self._failed_probe_ids:
                             continue
                         models.append({
                             "id": tm_id,
@@ -1319,12 +1319,12 @@ class KeysManager:
         for fm in FREE_MODELS:
             if fm["id"] == model_id:
                 or_key = self.providers.get("openrouter", {}).get("api_key", "")
+                or_base = self.providers.get("openrouter", {}).get("api_base", "") or "https://openrouter.ai/api/v1"
                 return {
                     "model": f"openrouter/{fm['model']}",
                     "api_key": or_key,
-                    "api_base": "https://openrouter.ai/api/v1",
+                    "api_base": or_base,
                 }
-
         # Кастомные модели
         for cm in self.custom_models:
             if cm["id"] == model_id:
