@@ -1478,13 +1478,17 @@ setTimeout(updateModeUI, 100);
 let wsReconnectAttempts = 0;
 const WS_MAX_RECONNECTS = 10;
 const WS_STABLE_DELAY = 15000; // 15 сек до признания соединения стабильным
+HEAD
 const WS_PING_INTERVAL = 4000; // Ping каждые 4 сек (keepalive через reverse proxy)
+ac3d53d (fix: textarea rows 6 → 4 (both hub and project inputs))
 let wsIsConnected = false;
 let wsConnecting = false;
 let wsEverConnected = false;
 let wsIsStable = false;
 let wsStableTimer = null;
+HEAD
 let wsPingTimer = null;
+ac3d53d (fix: textarea rows 6 → 4 (both hub and project inputs))
 let wsMessageQueue = [];
 try { const s = localStorage.getItem("fosved-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
 function persistQ() { try { localStorage.setItem("fosved-ws-q", JSON.stringify(wsMessageQueue.slice(-50))); } catch(e) {} }
@@ -1518,6 +1522,7 @@ function wsConnect() {
             wsReconnectAttempts = 0; // Сбрасываем счётчик ТОЛЬКО после стабильного соединения
             addClientLog('ws', 'WebSocket connection stable');
         }, WS_STABLE_DELAY);
+HEAD
         // Heartbeat — keep WS alive through reverse proxy (idle timeout)
         clearInterval(wsPingTimer);
         wsPingTimer = setInterval(() => {
@@ -1525,6 +1530,7 @@ function wsConnect() {
                 try { ws.send(JSON.stringify({type:"ping"})); } catch(e) {}
             }
         }, WS_PING_INTERVAL);
+ac3d53d (fix: textarea rows 6 → 4 (both hub and project inputs))
         addClientLog('ws', isFirstConnect ? 'WebSocket connected' : 'WebSocket reconnected');
         updateLoadingBar(50, 'Загрузка моделей...');
         // Do NOT clear chat boxes on reconnect — only on first connect
@@ -1698,6 +1704,7 @@ function wsConnect() {
         addMessage(data.type || "system", data.content || "");
     };
 
+HEAD
     ws.onclose = (event) => {
         const wasStable = wsIsStable; // Capture BEFORE clearing
         wsIsConnected = false; wsConnecting = false; wsIsStable = false;
@@ -1710,6 +1717,7 @@ function wsConnect() {
             wsReconnectAttempts = 0; // Stable connection died — full reset
         } else {
             wsReconnectAttempts++;
+ac3d53d (fix: textarea rows 6 → 4 (both hub and project inputs))
         }
         addClientLog('ws', 'WebSocket disconnected (attempt ' + wsReconnectAttempts + '/' + WS_MAX_RECONNECTS + ')');
         if (wsReconnectAttempts < WS_MAX_RECONNECTS) {
