@@ -1477,9 +1477,12 @@ setTimeout(updateModeUI, 100);
 // ═══════════════════════════════════════════════════════
 let wsReconnectAttempts = 0;
 const WS_MAX_RECONNECTS = 10;
+const WS_STABLE_DELAY = 15000; // 15 сек до признания соединения стабильным
 let wsIsConnected = false;
 let wsConnecting = false;
 let wsEverConnected = false;
+let wsIsStable = false;
+let wsStableTimer = null;
 let wsMessageQueue = [];
 try { const s = localStorage.getItem("fosved-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
 function persistQ() { try { localStorage.setItem("fosved-ws-q", JSON.stringify(wsMessageQueue.slice(-50))); } catch(e) {} }
@@ -1502,9 +1505,17 @@ function wsConnect() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(protocol + "//" + window.location.host + "/ws");
     ws.onopen = () => {
-        wsReconnectAttempts = 0; wsIsConnected = true; wsConnecting = false;
+        wsIsConnected = true; wsConnecting = false;
         const isFirstConnect = !wsEverConnected;
         wsEverConnected = true;
+        wsIsStable = false;
+        clearTimeout(wsStableTimer);
+        // Считаем соединение стабильным только после WS_STABLE_DELAY
+        wsStableTimer = setTimeout(() => {
+            wsIsStable = true;
+            wsReconnectAttempts = 0; // Сбрасываем счётчик ТОЛЬКО после стабильного соединения
+            addClientLog('ws', 'WebSocket connection stable');
+        }, WS_STABLE_DELAY);
         addClientLog('ws', isFirstConnect ? 'WebSocket connected' : 'WebSocket reconnected');
         updateLoadingBar(50, 'Загрузка моделей...');
         // Do NOT clear chat boxes on reconnect — only on first connect
@@ -1679,17 +1690,23 @@ function wsConnect() {
     };
 
     ws.onclose = () => {
-        wsIsConnected = false; wsConnecting = false;
-        addClientLog('ws', 'WebSocket disconnected (attempt ' + (wsReconnectAttempts + 1) + '/' + WS_MAX_RECONNECTS + ')');
-        // Do NOT add error messages to chat boxes — only subtle log entries
+        wsIsConnected = false; wsConnecting = false; wsIsStable = false;
+        clearTimeout(wsStableTimer);
+        // Если соединение было стабильным — это реальный обрыв, сбрасываем счётчик
+        // Если НЕ было стабильным — инкрементируем (не даём бесконечный цикл)
+        if (!wsIsStable) {
+            wsReconnectAttempts++;
+        } else {
+            wsReconnectAttempts = 0;
+        }
+        addClientLog('ws', 'WebSocket disconnected (attempt ' + wsReconnectAttempts + '/' + WS_MAX_RECONNECTS + ')');
         if (wsReconnectAttempts < WS_MAX_RECONNECTS) {
             const baseDelay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000);
             const jitter = Math.random() * baseDelay * 0.3;
             const delay = baseDelay + jitter;
             setTimeout(wsConnect, delay);
-            wsReconnectAttempts++;
         } else {
-            addClientLog('ws', 'Max reconnect attempts reached. Reload page (F5).', 'error');
+            addClientLog('ws', 'Max reconnect attempts reached. Reload page (F5).');
             addMessageTo("error", "Не удалось подключиться. Перезагрузите (F5).", hubChatBox);
             addMessageTo("error", "Не удалось подключиться. Перезагрузите (F5).", projectChatBox);
         }
@@ -1805,11 +1822,13 @@ function buildModelCard(m, type) {
     const pActive = pIdx >= 0 ? ' active' : '';
     const statusOk = m.status==='valid'||m.status==='rate_limited'||m.status==='available';
 
+    const activeCheck = isActive ? ' <span style="color:var(--green);font-size:11px;margin-left:2px;">✓</span>' : '';
+
     return `<div class="model-card-with-priority${isActive?' active':''}" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name||'').toLowerCase()}" onclick="selectModel('${escapeHtml(m.id)}')" oncontextmenu="event.preventDefault();toggleModelPriority('${escapeHtml(m.id)}')">
         <div class="model-priority-btn${pActive}" onclick="event.stopPropagation();cycleModelPriority('${escapeHtml(m.id)}')" title="Приоритет: ${pLabel||'нет'}">${pLabel||'–'}</div>
         <div class="model-card-avatar" style="background:${avColor}">${initials}</div>
         <div class="model-card-info">
-            <div class="model-card-name">${escapeHtml(m.name)}</div>
+            <div class="model-card-name">${escapeHtml(m.name)}${activeCheck}</div>
             ${sub?'<div class="model-card-sub">'+sub+'</div>':''}
             ${getTagHtml(type)} ${thinkTag}
         </div>
@@ -1923,7 +1942,7 @@ async function loadModels() {
             if (!activeModelId && allModels.length>0) activeModelId = allModels[0].id;
         } else if (usable.length>0) {
             document.getElementById('setup-banner').style.display = 'none';
-            if (!activeModelId) { activeModelId = usable[0].id; renderModels(); }
+            if (!activeModelId) { activeModelId = usable[0].id; renderModels(); updateInputPlaceholders(); }
         }
         updateLoadingBar(80, 'Модели загружены...');
         hideLoadingScreen();
@@ -1934,11 +1953,22 @@ function selectModel(id) {
     activeModelId = id;
     renderModels();
     updateStatusBar();
+    updateInputPlaceholders();
     const m = allModels.find(x=>x.id===id);
     if (m) {
         addClientLog('select_model', 'Model selected: ' + m.name);
         showToast('Модель: ' + m.name, 'success');
     }
+}
+
+/** Обновить placeholder инпутов с именем активной модели */
+function updateInputPlaceholders() {
+    const m = allModels.find(x=>x.id===activeModelId);
+    const label = m ? ' (' + m.name + ')' : '';
+    const hubInput = document.getElementById('hub-user-input');
+    const projInput = document.getElementById('project-user-input');
+    if (hubInput) hubInput.placeholder = 'Задайте вопрос ИИ' + label + '...';
+    if (projInput) projInput.placeholder = 'Опишите задачу для ИИ' + label + '...';
 }
 
 function toggleModelPriority(id) {

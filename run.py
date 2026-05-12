@@ -370,7 +370,9 @@ async def websocket_chat(websocket: WebSocket):
         except Exception:
             pass
     except Exception as e:
-        logger.log("websocket_error", level="error", source="ws", project_id=current_project_id, error=str(e))
+        import traceback
+        logger.log("websocket_error", level="error", source="ws", project_id=current_project_id,
+                   error=str(e), stack_trace=traceback.format_exc())
 
 
 async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
