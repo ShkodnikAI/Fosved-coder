@@ -307,6 +307,7 @@
         <button class="hdr-btn" onclick="clearChat()" title="Очистить чат">🗑</button>
         <button class="hdr-btn" onclick="showSettings()" title="Настройки">⚙</button>
         <button class="hdr-btn" onclick="showHelp()" title="Справка">❓</button>
+        <button class="hdr-btn" onclick="showKeysModal()" title="Ключи" style="margin-left:4px;">🔑</button>
     </div>
 </header>
 
@@ -703,6 +704,40 @@
             <button class="modal-close" onclick="closeGenericModal()">✕</button>
         </div>
         <div class="modal-body" id="generic-modal-body"></div>
+    </div>
+</div>
+
+<!-- МОДАЛКА: Подтверждение удаления -->
+<div class="modal-overlay" id="confirm-modal" onclick="if(event.target===this){resolveConfirm(false);this.classList.remove('open')}">
+    <div class="modal" style="width:400px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h2 style="color:var(--red);font-size:15px;" id="confirm-modal-title">Подтверждение</h2>
+            <button class="modal-close" onclick="resolveConfirm(false);document.getElementById('confirm-modal').classList.remove('open')">✕</button>
+        </div>
+        <div class="modal-body">
+            <p id="confirm-modal-text" style="font-size:13px;color:var(--text-secondary);line-height:1.6;"></p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="resolveConfirm(false);document.getElementById('confirm-modal').classList.remove('open')">Отмена</button>
+            <button class="btn btn-danger" onclick="resolveConfirm(true);document.getElementById('confirm-modal').classList.remove('open')">Удалить</button>
+        </div>
+    </div>
+</div>
+
+<!-- МОДАЛКА: Подтверждение удаления -->
+<div class="modal-overlay" id="confirm-modal" onclick="if(event.target===this){resolveConfirm(false);this.classList.remove('open')}">
+    <div class="modal" style="width:420px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h2 style="color:var(--red);font-size:15px;" id="confirm-modal-title">Подтверждение</h2>
+            <button class="modal-close" onclick="resolveConfirm(false);document.getElementById('confirm-modal').classList.remove('open')">✕</button>
+        </div>
+        <div class="modal-body">
+            <p id="confirm-modal-text" style="font-size:13px;color:var(--text-secondary);line-height:1.6;"></p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="resolveConfirm(false);document.getElementById('confirm-modal').classList.remove('open')">Отмена</button>
+            <button class="btn btn-danger" onclick="resolveConfirm(true);document.getElementById('confirm-modal').classList.remove('open')">Удалить</button>
+        </div>
     </div>
 </div>
 
@@ -1896,7 +1931,8 @@ function renderProjects() {
                 </div>
                 <div class="project-card-actions">
                     <button class="project-action-btn" onclick="event.stopPropagation();openProjectModal(${p.id})" title="Редактировать">✏️</button>
-                    <button class="project-action-btn danger" onclick="event.stopPropagation();deleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">🗑</button>
+                    <button class="project-action-btn danger" onclick="event.stopPropagation();confirmDeleteProject(${p.id},'${escapeHtml(p.name)}')" title="Удалить">🗑</button>
+                    <button class="project-action-btn archive" onclick="event.stopPropagation();archiveProject(${p.id},'${escapeHtml(p.name)}')" title="Архивировать">📦</button>
                 </div>
             </div>
             ${progress>0?`<div class="project-progress-bar"><div class="project-progress-fill" style="width:${progress}%"></div></div>`:''}
@@ -1929,8 +1965,9 @@ async function selectProject(id) {
     }
 }
 
-async function deleteProject(id, name) {
-    if (!confirm(`Удалить "${name}"?`)) return;
+async function confirmDeleteProject(id, name) {
+    const confirmed = await showConfirmModal(`Удалить проект "${name}"?`, 'Это действие нельзя отменить. Все данные проекта будут потеряны.');
+    if (!confirmed) return;
     try {
         await fetch(`/api/v1/projects/${id}`, {method:"DELETE"});
         await loadProjects();
@@ -1941,6 +1978,21 @@ async function deleteProject(id, name) {
         }
         showToast(`"${name}" удалён`, "success");
     } catch(e) { showToast(e.message, "error"); }
+}
+
+async function archiveProject(id, name) {
+    const desc = prompt(`Архивировать "${name}". Описание архива (необязательно):`);
+    if (desc === null) return; // отмена
+    try {
+        showToast('Создание архива...', 'info');
+        const resp = await fetch('/api/v1/projects/archive', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:id, description:desc||''}) });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`Архив создан: ${data.archive_name} (${data.file_count} файлов)`, 'success');
+        } else {
+            showToast(data.detail || 'Ошибка архива', 'error');
+        }
+    } catch(e) { showToast(e.message, 'error'); }
 }
 
 const templateDescriptions = {
@@ -2034,41 +2086,55 @@ async function autoIncrementProgress() {
 }
 
 // ═══════════════════════════════════════════════════════
+// ПОДТВЕРЖДАЮЩАЯ МОДАЛКА
+// ═══════════════════════════════════════════════════════
+let _confirmResolve = null;
+function showConfirmModal(title, text) {
+    document.getElementById('confirm-modal-title').textContent = title;
+    document.getElementById('confirm-modal-text').textContent = text;
+    document.getElementById('confirm-modal').classList.add('open');
+    return new Promise(resolve => { _confirmResolve = resolve; });
+}
+function resolveConfirm(result) {
+    if (_confirmResolve) { _confirmResolve(result); _confirmResolve = null; }
+}
+
+// ═══════════════════════════════════════════════════════
 // СКИЛЛЫ
 // ═══════════════════════════════════════════════════════
 const SKILL_GROUPS = [
-    { name: 'AI', icon: '🧠', skills: [
-        {id:'asr',name:'ASR',icon:'🎤',desc:'Распознавание речи'},
-        {id:'vlm',name:'VLM',icon:'👁',desc:'Понимание изображений'},
-        {id:'llm',name:'LLM',icon:'💬',desc:'Языковая модель'},
-        {id:'tts',name:'TTS',icon:'🔊',desc:'Синтез речи'},
+    { name: 'AI & Media', icon: '🧠', desc: 'Модели ИИ и мультимедиа', skills: [
+        {id:'llm',name:'LLM Chat',icon:'💬',desc:'Чат и генерация текста через языковые модели'},
+        {id:'vlm',name:'VLM',icon:'👁',desc:'Анализ изображений и визуального контента'},
+        {id:'asr',name:'ASR',icon:'🎤',desc:'Распознавание речи (speech-to-text)'},
+        {id:'tts',name:'TTS',icon:'🔊',desc:'Синтез речи (text-to-speech)'},
+        {id:'image-gen',name:'Image Gen',icon:'🖼',desc:'Генерация изображений по описанию'},
+        {id:'video-gen',name:'Video Gen',icon:'🎬',desc:'Генерация и обработка видео'},
     ]},
-    { name: 'Creative', icon: '🎨', skills: [
-        {id:'charts',name:'Charts',icon:'📊',desc:'Графики и диаграммы'},
-        {id:'image-gen',name:'Image Gen',icon:'🖼',desc:'Генерация изображений'},
-        {id:'video-gen',name:'Video Gen',icon:'🎬',desc:'Генерация видео'},
+    { name: 'Documents', icon: '📄', desc: 'Работа с документами', skills: [
+        {id:'pdf',name:'PDF',icon:'📕',desc:'Создание, редактирование и анализ PDF'},
+        {id:'docx',name:'DOCX',icon:'📝',desc:'Создание и редактирование Word документов'},
+        {id:'xlsx',name:'XLSX',icon:'📗',desc:'Работа с таблицами Excel'},
+        {id:'ppt',name:'PPT',icon:'📙',desc:'Создание презентаций PowerPoint'},
     ]},
-    { name: 'Docs', icon: '📄', skills: [
-        {id:'pdf',name:'PDF',icon:'📕',desc:'Работа с PDF'},
-        {id:'docx',name:'DOCX',icon:'📝',desc:'Работа с DOCX'},
-        {id:'xlsx',name:'XLSX',icon:'📗',desc:'Работа с таблицами'},
-        {id:'ppt',name:'PPT',icon:'📙',desc:'Презентации'},
-    ]},
-    { name: 'Web', icon: '🌐', skills: [
-        {id:'web-search',name:'Web Search',icon:'🔍',desc:'Поиск в интернете'},
-        {id:'web-reader',name:'Web Reader',icon:'📖',desc:'Чтение веб-страниц'},
+    { name: 'Web & Research', icon: '🌐', desc: 'Веб-инструменты и исследования', skills: [
+        {id:'web-search',name:'Web Search',icon:'🔍',desc:'Поиск информации в интернете'},
+        {id:'web-reader',name:'Web Reader',icon:'📖',desc:'Извлечение контента с веб-страниц'},
         {id:'browser',name:'Browser',icon:'🌐',desc:'Автоматизация браузера'},
+        {id:'aminer-academic-search',name:'Academic',icon:'🎓',desc:'Поиск научных статей и публикаций'},
     ]},
-    { name: 'Other', icon: '⚡', skills: [
-        {id:'coding-agent',name:'Coding Agent',icon:'🤖',desc:'Агент кодирования'},
-        {id:'finance',name:'Finance',icon:'💰',desc:'Финансовые данные'},
+    { name: 'Development', icon: '⚡', desc: 'Инструменты разработки', skills: [
+        {id:'coding-agent',name:'Coding Agent',icon:'🤖',desc:'AI-агент для написания кода'},
+        {id:'charts',name:'Charts',icon:'📊',desc:'Графики, диаграммы и визуализации'},
+        {id:'finance',name:'Finance',icon:'💰',desc:'Финансовые данные и аналитика'},
+        {id:'skill-creator',name:'Skill Creator',icon:'🛠',desc:'Создание новых навыков'},
     ]},
 ];
 
 function renderSkills() {
     let html = '';
     SKILL_GROUPS.forEach(g => {
-        html += `<div class="skill-group"><div class="skill-group-header">${g.icon} ${g.name}</div>`;
+        html += `<div class="skill-group"><div class="skill-group-header">${g.icon} ${g.name}</div>${g.desc?`<div class="skill-group-desc">${g.desc}</div>`:''}`;
         g.skills.forEach(s => {
             const isOn = activeSkills.has(s.id);
             html += `<div class="skill-item" onclick="toggleSkill('${s.id}')">
@@ -2186,7 +2252,6 @@ function renderBottomBar() {
             {l:'🔀 Git',a:"togglePanel('git')"},
             {l:'🛠 Terminal',a:"insertCommand('/terminal ')"},
             {l:'📊 Stats',a:"showStats()"},
-            {l:'🔑 Keys',a:"showKeysModal()"},
             {l:'⚙️ Settings',a:"showSettings()"},
             {l:'❓ Help',a:"showHelp()"},
         ];
@@ -2201,7 +2266,6 @@ function renderBottomBar() {
     } else {
         btns = [
             {l:'📊 Stats',a:"showStats()"},
-            {l:'🔑 Keys',a:"showKeysModal()"},
             {l:'⚙️ Settings',a:"showSettings()"},
             {l:'❓ Help',a:"showHelp()"},
         ];
@@ -2397,8 +2461,8 @@ async function showKeysModal() {
             const status = cfg.status||"not_configured";
             const sLabel = {valid:"Активен",rate_limited:"Лимит",invalid:"Ошибка",not_configured:"Не настроен"}[status]||status;
             const sCls = {valid:"valid",rate_limited:"limited",invalid:"invalid",not_configured:"none"}[status]||"none";
-            const dis = cfg.enabled===false ? 'opacity:0.4;' : '';
-            const offBadge = cfg.enabled===false ? '<span style="background:var(--red);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:6px;">OFF</span>' : '';
+            const dis = cfg.enabled===false ? 'opacity:0.35; border-color:var(--red) !important;' : '';
+            const offBadge = cfg.enabled===false ? '<span style="background:var(--red);color:#fff;font-size:10px;padding:2px 8px;border-radius:8px;margin-left:6px;font-weight:700;">ВЫКЛ</span>' : '';
             html += `<div class="key-card" style="${dis}"><div class="key-card-header"><span class="key-provider">${pdef.name}${offBadge}</span><span class="key-status ${sCls}">${sLabel}</span></div>
                 ${cfg.has_key?'<div class="key-value">●●●●●●●●●</div>':''}
                 <div class="key-actions">
@@ -2433,8 +2497,11 @@ async function removeKey(pid) {
     await loadModels(); showKeysModal(); showToast("Удалено","success");
 }
 async function toggleProvider(pid, enabled) {
-    await fetch('/api/v1/keys/'+pid+'/toggle', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled}) });
-    await loadModels(); showKeysModal();
+    try {
+        await fetch('/api/v1/keys/'+pid+'/toggle', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled}) });
+        showToast(enabled ? 'Провайдер включён' : 'Провайдер выключен', enabled ? 'success' : 'warning');
+        await loadModels(); showKeysModal();
+    } catch(e) { showToast('Ошибка: ' + e.message, 'error'); }
 }
 async function revalidateKey(pid) {
     showToast("Проверка...","info");
@@ -2451,8 +2518,11 @@ async function doAddGithub() {
     try { await fetch('/api/v1/keys/github',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})}); showKeysModal(); showToast("OK","success"); } catch(e){showToast(e.message,"error");}
 }
 async function toggleGitHub(enabled) {
-    await fetch('/api/v1/keys/github/toggle',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
-    showKeysModal();
+    try {
+        await fetch('/api/v1/keys/github/toggle',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+        showToast(enabled ? 'GitHub включён' : 'GitHub выключен', enabled ? 'success' : 'warning');
+        showKeysModal();
+    } catch(e) { showToast('Ошибка: ' + e.message, 'error'); }
 }
 
 // ═══════════════════════════════════════════════════════
