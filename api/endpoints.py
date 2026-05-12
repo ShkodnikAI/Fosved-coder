@@ -16,7 +16,8 @@ import shlex
 import shutil
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
+import re
 
 from core.memory import (
     CONFIG, create_project, get_all_projects, get_project,
@@ -892,15 +893,27 @@ async def search_files(req: SearchFilesRequest):
                     lines = fh.readlines()
                 rel_path = os.path.relpath(full_path, project_path).replace("\\", "/")
                 for line_num, line in enumerate(lines, 1):
-                    if query in line.lower():
-                        results.append({
-                            "file": rel_path,
-                            "line": line_num,
-                            "text": line.rstrip()[:200],
-                            "match_start": max(0, line.lower().find(query) - 40),
-                        })
+                    try:
+                        if re.search(query, line, re.IGNORECASE):
+                            results.append({
+                                "file": rel_path,
+                                "line": line_num,
+                                "text": line.rstrip()[:200],
+                                "match_start": max(0, line.lower().find(query.split("|")[0].split("(")[0].lower()) - 40),
+                            })
                         if len(results) >= req.max_results:
                             return {"results": results, "query": req.query, "total": len(results), "truncated": True}
+                    except re.error:
+                        # Invalid regex — fall back to substring match
+                        if query in line.lower():
+                            results.append({
+                                "file": rel_path,
+                                "line": line_num,
+                                "text": line.rstrip()[:200],
+                                "match_start": max(0, line.lower().find(query) - 40),
+                            })
+                            if len(results) >= req.max_results:
+                                return {"results": results, "query": req.query, "total": len(results), "truncated": True}
             except (OSError, PermissionError):
                 continue
 
@@ -1570,7 +1583,7 @@ async def archive_project(req: ArchiveProjectRequest):
     #    (защита от data-exfil через подсунутый symlink).
     archives_dir = os.path.join(CONFIG["system"].get("archives_dir", "./archives"))
     os.makedirs(archives_dir, exist_ok=True)
-    archive_name = f"{project['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    archive_name = f"{project['name'].replace(' ', '_')}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     zip_path = os.path.join(archives_dir, f"{archive_name}.zip")
 
     project_real = os.path.realpath(project_path)
@@ -1643,7 +1656,7 @@ def _generate_master_prompt(project_name: str, history: list, file_list: list) -
     """Сгенерировать мастер-промпт из истории чата и файлов проекта."""
     lines = [
         f"# МАСТЕР-ПРОМПТ ПРОЕКТА: {project_name}",
-        f"# Дата архивации: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"# Дата архивации: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
         "",
         "## Описание проекта",
     ]
@@ -2358,7 +2371,7 @@ async def debug_push_to_github():
     Остановить debug-сессию, собрать логи, сохранить в файл и git push на GitHub.
     Возвращает {pushed, log_file, github_url, ...} или {error}.
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     # 1. Собрать debug-лог
     debug_data = action_logger.stop_debug_session()
@@ -2366,7 +2379,7 @@ async def debug_push_to_github():
     client_errors = debug_data.get("client_errors", [])
 
     # 2. Формируем отчёт в Markdown
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
     session_id = now.strftime("%Y%m%d_%H%M%S")
     log_filename = f"debug_{session_id}.md"

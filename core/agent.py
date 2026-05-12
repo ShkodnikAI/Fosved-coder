@@ -6,6 +6,7 @@ import shlex
 import re
 import asyncio
 import glob as glob_mod
+import fnmatch
 import litellm
 import json
 from pathlib import Path
@@ -370,7 +371,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 for root, dirs, files in os.walk(project_path):
                     dirs[:] = [d for d in dirs if d not in {"venv", "__pycache__", "node_modules", ".git", ".cache", ".venv", "dist", "build", ".next"}]
                     for f in files:
-                        if file_pattern != "*" and not f.endswith(file_pattern.replace("*", "")):
+                        if file_pattern != "*" and not fnmatch.fnmatch(f, file_pattern):
                             continue
                         fpath = os.path.join(root, f)
                         try:
@@ -444,7 +445,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             # Stage all
             r1 = await executor.execute("git add -A", cwd=project_path, need_approval=False)
             # Commit
-            safe_msg = message.replace('"', "'")
+            safe_msg = shlex.quote(message)
             r2 = await executor.execute(f'git commit -m "{safe_msg}" --allow-empty', cwd=project_path, need_approval=False)
             commit_out = r2.get("stdout", "") + r2.get("stderr", "")
             # Push with project PAT token if available

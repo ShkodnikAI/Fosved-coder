@@ -5,7 +5,7 @@ Fosved Coder v2.0 — Context Compressor
 import re
 import json
 import litellm
-from datetime import datetime
+from datetime import datetime, timezone
 
 from core.action_logger import get_logger
 logger = get_logger()
@@ -182,7 +182,7 @@ class ContextCompressor:
             raise ValueError(f"LLM вернул слишком короткую суммаризацию: {len(summary)} символов")
 
         # Add metadata header
-        now = datetime.now().strftime("%H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%H:%M:%S")
         final = f"[Сжатый контекст — {now} | LLM-суммаризация {message_count} сообщений]\n\n{summary}"
         return final
 
@@ -203,7 +203,7 @@ class ContextCompressor:
             decisions_made.extend(self.DECISION_PATTERN.findall(text)[:5])
 
         summary_lines = [
-            f"[Сжатый контекст — {datetime.now().strftime('%H:%M:%S')} | Regex]",
+            f"[Сжатый контекст — {datetime.now(timezone.utc).strftime('%H:%M:%S')} | Regex]",
             f"Предыдущих сообщений: {len(old_messages)}",
         ]
 
