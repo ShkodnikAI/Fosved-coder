@@ -750,6 +750,7 @@ pre:hover .code-btn-bar { opacity: 1; }
     font-weight: 700; font-size: 12px; transition: all 0.15s;
     display: flex; align-items: center; gap: 4px;
     animation: stopPulse 1.5s ease-in-out infinite;
+    margin-left: 8px;
 }
 .btn-stop:hover { background: #dc2626; transform: scale(1.05); }
 .btn-stop:active { transform: scale(0.95); }

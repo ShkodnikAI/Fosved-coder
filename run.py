@@ -308,7 +308,15 @@ async def websocket_chat(websocket: WebSocket):
                     await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
                     continue
 
+                # ── Reset cancel flag before every new generation request ──
+                # This is critical: after stop_generation, ws_cancelled stays True
+                # until we explicitly reset it here, before each new chat/hub message.
+                _msg_type = payload.get("type", "")
+                if _msg_type in ("chat", "hub_chat", "refactor", "start_questionnaire"):
+                    ws_cancelled = False
+
                 # Handle hub chat (главный экран — без контекста проекта)
+                # ws_cancelled already reset above for all chat types
                 if payload.get("type") == "hub_chat":
                     hub_prompt = payload.get("prompt", "")
                     hub_model = payload.get("model_id")
