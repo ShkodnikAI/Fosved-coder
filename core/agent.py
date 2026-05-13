@@ -138,6 +138,47 @@ DANGEROUS_COMMAND_PATTERNS = [
 ]
 
 
+# ═══════════════════════════════════════════════════════
+# TOKEN COMPRESSION FOR TOOL OUTPUTS (inspired by SlopLobster)
+# ═══════════════════════════════════════════════════════
+
+# Maximum chars for tool outputs going into context
+_TOOL_OUTPUT_MAX_CHARS = {
+    "read_file": 30000,       # Already trimmed in execute_tool
+    "write_file": 500,        # Just confirmation
+    "list_files": 5000,       # Directory listing
+    "search_files": 8000,     # Search results (max 30 matches)
+    "execute_command": 7000,  # Command output
+    "git_commit_push": 1000,  # Git output
+}
+
+# Search result snippet limit
+_SEARCH_SNIPPET_MAX = 150
+
+
+def _compress_tool_output(tool_name: str, output: str) -> str:
+    """
+    Compress tool output to save context window tokens.
+    Trims to max chars per tool type, with smart truncation messages.
+    Returns compressed output string.
+    """
+    max_chars = _TOOL_OUTPUT_MAX_CHARS.get(tool_name, 10000)
+
+    if len(output) <= max_chars:
+        return output
+
+    # Smart truncation: keep beginning and end
+    keep_start = max_chars * 2 // 3
+    keep_end = max_chars // 3
+
+    compressed = output[:keep_start]
+    compressed += f"\n\n... [обрезано: {len(output) - max_chars} символов пропущено] ...\n\n"
+    compressed += output[-keep_end:]
+
+    print(f"  [agent] Tool output compressed: {tool_name} {len(output)} -> {max_chars} chars")
+    return compressed
+
+
 def _check_dangerous_command(command: str) -> str | None:
     """Check if command matches dangerous patterns. Returns warning or None."""
     cmd_lower = command.lower()
@@ -816,6 +857,9 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                     })
 
                     result = await execute_tool(fn_name, fn_args, project_path, websocket)
+
+                    # Compress tool output before adding to context (token budget)
+                    result = _compress_tool_output(fn_name, result)
 
                     messages.append({
                         "role": "tool",
