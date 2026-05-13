@@ -887,7 +887,11 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     await save_message(project_id, "user", prompt)
 
-    # Build model list with fallback
+    # Build model list — PREFER PROBED models (they actually responded)
+    all_models = keys_manager.get_all_models()
+    probed_ids = keys_manager._probed_model_ids  # Модели, прошедшие probe
+    failed_probe_ids = keys_manager._failed_probe_ids  # Модели, НЕ прошедшие probe
+
     models_to_try = []
     if model_id:
         models_to_try.append(model_id)
@@ -897,19 +901,45 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if pm not in models_to_try:
             models_to_try.append(pm)
 
-    all_models = keys_manager.get_all_models()
     dead_providers_seen = set()  # Провайдеры, сдохшие при обработке ЭТОГО сообщения
+
+    # --- Phase 1: Probed models (GUARANTEED working) ---
     for m in all_models:
-        if m["id"] not in models_to_try and m.get("status") in ("valid", "available"):
+        mid = m["id"]
+        if mid in models_to_try:
+            continue
+        # Only models that PASSED probe
+        if probed_ids and mid not in probed_ids:
+            continue
+        if m.get("status") not in ("valid", "available", "rate_limited"):
+            continue
+        if m.get("type") == "free" and m.get("status") == "no_key":
+            continue
+        if m.get("type") == "local" and not m.get("base_url"):
+            continue
+        _m_cfg = keys_manager.get_model_config(mid)
+        if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
+            continue
+        models_to_try.append(mid)
+
+    # --- Phase 2: Remaining valid models (fallback if no probed) ---
+    if not probed_ids:
+        for m in all_models:
+            mid = m["id"]
+            if mid in models_to_try:
+                continue
+            if mid in failed_probe_ids:
+                continue  # Skip models we KNOW failed probe
+            if m.get("status") not in ("valid", "available"):
+                continue
             if m.get("type") == "free" and m.get("status") == "no_key":
                 continue
             if m.get("type") == "local" and not m.get("base_url"):
                 continue
-            # Skip models from dead providers
-            _m_cfg = keys_manager.get_model_config(m["id"])
+            _m_cfg = keys_manager.get_model_config(mid)
             if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
                 continue
-            models_to_try.append(m["id"])
+            models_to_try.append(mid)
 
     if not models_to_try:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
@@ -1099,27 +1129,56 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
 
     await save_message(None, "user", prompt)
 
-    # Список моделей с fallback
+    # Список моделей — PREFER PROBED models
+    all_models = keys_manager.get_all_models()
+    probed_ids = keys_manager._probed_model_ids
+    failed_probe_ids = keys_manager._failed_probe_ids
+
     models_to_try = []
     if model_id:
         models_to_try.append(model_id)
 
-    all_models = keys_manager.get_all_models()
-    dead_providers_seen = set()  # Провайдеры, сдохшие при обработке ЭТОГО сообщения
+    dead_providers_seen = set()
+
+    # Phase 1: Probed models (GUARANTEED working)
     for m in all_models:
-        if m["id"] not in models_to_try and m.get("status") in ("valid", "available"):
+        mid = m["id"]
+        if mid in models_to_try:
+            continue
+        if probed_ids and mid not in probed_ids:
+            continue
+        if m.get("status") not in ("valid", "available", "rate_limited"):
+            continue
+        if m.get("type") == "free" and m.get("status") == "no_key":
+            continue
+        if m.get("type") == "local" and not m.get("base_url"):
+            continue
+        _m_cfg = keys_manager.get_model_config(mid)
+        if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
+            continue
+        models_to_try.append(mid)
+
+    # Phase 2: Fallback (if no probed results yet)
+    if not probed_ids:
+        for m in all_models:
+            mid = m["id"]
+            if mid in models_to_try:
+                continue
+            if mid in failed_probe_ids:
+                continue
+            if m.get("status") not in ("valid", "available"):
+                continue
             if m.get("type") == "free" and m.get("status") == "no_key":
                 continue
             if m.get("type") == "local" and not m.get("base_url"):
                 continue
-            # Skip models from dead providers
-            _m_cfg = keys_manager.get_model_config(m["id"])
+            _m_cfg = keys_manager.get_model_config(mid)
             if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
                 continue
-            models_to_try.append(m["id"])
+            models_to_try.append(mid)
 
     if not models_to_try:
-        print(f"  [agent] hub: NO models available! all_models={len(all_models)}")
+        print(f"  [agent] hub: NO models available! all_models={len(all_models)}, probed={len(probed_ids)}")
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         return
 

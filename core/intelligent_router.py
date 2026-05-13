@@ -212,8 +212,16 @@ class IntelligentRouter:
         complexity = classification["complexity"]
 
         # Разделяем модели на лидеров и бесплатные
+        # PREFER PROBED models — только те, что реально ответили на probe
         leader_models = []
         free_models = []
+        try:
+            from core.keys_manager import keys_manager as _km
+            _probed_ids = _km._probed_model_ids
+            _failed_ids = _km._failed_probe_ids
+        except Exception:
+            _probed_ids = set()
+            _failed_ids = set()
 
         for m in available_models:
             status = m.get("status", "")
@@ -225,10 +233,16 @@ class IntelligentRouter:
             if status in ("invalid", "no_key"):
                 continue
 
+            # PREFER PROBED: если есть результаты probe, пропускать непроверенные
+            if _probed_ids and model_id not in _probed_ids:
+                continue
+            # Пропускаем модели, явно провалившие probe
+            if model_id in _failed_ids:
+                continue
+
             # Пропускаем модели от мёртвых провайдеров
             try:
                 from core.agent import _is_provider_dead
-                from core.keys_manager import keys_manager as _km
                 _mcfg = _km.get_model_config(model_id)
                 if _mcfg and _is_provider_dead(_mcfg.get("provider", "")):
                     continue
