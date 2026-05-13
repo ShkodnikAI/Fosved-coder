@@ -745,7 +745,8 @@ async def stream_llm_response(prompt: str, history: list, websocket,
         return None
 
     print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, thinking={is_thinking}, project={project_path}, api_base={'yes' if api_base else 'no'}")
-    await _send_log(websocket, f"🧠 Модель: {model}", "info")
+    # Silent: model name only in server console, not in UI logs
+    print(f"  [agent] Using model: {model}")
 
     # Extended Thinking: уведомить клиента и настроить параметры
     if is_thinking:
@@ -919,7 +920,8 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             duration = (time.time() - start_time) * 1000
             tokens = len(full_response) // 4
             logger.ai_response(model=model, tokens=tokens, success=True, duration_ms=duration)
-            await _send_log(websocket, f"✅ Ответ от {model}: {len(full_response)} симв., {(duration/1000):.1f}с", "success")
+            # Silent: response stats only in server console
+            print(f"  [agent] Response OK: {model} — {len(full_response)} chars, {(duration/1000):.1f}s")
             return full_response
 
         except Exception as e:

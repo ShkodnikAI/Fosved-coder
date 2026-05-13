@@ -429,11 +429,8 @@ async def websocket_chat(websocket: WebSocket):
                             logger.log("intelligent_router_selected", level="info", source="ws",
                                        details={"model": model_id, "complexity": route_result.get("complexity"),
                                                 "reason": route_result.get("reason", "")[:200]})
-                            await safe_ws_send(websocket, {
-                                "type": "auto_log",
-                                "content": f"🔀 Маршрутизатор: {route_result.get('reason', '')}",
-                                "level": "info",
-                            })
+                            # Silent routing — no UI log, only server console
+                            print(f"  [router] {route_result.get('reason', '')} → {model_id}")
                     except Exception as route_err:
                         try:
                             logger.log("intelligent_router_error", level="warning", source="ws", error=str(route_err)[:200])

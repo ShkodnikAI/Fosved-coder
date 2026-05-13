@@ -1826,6 +1826,8 @@ function updateHeaderModelBadge(name, state) {
 
 /** Результаты зондирования моделей */
 function handleProbedModels(models) {
+    // Store probed model IDs globally for renderModels filtering
+    window._probedModelIds = (models || []).map(m => m.model_id || m.id).filter(Boolean);
     const indicator = document.getElementById('probed-indicator');
     if (!indicator) return;
     const total = allModels.length;
@@ -1939,7 +1941,20 @@ function renderModels() {
         updateStatusBar();
         return;
     }
-    const usable = allModels.filter(m => m.status==='valid'||m.status==='rate_limited'||m.status==='available');
+    // Only show models that passed probe (status=valid) or are local/custom
+    // Hide models that haven't been probed yet (still "available" without probe confirmation)
+    const probedIds = new Set((window._probedModelIds || []));
+    const hasProbeData = probedIds.size > 0;
+    const usable = allModels.filter(m => {
+        // Local/custom models always shown
+        if (m.type === 'local' || m.type === 'custom') return true;
+        // If no probe data yet, show valid/rate_limited only (hide plain "available")
+        if (!hasProbeData) return m.status === 'valid' || m.status === 'rate_limited';
+        // With probe data: only show probed models
+        if (m.status === 'valid') return true;
+        if (m.status === 'rate_limited') return true;
+        return probedIds.has(m.id);
+    });
     const mc = document.getElementById('hub-models-count');
     if (mc) mc.textContent = usable.length ? usable.length + '/' + allModels.length : '';
 

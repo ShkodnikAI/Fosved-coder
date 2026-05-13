@@ -99,6 +99,7 @@ class IntelligentRouter:
 
     def __init__(self):
         self._classification_cache: dict = {}  # Кэш последних классификаций
+        self._fallback_index: int = 0  # Ротация fallback моделей
 
     def classify(self, user_prompt: str) -> dict:
         """
@@ -260,31 +261,50 @@ class IntelligentRouter:
             elif model_type == "free" and status in ("valid", "available"):
                 free_models.append(m)
 
-        # Выбор модели
+        # Выбор модели (с ротацией — не гоняем одну и ту же модель)
         if complexity == "simple":
             # Простая задача → сначала бесплатная, fallback на лидера
             if free_models:
-                chosen = free_models[0]
+                # Ротация среди бесплатных
+                idx = self._fallback_index % len(free_models)
+                chosen = free_models[idx]
                 reason = f"Простая задача → бесплатная модель: {chosen['name']}"
             elif leader_models:
-                chosen = leader_models[0]
+                idx = self._fallback_index % len(leader_models)
+                chosen = leader_models[idx]
                 reason = f"Простая задача, но нет бесплатных → лидер: {chosen['name']}"
             else:
-                # Fallback: первая доступная модель
+                # Fallback: ротация среди доступных
                 usable = [m for m in available_models if m.get("status") in ("valid", "available")]
-                chosen = usable[0] if usable else available_models[0] if available_models else None
-                reason = f"Fallback: {chosen['name'] if chosen else 'нет моделей'}"
+                pool = usable if usable else available_models
+                if pool:
+                    idx = self._fallback_index % len(pool)
+                    chosen = pool[idx]
+                    reason = f"Fallback: {chosen['name']}"
+                else:
+                    chosen = None
+                    reason = "Fallback: нет моделей"
         else:
             # Сложная задача → сначала лидер, fallback на любую платную
             if leader_models:
-                chosen = leader_models[0]
+                idx = self._fallback_index % len(leader_models)
+                chosen = leader_models[idx]
                 reason = f"Сложная задача → модель-лидер: {chosen['name']}"
             else:
-                # Нет лидеров — берём любую валидную платную
+                # Нет лидеров — берём любую валидную (с ротацией)
                 paid = [m for m in available_models
                         if m.get("type") == "paid" and m.get("status") in ("valid", "available")]
-                chosen = paid[0] if paid else available_models[0] if available_models else None
-                reason = f"Сложная задача, лидеры недоступны → {chosen['name'] if chosen else 'нет моделей'}"
+                pool = paid if paid else available_models
+                if pool:
+                    idx = self._fallback_index % len(pool)
+                    chosen = pool[idx]
+                    reason = f"Сложная задача, лидеры недоступны → {chosen['name']}"
+                else:
+                    chosen = None
+                    reason = "Сложная задача: нет моделей"
+
+        # Инкрементируем индекс ротации
+        self._fallback_index += 1
 
         if not chosen:
             return {
