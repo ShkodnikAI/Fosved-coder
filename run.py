@@ -307,6 +307,22 @@ async def websocket_chat(websocket: WebSocket):
                 if _is_gen_msg:
                     ws_cancelled = False
 
+                # Handle probe_selected — тихий опрос только выбранных моделей
+                if payload.get("type") == "probe_selected":
+                    selected_ids = payload.get("models", [])
+                    if selected_ids:
+                        logger.user_action("probe_selected", details={"count": len(selected_ids)})
+                        try:
+                            from core.agent import probe_selected_models
+                            await probe_selected_models(websocket, selected_ids)
+                        except Exception as probe_err:
+                            err_msg = str(probe_err)[:200]
+                            logger.log("probe_selected_error", level="error", source="ws", error=err_msg)
+                            await safe_ws_send(websocket, {"type": "auto_log", "content": f"❌ Ошибка опроса: {err_msg}", "level": "error"})
+                    else:
+                        await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Не выбрано ни одной модели", "level": "warning"})
+                    continue
+
                 # Handle hub chat (главный экран — без контекста проекта)
                 # ws_cancelled already reset above for all chat types
                 if payload.get("type") == "hub_chat":
@@ -409,6 +425,7 @@ async def websocket_chat(websocket: WebSocket):
                             prompt, all_models,
                             probed_model_ids=keys_manager._probed_model_ids,
                             failed_probe_ids=keys_manager._failed_probe_ids,
+                            has_been_probed=bool(keys_manager._failed_probe_ids),
                         )
                         if route_result.get("model_id") and route_result.get("overridden"):
                             model_id = route_result["model_id"]
@@ -417,6 +434,9 @@ async def websocket_chat(websocket: WebSocket):
                                                 "reason": route_result.get("reason", "")[:200]})
                             # Silent routing — no UI log, only server console
                             print(f"  [router] {route_result.get('reason', '')} → {model_id}")
+                        elif not route_result.get("model_id") and keys_manager._failed_probe_ids and not keys_manager._probed_model_ids:
+                            # Probe был запущен, но НИ ОДНА модель не прошла
+                            await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет моделей, прошедших опрос. Откройте вкладку 🤖 Модели и нажмите 'Опросить выбранные'", "level": "warning"})
                     except Exception as route_err:
                         try:
                             logger.log("intelligent_router_error", level="warning", source="ws", error=str(route_err)[:200])
@@ -680,7 +700,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             await safe_ws_send(websocket, {"type": "auto_log", "content": "Выберите проект для построения Repo Map.", "level": "info"})
 
     elif command == "/probe":
-        # Принудительный опрос моделей — тихий, с прогрессивной отправкой результатов
+        # Принудительный опрос ВСЕХ моделей — тихий, с прогрессивной отправкой результатов
         await safe_ws_send(websocket, {"type": "auto_log", "content": "🔍 Начинаю опрос моделей...", "level": "info"})
         try:
             from core.agent import probe_models_live

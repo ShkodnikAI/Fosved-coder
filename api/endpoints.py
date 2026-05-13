@@ -527,6 +527,18 @@ async def get_all_models_endpoint(probed_only: bool = Query(False)):
 
     return {"models": all_models}
 
+
+@router.get("/models/probed")
+async def get_probed_models_endpoint():
+    """Список моделей, прошедших probe (из кэша + БД)."""
+    _api("GET", "/api/v1/models/probed")
+    return {
+        "probed_model_ids": list(keys_manager._probed_model_ids),
+        "failed_probe_ids": list(keys_manager._failed_probe_ids),
+        "has_been_probed": bool(keys_manager._failed_probe_ids),
+    }
+
+
 @router.post("/models/validate/{provider_id}")
 async def revalidate_provider(provider_id: str):
     """Повторная валидация ключа провайдера."""

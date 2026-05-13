@@ -410,10 +410,11 @@
         <!-- Ручка изменения размера (правая) -->
         <div class="resize-handle" id="hub-right-resize-handle"></div>
 
-        <!-- ПРАВАЯ ПАНЕЛЬ: Скиллы | Логи -->
+        <!-- ПРАВАЯ ПАНЕЛЬ: Скиллы | Модели | Логи -->
         <div class="right-panel" id="hub-right-panel">
             <div class="right-panel-tabs">
                 <div class="right-panel-tab active" data-rptab="hub-skills" onclick="switchHubRightTab('hub-skills')">⚡ Скиллы</div>
+                <div class="right-panel-tab" data-rptab="hub-models-tab" onclick="switchHubRightTab('hub-models-tab')">🤖 Модели</div>
                 <div class="right-panel-tab" data-rptab="hub-logs" onclick="switchHubRightTab('hub-logs')">📋 Логи</div>
             </div>
             <div class="right-panel-content">
@@ -421,6 +422,26 @@
                 <div class="right-panel-pane active" id="rp-hub-skills">
                     <div class="skills-panel-list" id="hub-skills-list">
                         <div class="panel-list-empty">Загрузка...</div>
+                    </div>
+                </div>
+                <!-- Вкладка: Модели (выбор и опрос) -->
+                <div class="right-panel-pane" id="rp-hub-models-tab">
+                    <div style="padding:8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <input type="text" id="model-selector-search" placeholder="Поиск моделей..." oninput="filterModelSelector(this.value)" style="flex:1;padding:5px 8px;font-size:11px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-md);font-family:var(--font-ui);">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="modelSelectorSelectAll(true)">✓ Все</button>
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="modelSelectorSelectAll(false)">✕ Сброс</button>
+                        </div>
+                        <button class="probe-btn" id="probe-selected-btn" onclick="startProbeSelected()" style="width:100%;margin:0;padding:6px;font-size:12px;text-align:center;">🔍 Опросить выбранные</button>
+                        <div id="probe-progress-bar" style="display:none;margin-top:6px;">
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;" id="probe-progress-text">0/0</div>
+                            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="probe-progress-fill" style="height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%"></div></div>
+                        </div>
+                    </div>
+                    <div id="model-selector-list" style="flex:1;overflow-y:auto;padding:6px;">
+                        <div class="panel-list-empty">Загрузка моделей...</div>
                     </div>
                 </div>
                 <!-- Вкладка: Логи -->
@@ -537,15 +558,36 @@
         <!-- Ручка изменения размера (правая) -->
         <div class="resize-handle" id="proj-right-resize-handle"></div>
 
-        <!-- ПРАВАЯ ПАНЕЛЬ: Логи | Git -->
+        <!-- ПРАВАЯ ПАНЕЛЬ: Модели | Логи | Git -->
         <div class="right-panel" id="project-right-panel">
             <div class="right-panel-tabs">
-                <div class="right-panel-tab active" data-rptab="proj-logs" onclick="switchProjRightTab('proj-logs')">📋 Логи</div>
+                <div class="right-panel-tab active" data-rptab="proj-models-tab" onclick="switchProjRightTab('proj-models-tab')">🤖 Модели</div>
+                <div class="right-panel-tab" data-rptab="proj-logs" onclick="switchProjRightTab('proj-logs')">📋 Логи</div>
                 <div class="right-panel-tab" data-rptab="proj-git" onclick="switchProjRightTab('proj-git')">🔀 Git</div>
             </div>
             <div class="right-panel-content">
+                <!-- Вкладка: Модели (выбор и опрос) -->
+                <div class="right-panel-pane active" id="rp-proj-models-tab">
+                    <div style="padding:8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <input type="text" id="proj-model-selector-search" placeholder="Поиск моделей..." oninput="filterProjModelSelector(this.value)" style="flex:1;padding:5px 8px;font-size:11px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-md);font-family:var(--font-ui);">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="projModelSelectorSelectAll(true)">✓ Все</button>
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="projModelSelectorSelectAll(false)">✕ Сброс</button>
+                        </div>
+                        <button class="probe-btn" id="proj-probe-selected-btn" onclick="startProbeSelected()" style="width:100%;margin:0;padding:6px;font-size:12px;text-align:center;">🔍 Опросить выбранные</button>
+                        <div id="proj-probe-progress-bar" style="display:none;margin-top:6px;">
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;" id="proj-probe-progress-text">0/0</div>
+                            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="proj-probe-progress-fill" style="height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%"></div></div>
+                        </div>
+                    </div>
+                    <div id="proj-model-selector-list" style="flex:1;overflow-y:auto;padding:6px;">
+                        <div class="panel-list-empty">Загрузка моделей...</div>
+                    </div>
+                </div>
                 <!-- Вкладка: Логи проекта -->
-                <div class="right-panel-pane active" id="rp-proj-logs">
+                <div class="right-panel-pane" id="rp-proj-logs">
                     <div class="right-panel-header" style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
                         <div class="right-panel-title">
                             Логи <span class="log-badge" id="proj-log-badge" style="display:none">0</span>
@@ -607,6 +649,10 @@
     <div class="status-section">
         <span class="status-label">Модель:</span>
         <span class="status-content" id="status-model">—</span>
+    </div>
+    <div class="status-section">
+        <span class="status-label">Модели:</span>
+        <span class="status-content" id="status-models-count">—</span>
     </div>
     <div class="status-section">
         <span class="status-label">Экран:</span>
@@ -1756,6 +1802,12 @@ function wsConnect() {
             return;
         }
 
+        // ─── Прогресс опроса выбранных моделей ───
+        if (data.type === "probe_progress") {
+            handleProbeProgress(data);
+            return;
+        }
+
         // ─── Анкета создана (новое в V2.0) ───
         if (data.type === "questionnaire_created") {
             handleQuestionnaireCreated(data);
@@ -2057,6 +2109,7 @@ async function loadModels() {
         // НЕ рендерим сразу — показываем только проверенные модели.
         // Пустая панель до тех пор, пока не придут результаты probe.
         _showProbedOnlyModels();
+        renderModelSelectorLists(); // ← Заполняем селектор ВСЕМИ моделями
         updateLoadingBar(80, 'Модели загружены...');
         hideLoadingScreen();
     } catch(e) { console.error("Models error:", e); hideLoadingScreen(); }
@@ -2118,7 +2171,149 @@ async function startProbe() {
 async function refreshModels() {
     showToast('Обновление моделей...', 'info');
     await loadModels();
+    renderModelSelectorLists();
     renderModels();
+}
+
+// ═══════════════════════════════════════════════════════
+// МОДЕЛЬНЫЙ СЕЛЕКТОР (вкладка 🤖 Модели в правой панели)
+// ═══════════════════════════════════════════════════════
+
+/** Состояние: какие модели отмечены в селекторе */
+let _modelSelectorChecked = new Set();
+
+/** Построить HTML строки для одной модели в селекторе */
+function _buildModelSelectorItem(m) {
+    const checked = _modelSelectorChecked.has(m.id) ? 'checked' : '';
+    const tagHtml = {paid:'<span class="type-tag paid">paid</span>',free:'<span class="type-tag free">free</span>',local:'<span class="type-tag local">local</span>',custom:'<span class="type-tag custom">custom</span>',abacus:'<span class="type-tag abacus">abacus</span>'}[m.type]||'';
+    const prov = m.provider_name ? escapeHtml(m.provider_name) : '';
+    const isProbed = m._probed ? '<span style="color:var(--green);font-size:10px;margin-left:2px;">✓</span>' : '';
+    return `<div class="model-selector-item" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml((m.name||'').toLowerCase())}" style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;" onclick="this.querySelector('input').click()">
+        <input type="checkbox" ${checked} data-model-id="${escapeHtml(m.id)}" onchange="_modelSelectorToggle('${escapeHtml(m.id)}',this.checked)" style="flex-shrink:0;cursor:pointer;">
+        <div style="flex:1;min-width:0;">
+            <div style="font-size:11px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(m.name)}${isProbed}</div>
+            <div style="font-size:9px;color:var(--text-dim);">${prov} ${tagHtml}</div>
+        </div>
+    </div>`;
+}
+
+function _modelSelectorToggle(id, checked) {
+    if (checked) _modelSelectorChecked.add(id);
+    else _modelSelectorChecked.delete(id);
+}
+
+/** Отрендерить списки моделей в селекторе (для обеих панелей) */
+function renderModelSelectorLists() {
+    if (!allModels.length) return;
+    // Группируем по провайдеру
+    const groups = {};
+    allModels.forEach(m => {
+        const prov = m.provider_name || m.provider || 'other';
+        if (!groups[prov]) groups[prov] = [];
+        groups[prov].push(m);
+    });
+    let html = '';
+    for (const [provName, models] of Object.entries(groups)) {
+        html += `<div style="font-size:10px;font-weight:600;color:var(--text-dim);padding:6px 6px 2px;text-transform:uppercase;letter-spacing:0.3px;">${escapeHtml(provName)} (${models.length})</div>`;
+        models.forEach(m => { html += _buildModelSelectorItem(m); });
+    }
+    if (!html) html = '<div class="panel-list-empty">Нет моделей</div>';
+    const el1 = document.getElementById('model-selector-list');
+    const el2 = document.getElementById('proj-model-selector-list');
+    if (el1) el1.innerHTML = html;
+    if (el2) el2.innerHTML = html;
+}
+
+function modelSelectorSelectAll(selectAll) {
+    if (selectAll) {
+        allModels.forEach(m => _modelSelectorChecked.add(m.id));
+    } else {
+        _modelSelectorChecked.clear();
+    }
+    renderModelSelectorLists();
+}
+
+function projModelSelectorSelectAll(selectAll) {
+    modelSelectorSelectAll(selectAll);
+}
+
+function filterModelSelector(q) {
+    q = q.toLowerCase();
+    document.querySelectorAll('#model-selector-list .model-selector-item').forEach(el => {
+        el.style.display = el.dataset.name.includes(q) ? '' : 'none';
+    });
+}
+
+function filterProjModelSelector(q) {
+    q = q.toLowerCase();
+    document.querySelectorAll('#proj-model-selector-list .model-selector-item').forEach(el => {
+        el.style.display = el.dataset.name.includes(q) ? '' : 'none';
+    });
+}
+
+/** Запустить опрос выбранных моделей */
+function startProbeSelected() {
+    const selected = Array.from(_modelSelectorChecked);
+    if (!selected.length) {
+        showToast('Выберите хотя бы одну модель', 'warning');
+        return;
+    }
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        showToast('Нет подключения к серверу', 'error');
+        return;
+    }
+    // Отключаем кнопку
+    document.querySelectorAll('#probe-selected-btn, #proj-probe-selected-btn').forEach(btn => {
+        btn.disabled = true;
+        btn.textContent = '⏳ Опрос...';
+    });
+    // Показать прогресс-бар
+    document.querySelectorAll('#probe-progress-bar, #proj-probe-progress-bar').forEach(el => {
+        el.style.display = 'block';
+        el.querySelector('[id$="-text"]').textContent = `0/${selected.length}`;
+        el.querySelector('[id$="-fill"]').style.width = '0%';
+    });
+    wsSend({ type: "probe_selected", models: selected });
+    // Таймаут разблокировки
+    setTimeout(() => {
+        document.querySelectorAll('#probe-selected-btn, #proj-probe-selected-btn').forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = '🔍 Опросить выбранные';
+        });
+    }, 120000);
+}
+
+/** Обработать probe_progress — обновить UI прогресс */
+function handleProbeProgress(data) {
+    const total = data.total || 0;
+    const done = data.done || 0;
+    const ok = data.ok || 0;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const text = `${ok}✓ ${done - ok}✗ / ${total}`;
+
+    document.querySelectorAll('#probe-progress-text, #proj-probe-progress-text').forEach(el => {
+        el.textContent = text;
+    });
+    document.querySelectorAll('#probe-progress-fill, #proj-probe-progress-fill').forEach(el => {
+        el.style.width = pct + '%';
+    });
+
+    if (data.finished) {
+        document.querySelectorAll('#probe-progress-bar, #proj-probe-progress-bar').forEach(el => {
+            setTimeout(() => { el.style.display = 'none'; }, 2000);
+        });
+        document.querySelectorAll('#probe-selected-btn, #proj-probe-selected-btn').forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = '🔍 Опросить выбранные';
+        });
+        // Пометить опрошенные модели в селекторе
+        allModels.forEach(m => {
+            // Модели, которые уже в probed_models списке, пометим
+            const probed = m.status === 'valid';
+            m._probed = probed;
+        });
+        renderModelSelectorLists();
+    }
 }
 
 function showAddLocalModelModal() {
@@ -2560,6 +2755,10 @@ function updateStatusBar() {
     const modelEl = document.getElementById('status-model');
     const m = allModels.find(x=>x.id===activeModelId);
     modelEl.innerHTML = m ? `<span class="status-dot green"></span>${escapeHtml(m.name)}` : '—';
+    // Модели: показываем сколько прошли опрос из скольких всего
+    const mcEl = document.getElementById('status-models-count');
+    const probedCount = allModels.filter(m => m.status === 'valid' || m.status === 'rate_limited').length;
+    mcEl.textContent = probedCount > 0 ? `${probedCount}/${allModels.length}` : `${allModels.length} всего`;
 }
 
 // ═══════════════════════════════════════════════════════

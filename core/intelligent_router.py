@@ -181,6 +181,7 @@ class IntelligentRouter:
         user_preferred_model: str = None,
         probed_model_ids: set = None,
         failed_probe_ids: set = None,
+        has_been_probed: bool = False,
     ) -> dict:
         """
         Выбрать модель на основе классификации задачи.
@@ -191,6 +192,7 @@ class IntelligentRouter:
             user_preferred_model: ID модели, выбранной пользователем вручную
             probed_model_ids: множество ID моделей, прошедших probe
             failed_probe_ids: множество ID моделей, НЕ прошедших probe
+            has_been_probed: True если probe когда-либо запускался
 
         Returns:
             {
@@ -215,6 +217,18 @@ class IntelligentRouter:
         classification = self.classify(user_prompt)
         complexity = classification["complexity"]
 
+        # ── ФИКС glm-5.1 cycling ──
+        # Если probe БЫЛ запущен (has_been_probed=True), но НЕТ проверенных моделей —
+        # НЕ пытаемся подобрать модель. Пользователь должен запустить /probe.
+        if has_been_probed and not probed_model_ids:
+            return {
+                "model_id": "",
+                "model_name": "",
+                "complexity": complexity,
+                "reason": "Нет моделей, прошедших опрос. Запустите /probe.",
+                "overridden": False,
+            }
+
         # ── Фильтрация: ТОЛЬКО проверенные модели ──
         # Если есть результаты probe — используем только проверенные модели
         has_probe_data = probed_model_ids or failed_probe_ids
@@ -233,7 +247,7 @@ class IntelligentRouter:
             if status in ("invalid", "no_key"):
                 continue
 
-            # Если есть данные probe — пропускаем непроверенные и проваленные модели
+            # Если probe запускался — пропускаем непроверенные и проваленные модели
             if has_probe_data:
                 if failed_probe_ids and model_id in failed_probe_ids:
                     continue

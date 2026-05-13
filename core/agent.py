@@ -1627,6 +1627,125 @@ async def probe_models_live(websocket) -> list[dict]:
     return await _do_probe(websocket, live=True)
 
 
+async def probe_selected_models(websocket, selected_model_ids: list[str]) -> list[dict]:
+    """
+    Тихий опрос ТОЛЬКО выбранных моделей (из UI панели).
+    - Отправляет результаты ТОЛЬКО через probed_models type (в модельную панель)
+    - Прогресс — ТОЛЬКО через _send_log (в панель логов)
+    - НЕ отправляет chunk/type сообщения на главный экран
+    """
+    _sem = asyncio.Semaphore(5)
+    _probed: list[dict] = []
+    _lock = asyncio.Lock()
+
+    all_models = keys_manager.get_all_models()
+    # Фильтруем candidates только по выбранным ID
+    selected_set = set(selected_model_ids)
+    candidates = [
+        m for m in all_models
+        if m.get("id") in selected_set
+        and m.get("status") in ("valid", "rate_limited", "available")
+    ]
+
+    if not candidates:
+        await _send_log(websocket, "⚠️ Нет подходящих моделей для опроса", "warning")
+        return []
+
+    total = len(candidates)
+    await _send_log(websocket, f"🔍 Опрос {total} выбранных моделей...", "info")
+
+    # Отправляем клиенту состояние начала опроса (для UI прогресса)
+    await safe_ws_send(websocket, {
+        "type": "probe_progress",
+        "total": total,
+        "done": 0,
+        "ok": 0,
+        "fail": 0,
+    })
+
+    async def _probe_one(model_info: dict) -> dict | None:
+        model_id = model_info["id"]
+        model_name = model_info.get("name", model_id)
+        litellm_model, api_key, api_base, _ = _resolve_model(model_id)
+        if not api_key:
+            return None
+
+        probe_messages = [{"role": "user", "content": "Hi"}]
+
+        async with _sem:
+            try:
+                resp = await asyncio.wait_for(
+                    litellm.acompletion(
+                        model=litellm_model,
+                        messages=probe_messages,
+                        max_tokens=3,
+                        stream=False,
+                        api_key=api_key,
+                        **({"api_base": api_base} if api_base else {}),
+                    ),
+                    timeout=12,
+                )
+                return {"id": model_id, "name": model_name, "status": "valid"}
+            except asyncio.TimeoutError:
+                return None
+            except Exception:
+                return None
+
+    # Запускаем параллельно, с прогрессивной отправкой
+    import itertools
+    tasks = {asyncio.ensure_future(_probe_one(m)): m for m in candidates}
+    _failed_ids = []
+    _done_count = 0
+    _ok_count = 0
+
+    for future in asyncio.as_completed(tasks):
+        try:
+            result = await future
+            _done_count += 1
+            if isinstance(result, dict) and result:
+                async with _lock:
+                    _probed.append(result)
+                # Сразу отправляем клиенту — модель появится в панели
+                await safe_ws_send(websocket, {"type": "probed_models", "models": [result]})
+                keys_manager._probed_model_ids.add(result["id"])
+                keys_manager._failed_probe_ids.discard(result["id"])
+                _ok_count += 1
+            else:
+                model_info = tasks[future]
+                _failed_ids.append(model_info["id"])
+                keys_manager._failed_probe_ids.add(model_info["id"])
+
+            # Прогресс
+            await safe_ws_send(websocket, {
+                "type": "probe_progress",
+                "total": total,
+                "done": _done_count,
+                "ok": _ok_count,
+                "fail": _done_count - _ok_count,
+            })
+        except Exception:
+            _done_count += 1
+
+    # Сохраняем результаты
+    if _failed_ids:
+        keys_manager.update_failed_probe_ids(_failed_ids)
+    await save_probed_models(_probed)
+
+    await _send_log(websocket, f"✅ Опрос завершён: {_ok_count}/{total} моделей работают", "success")
+
+    # Финальное сообщение
+    await safe_ws_send(websocket, {
+        "type": "probe_progress",
+        "total": total,
+        "done": total,
+        "ok": _ok_count,
+        "fail": total - _ok_count,
+        "finished": True,
+    })
+
+    return _probed
+
+
 async def _do_probe(websocket=None, live: bool = False) -> list[dict]:
     """
     Общее зондирование. Если live=True — отправляет каждую модель по мере проверки.
