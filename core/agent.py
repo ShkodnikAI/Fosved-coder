@@ -478,10 +478,27 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             exec_cwd = project_path
             if not exec_cwd and any(cmd in command.lower() for cmd in ["git ", "git\n", "npm ", "pip ", "python "]):
                 return f"Ошибка: нет пути к проекту (project_path is None). Команда '{command[:50]}' требует рабочую директорию. Откройте проект перед выполнением."
+
+            # Auto-timeout extension for package managers (inspired by SlopLobster)
+            cmd_lower = command.lower().strip()
+            _long_patterns = [
+                r"\bpip\s+install\b", r"\bpip3\s+install\b", r"\buv\s+pip\s+install\b",
+                r"\bnpm\s+install\b", r"\byarn\s+add\b", r"\byarn\s+install\b",
+                r"\bcargo\s+install\b", r"\bcargo\s+build\b",
+                r"\bgem\s+install\b", r"\bcomposer\s+(require|install)\b",
+                r"\bapt-get\s+install\b", r"\bbrew\s+install\b",
+                r"\bgit\s+clone\b",  # Large repos can be slow
+                r"\bdocker\s+build\b", r"\bdocker\s+pull\b",
+            ]
+            exec_timeout = 60  # Default
+            if any(re.search(p, cmd_lower) for p in _long_patterns):
+                exec_timeout = 300  # 5 minutes for package managers
+                await _send_log(websocket, f"⏱️ Авто-таймаут: 5 мин (пакетный менеджер)", "info")
+
             logger.log(f"tool: execute_command '{command[:100]}'", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
             await _send_log(websocket, f"⚡ Выполняю: $ {command[:120]}", "command")
-            result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=60)
+            result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=exec_timeout)
             output = ""
             if result.get("stdout"):
                 output += result["stdout"][:5000]
