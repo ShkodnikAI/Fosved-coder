@@ -354,7 +354,6 @@
         <div class="hub-section-header">
             <span>🤖 Модели</span>
             <span class="hub-models-count" id="hub-models-count"></span>
-            <button class="probe-btn" id="probe-btn" onclick="startProbe()" title="Опросить все модели">🔍 Опросить</button>
         </div>
         <div class="hub-section-list" id="hub-models-list">
             <div class="panel-list-empty">Загрузка...</div>
@@ -498,7 +497,6 @@
                 <div class="hub-section-header">
                     <span>🤖 Модели</span>
                     <span class="hub-models-count" id="proj-models-count"></span>
-                    <button class="probe-btn" onclick="startProbe()" title="Опросить все модели">🔍 Опросить</button>
                 </div>
                 <div class="hub-section-list" id="proj-models-list">
                     <div class="panel-list-empty">Загрузка...</div>
@@ -856,6 +854,10 @@ let autoModeRunning = false;
 let priorityModels = [];
 // Восстановить приоритеты из localStorage
 try { const saved = localStorage.getItem('fosved-priority-models'); if (saved) priorityModels = JSON.parse(saved); } catch(e) {}
+// ═══ Явно проверенные модели (только через ручной опрос из UI) ═══
+let explicitlyProbedIds = new Set();
+try { const s = localStorage.getItem('fosved-probed-ids'); if (s) explicitlyProbedIds = new Set(JSON.parse(s)||[]); } catch(e) {}
+function _saveProbedIds() { try { localStorage.setItem('fosved-probed-ids', JSON.stringify([...explicitlyProbedIds])); } catch(e) {} }
 let currentLogFilter = "all";
 let autoLogCount = 0;
 let autoLogPanelVisible = true;
@@ -1873,7 +1875,7 @@ function updateHeaderModelBadge(name, state) {
 // ОБРАБОТЧИКИ НОВЫХ ТИПОВ СООБЩЕНИЙ (V2.0)
 // ═══════════════════════════════════════════════════════
 
-/** Показать в панели только проверенные модели (прошедшие probe) */
+/** Показать в панели ТОЛЬКО явно проверенные модели (прошедшие ручной probe) */
 function _showProbedOnlyModels() {
     if (!allModels.length) {
         ['hub-models-list', 'proj-models-list'].forEach(id => {
@@ -1882,29 +1884,31 @@ function _showProbedOnlyModels() {
         });
         return;
     }
-    const probedIds = new Set((allModels.filter(m => m.status === 'valid' || m.status === 'rate_limited')).map(m => m.id));
-    if (probedIds.size === 0) {
-        // Нет проверенных — показываем "опрос моделей..."
+    // Фильтруем ТОЛЬКО по explicitlyProbedIds (не по status от key validation!)
+    const probed = allModels.filter(m => explicitlyProbedIds.has(m.id));
+    if (probed.length === 0) {
+        // Нет явно проверенных — сбрасываем активную модель
+        activeModelId = null;
+        updateInputPlaceholders();
         ['hub-models-list', 'proj-models-list'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.innerHTML = '<div class="panel-list-empty">Опрос моделей...</div>';
+            if (el) el.innerHTML = '<div class="panel-list-empty">Откройте вкладку \u{1F916} Модели справа и нажмите "\u{1F50D} Опросить выбранные"</div>';
         });
         updateStatusBar();
         return;
     }
     renderModels();
     // Авто-выбор первой проверенной модели
-    const usable = allModels.filter(m => probedIds.has(m.id));
-    if (!activeModelId || !probedIds.has(activeModelId)) {
-        if (usable.length > 0) {
-            activeModelId = usable[0].id;
+    if (!activeModelId || !explicitlyProbedIds.has(activeModelId)) {
+        if (probed.length > 0) {
+            activeModelId = probed[0].id;
             updateInputPlaceholders();
         }
     }
     document.getElementById('setup-banner').style.display = 'none';
 }
 
-/** Результаты зондирования моделей */
+/** Результаты зондирования моделей — ТОЛЬКО помечаем как явно проверенные */
 function handleProbedModels(models) {
     const indicator = document.getElementById('probed-indicator');
     if (!indicator) return;
@@ -1916,16 +1920,18 @@ function handleProbedModels(models) {
     if (barFill && total > 0) {
         barFill.style.width = Math.round(((models ? models.length : 0) / total) * 100) + '%';
     }
-    // Обновить статусы моделей в allModels и перерисовать ТОЛЬКО проверенные
+    // Помечаем модели как ЯВНО проверенные и перерисовываем
     if (models && models.length) {
         models.forEach(probed => {
             const mid = probed.model_id || probed.id;
+            explicitlyProbedIds.add(mid);  // Явная пометка
             const m = allModels.find(x => x.id === mid);
             if (m) {
                 if (probed.status) m.status = probed.status;
+                m._probed = true;
             }
         });
-        // Прогрессивное заполнение — показываем только проверенные
+        _saveProbedIds();
         _showProbedOnlyModels();
     }
 }
@@ -2017,8 +2023,8 @@ function renderModels() {
         updateStatusBar();
         return;
     }
-    // Показываем ТОЛЬКО проверенные модели (valid или rate_limited)
-    const probedModels = allModels.filter(m => m.status === 'valid' || m.status === 'rate_limited');
+    // Показываем ТОЛЬКО явно проверенные модели (через ручной опрос)
+    const probedModels = allModels.filter(m => explicitlyProbedIds.has(m.id));
     const mc = document.getElementById('hub-models-count');
     if (mc) mc.textContent = probedModels.length ? probedModels.length + '/' + allModels.length : '';
 
@@ -2146,28 +2152,6 @@ function toggleModelPriority(id) {
     updateStatusBar();
 }
 
-/** Принудительный опрос всех моделей через /probe */
-async function startProbe() {
-    const btn = document.getElementById('probe-btn');
-    if (!btn || btn.disabled) return;
-    btn.disabled = true;
-    btn.textContent = '⏳ Опрос...';
-    // Очищаем текущие результаты probe — панель станет пустой
-    allModels.forEach(m => { m.status = 'available'; });
-    _showProbedOnlyModels();
-    try {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send('/probe');
-        } else {
-            showToast('Нет подключения к серверу', 'error');
-        }
-    } catch(e) {
-        showToast('Ошибка: ' + e, 'error');
-    }
-    // Кнопка разблокируется когда придёт финальный auto_log с результатом
-    setTimeout(() => { btn.disabled = false; btn.textContent = '🔍 Опросить'; }, 120000);
-}
-
 async function refreshModels() {
     showToast('Обновление моделей...', 'info');
     await loadModels();
@@ -2202,26 +2186,51 @@ function _modelSelectorToggle(id, checked) {
     else _modelSelectorChecked.delete(id);
 }
 
-/** Отрендерить списки моделей в селекторе (для обеих панелей) */
+/** Отрендерить списки моделей в селекторе — сгруппированные по операторам с выбором блоками */
 function renderModelSelectorLists() {
     if (!allModels.length) return;
-    // Группируем по провайдеру
+    // Группируем по провайдеру (оператору)
     const groups = {};
     allModels.forEach(m => {
-        const prov = m.provider_name || m.provider || 'other';
+        const prov = m.provider_name || m.provider || 'Other';
         if (!groups[prov]) groups[prov] = [];
         groups[prov].push(m);
     });
     let html = '';
     for (const [provName, models] of Object.entries(groups)) {
-        html += `<div style="font-size:10px;font-weight:600;color:var(--text-dim);padding:6px 6px 2px;text-transform:uppercase;letter-spacing:0.3px;">${escapeHtml(provName)} (${models.length})</div>`;
+        const allChecked = models.length > 0 && models.every(m => _modelSelectorChecked.has(m.id));
+        const someChecked = models.some(m => _modelSelectorChecked.has(m.id));
+        const checkIcon = allChecked ? '\u2705' : (someChecked ? '\u25A3' : '\u25A2');
+        const checkedCount = models.filter(m => _modelSelectorChecked.has(m.id)).length;
+        // Заголовок группы — кликабельный для выбора/снятия блока
+        html += `<div class="model-selector-group" style="border-bottom:1px solid var(--border);">`;
+        html += `<div class="model-selector-group-header" onclick="toggleModelSelectorGroup('${escapeHtml(provName)}')" style="display:flex;align-items:center;gap:6px;padding:6px 6px 2px;cursor:pointer;background:var(--bg-hover);">`;
+        html += `<span style="font-size:12px;">${checkIcon}</span>`;
+        html += `<div style="flex:1;min-width:0;">`;
+        html += `<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(provName)}</div>`;
+        html += `</div>`;
+        html += `<span style="font-size:9px;color:var(--text-dim);white-space:nowrap;">${checkedCount}/${models.length}</span>`;
+        html += `</div>`;
         models.forEach(m => { html += _buildModelSelectorItem(m); });
+        html += `</div>`;
     }
     if (!html) html = '<div class="panel-list-empty">Нет моделей</div>';
     const el1 = document.getElementById('model-selector-list');
     const el2 = document.getElementById('proj-model-selector-list');
     if (el1) el1.innerHTML = html;
     if (el2) el2.innerHTML = html;
+}
+
+/** Выбрать/снять все модели в группе оператора */
+function toggleModelSelectorGroup(provName) {
+    const groupModels = allModels.filter(m => (m.provider_name || m.provider || 'Other') === provName);
+    const allChecked = groupModels.length > 0 && groupModels.every(m => _modelSelectorChecked.has(m.id));
+    if (allChecked) {
+        groupModels.forEach(m => _modelSelectorChecked.delete(m.id));
+    } else {
+        groupModels.forEach(m => _modelSelectorChecked.add(m.id));
+    }
+    renderModelSelectorLists();
 }
 
 function modelSelectorSelectAll(selectAll) {
@@ -2731,7 +2740,7 @@ function renderBottomBar() {
         }
     } else {
         btns = [
-            {l:'🔍 Probe',a:"insertHubCommand('/probe ')"},
+            {l:'🔍 Probe',a:"startProbeSelected()"},
             {l:'📊 Stats',a:"showStats()"},
             {l:'⚙️ Settings',a:"showSettings()"},
             {l:'❓ Help',a:"showHelp()"},
@@ -2757,7 +2766,7 @@ function updateStatusBar() {
     modelEl.innerHTML = m ? `<span class="status-dot green"></span>${escapeHtml(m.name)}` : '—';
     // Модели: показываем сколько прошли опрос из скольких всего
     const mcEl = document.getElementById('status-models-count');
-    const probedCount = allModels.filter(m => m.status === 'valid' || m.status === 'rate_limited').length;
+    const probedCount = allModels.filter(m => explicitlyProbedIds.has(m.id)).length;
     mcEl.textContent = probedCount > 0 ? `${probedCount}/${allModels.length}` : `${allModels.length} всего`;
 }
 
