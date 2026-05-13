@@ -86,6 +86,36 @@ def _reset_dead_providers():
         _dead_providers.clear()
 
 
+def _safe_parse_tool_args(args_str: str) -> dict:
+    """
+    Parse tool call arguments with truncated JSON rescue.
+    If JSON.parse fails (e.g. truncated by max_tokens), try to extract
+    key fields (path, command, message, pattern, content) via regex.
+    Inspired by SlopLobster's safeParseArgs.
+    """
+    import json as _json
+    try:
+        return _json.loads(args_str)
+    except (_json.JSONDecodeError, TypeError):
+        pass
+
+    # Rescue: extract key fields from truncated JSON
+    rescued = {}
+    for m in re.finditer(r'"(path|command|message|pattern|content|file_pattern|model|name)":\s*"((?:[^"\\]|\\.)*)"', args_str):
+        rescued[m.group(1)] = m.group(2)
+
+    # Try to extract integer/boolean values too
+    for m in re.finditer(r'"(timeout|max_tokens|temperature)":\s*(\d+(?:\.\d+)?)', args_str):
+        val = m.group(2)
+        rescued[m.group(1)] = float(val) if '.' in val else int(val)
+
+    if rescued:
+        rescued["_parse_error"] = "truncated JSON — arguments were cut off, partial fields rescued"
+        print(f"  [agent] Truncated JSON rescued: {list(rescued.keys())}")
+
+    return rescued
+
+
 def _now():
     """Current UTC time as HH:MM:SS string."""
     return datetime.now(timezone.utc).strftime("%H:%M:%S")
@@ -702,10 +732,10 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                 # Execute each tool call
                 for tc_data in tool_calls_list:
                     fn_name = tc_data["function"]["name"]
-                    try:
-                        fn_args = json.loads(tc_data["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        fn_args = {}
+                    fn_args = _safe_parse_tool_args(tc_data["function"]["arguments"])
+
+                    if fn_args.get("_parse_error"):
+                        await _send_log(websocket, f"⚠️ {fn_name}: {fn_args['_parse_error']}", "warning")
 
                     await safe_ws_send(websocket, {
                         "type": "tool_call",
