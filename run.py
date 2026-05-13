@@ -704,6 +704,49 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         else:
             await safe_ws_send(websocket, {"type": "auto_log", "content": "Нет результатов зондирования. Попробуйте позже.", "level": "info"})
 
+    elif command == "/checkpoints":
+        from core.agent import _checkpoints
+        if not _checkpoints:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Нет сохранённых чекпоинтов.", "level": "info"})
+        else:
+            lines = [f"Чекпоинты ({len(_checkpoints)}):"]
+            for cp in _checkpoints[-10:]:  # Last 10
+                file_count = len(cp.get("files", {}))
+                desc = cp.get("description", "")
+                ts = cp.get("timestamp", "")[:19]
+                lines.append(f"  [{ts}] {desc} — {file_count} файл(ов)")
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "\n".join(lines), "level": "info"})
+
+    elif command == "/rewind":
+        from core.agent import _checkpoints, _safe_join
+        args_part = args.strip()
+        project_path = None
+        if project_id:
+            project = await get_project(project_id)
+            if project:
+                project_path = project["path"]
+
+        if not _checkpoints:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Нет чекпоинтов для отката.", "level": "info"})
+        elif not project_path:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Выберите проект для отката.", "level": "info"})
+        else:
+            # Rewind last checkpoint
+            cp = _checkpoints.pop()
+            restored = 0
+            for rel_path, original_content in cp.get("files", {}).items():
+                full_path = _safe_join(project_path, rel_path)
+                if full_path:
+                    try:
+                        with open(full_path, "w", encoding="utf-8") as f:
+                            f.write(original_content)
+                        restored += 1
+                    except Exception:
+                        pass
+            desc = cp.get("description", "checkpoint")
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"⏪ Откат: {desc} — {restored} файл(ов) восстановлено", "level": "success"})
+            logger.log(f"rewind: {desc} {restored} files restored", level="info", source="ws", project_id=project_id)
+
     elif command == "/questionnaire":
         title = args.strip() or "Новый проект"
         q_id = await save_questionnaire({"title": title, "project_id": project_id})
@@ -725,6 +768,8 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             "/ideas <github_url> — проанализировать репозиторий\n"
             "/repo_map — показать структуру проекта\n"
             "/probe — показать результаты зондирования моделей\n"
+            "/checkpoints — показать сохранённые чекпоинты\n"
+            "/rewind — откатить последний чекпоинт\n"
             "/questionnaire [title] — начать опрос для создания проекта\n"
             "/clear — очистить историю чата\n"
             "/help — эта справка"

@@ -179,13 +179,51 @@ def _compress_tool_output(tool_name: str, output: str) -> str:
     return compressed
 
 
-def _check_dangerous_command(command: str) -> str | None:
-    """Check if command matches dangerous patterns. Returns warning or None."""
-    cmd_lower = command.lower()
-    for pattern, description in DANGEROUS_COMMAND_PATTERNS:
-        if re.search(pattern, cmd_lower, re.IGNORECASE):
-            return description
-    return None
+# ═══════════════════════════════════════════════════════
+# CHECKPOINT SYSTEM (inspired by SlopLobster)
+# File snapshots before modifications for potential undo.
+# ═══════════════════════════════════════════════════════
+
+_MAX_CHECKPOINTS = 30
+_checkpoints: list[dict] = []  # [{id, timestamp, description, files: {path: content}}]
+
+
+def _save_checkpoint(project_path: str | None, description: str = ""):
+    """Save a checkpoint with current state of modified files (if project open)."""
+    if not project_path or not os.path.isdir(project_path):
+        return
+    # Only save if there are recent changes (simplified: save if < MAX)
+    if len(_checkpoints) >= _MAX_CHECKPOINTS:
+        _checkpoints.pop(0)  # Remove oldest
+    _checkpoints.append({
+        "id": int(time.time() * 1000),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "description": description or "auto checkpoint",
+        "files": {},  # We populate on write_file
+    })
+    if len(_checkpoints) > 5:
+        print(f"  [agent] Checkpoints: {len(_checkpoints)} saved (max {_MAX_CHECKPOINTS})")
+
+
+def _snapshot_file_before_write(project_path: str, rel_path: str) -> str | None:
+    """
+    Snapshot a file before it gets overwritten.
+    Returns: original content or None if file doesn't exist.
+    """
+    full_path = _safe_join(project_path, rel_path)
+    if not full_path or not os.path.isfile(full_path):
+        return None
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _store_in_checkpoint(rel_path: str, original_content: str):
+    """Store original file content in the latest checkpoint."""
+    if _checkpoints and original_content is not None:
+        _checkpoints[-1]["files"][rel_path] = original_content
 
 
 def _now():
@@ -456,6 +494,12 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             full_path = _safe_join(project_path, path)
             if not full_path:
                 return f"Ошибка: путь вне проекта: {path}"
+
+            # Checkpoint: snapshot file before overwriting
+            original = _snapshot_file_before_write(project_path, path)
+            if original is not None:
+                _store_in_checkpoint(path, original)
+
             dir_path = os.path.dirname(full_path)
             if dir_path and not os.path.exists(dir_path):
                 os.makedirs(dir_path, exist_ok=True)
