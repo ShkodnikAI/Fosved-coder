@@ -1097,6 +1097,7 @@ function flushAiRender() {
     if (ctx.div) {
         ctx.div.innerHTML = renderMarkdown(ctx.text);
         addCopyButtons(ctx.div);
+        addMessageCopyButton(ctx.div);
         ctx.chatBox.scrollTop = ctx.chatBox.scrollHeight;
     }
     _aiRenderPending = false;
@@ -1112,8 +1113,8 @@ function addCopyButtons(container) {
         const lang = langClass ? langClass.replace("language-", "") : "";
         const bar = document.createElement("div");
         bar.className = "code-btn-bar";
-        const cb = document.createElement("button"); cb.className = "code-btn"; cb.textContent = "Копировать";
-        cb.onclick = () => { navigator.clipboard.writeText(codeText).then(() => { cb.textContent = "OK"; setTimeout(() => cb.textContent = "Копировать", 2000); }); };
+        const cb = document.createElement("button"); cb.className = "code-btn"; cb.textContent = "📋";
+        cb.onclick = () => { navigator.clipboard.writeText(codeText).then(() => { cb.textContent = "✅"; setTimeout(() => cb.textContent = "📋", 2000); }); };
         bar.appendChild(cb);
         if (lang) {
             const sb = document.createElement("button"); sb.className = "code-btn save"; sb.textContent = "💾";
@@ -1123,6 +1124,24 @@ function addCopyButtons(container) {
         pre.style.position = "relative";
         pre.appendChild(bar);
     });
+}
+
+// ─── Кнопка копирования всего ответа ИИ ───
+function addMessageCopyButton(msgDiv) {
+    if (msgDiv.querySelector(".msg-copy-btn")) return;
+    if (!msgDiv.classList.contains("ai")) return;
+    const btn = document.createElement("button");
+    btn.className = "msg-copy-btn";
+    btn.textContent = "📋 Копировать";
+    btn.title = "Копировать весь ответ";
+    btn.onclick = () => {
+        const text = msgDiv.innerText || msgDiv.textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            btn.textContent = "✅ Скопировано";
+            setTimeout(() => btn.textContent = "📋 Копировать", 2000);
+        });
+    };
+    msgDiv.appendChild(btn);
 }
 
 function showSaveFileDialog(code, lang) {
@@ -1568,7 +1587,7 @@ function wsConnect() {
         if (allModels.length === 0) loadModels();
         if (allProjects.length === 0) loadProjects();
         loadServerLogs({limit: 200});
-        // Drain queued messages on connect (max 3 to avoid floods from old sessions)
+        // Drain queued messages on connect — max 3, drop the rest
         let _qCount = 0;
         while (wsMessageQueue.length > 0 && _qCount < 3) { ws.send(wsMessageQueue.shift()); _qCount++; }
         if (wsMessageQueue.length > 0) {
@@ -1576,6 +1595,8 @@ function wsConnect() {
             wsMessageQueue = [];
         }
         persistQ();
+        // Force-clear any leftover localStorage queue from old sessions
+        try { localStorage.removeItem("fosved-ws-q"); } catch(e) {}
     };
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -1732,6 +1753,16 @@ function wsConnect() {
         // ─── Результаты зондирования моделей (новое в V2.0) ───
         if (data.type === "probed_models") {
             handleProbedModels(data.models || []);
+            return;
+        }
+
+        // ─── Сервер требует очистить очередь сообщений ───
+        if (data.type === "clear_queue") {
+            if (wsMessageQueue.length > 0) {
+                addClientLog('ws', 'Queue cleared by server: ' + wsMessageQueue.length + ' messages');
+                wsMessageQueue = [];
+                persistQ();
+            }
             return;
         }
 

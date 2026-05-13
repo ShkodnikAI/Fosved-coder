@@ -623,6 +623,18 @@ pre:hover .code-btn-bar { opacity: 1; }
 .code-btn.save { border-color: rgba(78,201,176,0.3); color: var(--green); }
 .code-btn.save:hover { background: var(--green); color: #000; }
 
+/* Copy button for entire AI message */
+.msg-copy-btn {
+    display: block; width: 100%; margin-top: 8px;
+    padding: 4px 8px; background: transparent;
+    border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: var(--radius-sm); cursor: pointer;
+    font-size: 11px; text-align: center;
+    opacity: 0; transition: opacity 0.2s;
+}
+.msg.ai:hover .msg-copy-btn { opacity: 1; }
+.msg-copy-btn:hover { background: var(--bg-active); color: var(--text-primary); border-color: var(--accent); }
+
 /* Tool call message */
 .tool-call {
     padding: 8px 14px; border-left: 3px solid var(--blue);

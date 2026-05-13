@@ -197,6 +197,9 @@ async def websocket_chat(websocket: WebSocket):
     ws_session_id = str(__import__('uuid').uuid4())  # Unique session ID for memory
     logger.log("websocket_connected", level="info", source="ws")
 
+    # ── Force client to clear any stale message queue from localStorage ──
+    await safe_ws_send(websocket, {"type": "clear_queue"})
+
     # ── Cancellation flag: set by client to abort current generation ──
     ws_cancelled = False
     # ── Stop cooldown: after user presses stop, ignore queued messages for N seconds ──
