@@ -1287,11 +1287,18 @@ function setHubWaitingAI(state) {
 }
 
 function stopGeneration() {
+    // 1. Send stop signal to server
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({type: "stop_generation"}));
         addClientLog('ws', '⛔ Stop generation requested');
     }
-    // Immediately hide stop button, reset waiting state
+    // 2. Clear ALL queued messages — prevent auto-flood after stop
+    if (wsMessageQueue.length > 0) {
+        addClientLog('ws', 'Cleared ' + wsMessageQueue.length + ' queued messages');
+        wsMessageQueue = [];
+        persistQ();
+    }
+    // 3. Immediately hide stop button, reset waiting state
     setWaitingAI(false);
     setHubWaitingAI(false);
 }
@@ -1508,8 +1515,9 @@ let wsIsStable = false;
 let wsStableTimer = null;
 let wsPingTimer = null;
 let wsMessageQueue = [];
-try { const s = localStorage.getItem("fosved-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
-function persistQ() { try { localStorage.setItem("fosved-ws-q", JSON.stringify(wsMessageQueue.slice(-50))); } catch(e) {} }
+// DON'T load old messages from localStorage — they cause auto-replay floods
+// try { const s = localStorage.getItem("fosved-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
+function persistQ() { try { localStorage.setItem("fosved-ws-q", JSON.stringify(wsMessageQueue.slice(-3))); } catch(e) {} }
 
 function wsSend(data) {
     const msg = typeof data === 'string' ? data : JSON.stringify(data);
@@ -1560,7 +1568,13 @@ function wsConnect() {
         if (allModels.length === 0) loadModels();
         if (allProjects.length === 0) loadProjects();
         loadServerLogs({limit: 200});
-        while (wsMessageQueue.length > 0) { ws.send(wsMessageQueue.shift()); }
+        // Drain queued messages on connect (max 3 to avoid floods from old sessions)
+        let _qCount = 0;
+        while (wsMessageQueue.length > 0 && _qCount < 3) { ws.send(wsMessageQueue.shift()); _qCount++; }
+        if (wsMessageQueue.length > 0) {
+            addClientLog('ws', 'Dropped ' + wsMessageQueue.length + ' old queued messages (flood protection)');
+            wsMessageQueue = [];
+        }
         persistQ();
     };
     ws.onmessage = (event) => {
