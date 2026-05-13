@@ -234,7 +234,8 @@ class IntelligentRouter:
             if status in ("invalid", "no_key"):
                 continue
 
-            # PREFER PROBED: если есть результаты probe, пропускать непроверенные
+            # СТРОГО: только модели, прошедшие probe
+            # Если есть результаты probe — пропускать ВСЕ непроверенные
             if _probed_ids and model_id not in _probed_ids:
                 continue
             # Пропускаем модели, явно провалившие probe
@@ -256,52 +257,41 @@ class IntelligentRouter:
                 for pattern in LEADER_MODEL_PATTERNS
             )
 
-            if is_leader and status in ("valid", "available"):
+            # Для выбора: считаем модель доступной если status valid/available/rate_limited
+            if is_leader and status in ("valid", "available", "rate_limited"):
                 leader_models.append(m)
-            elif model_type == "free" and status in ("valid", "available"):
+            elif model_type == "free" and status in ("valid", "available", "rate_limited"):
                 free_models.append(m)
+            # Платные не-лидеры тоже добавляем как fallback
+            elif not is_leader and status in ("valid", "available", "rate_limited"):
+                free_models.append(m)  # Используем тот же список для ротации
 
         # Выбор модели (с ротацией — не гоняем одну и ту же модель)
+        # СТРОГО: НЕТ fallback на непроверенные модели!
         if complexity == "simple":
-            # Простая задача → сначала бесплатная, fallback на лидера
             if free_models:
-                # Ротация среди бесплатных
                 idx = self._fallback_index % len(free_models)
                 chosen = free_models[idx]
-                reason = f"Простая задача → бесплатная модель: {chosen['name']}"
+                reason = f"Простая задача → модель: {chosen['name']}"
             elif leader_models:
                 idx = self._fallback_index % len(leader_models)
                 chosen = leader_models[idx]
-                reason = f"Простая задача, но нет бесплатных → лидер: {chosen['name']}"
+                reason = f"Простая задача, нет бесплатных → лидер: {chosen['name']}"
             else:
-                # Fallback: ротация среди доступных
-                usable = [m for m in available_models if m.get("status") in ("valid", "available")]
-                pool = usable if usable else available_models
-                if pool:
-                    idx = self._fallback_index % len(pool)
-                    chosen = pool[idx]
-                    reason = f"Fallback: {chosen['name']}"
-                else:
-                    chosen = None
-                    reason = "Fallback: нет моделей"
+                chosen = None
+                reason = "Нет проверенных моделей для простой задачи"
         else:
-            # Сложная задача → сначала лидер, fallback на любую платную
             if leader_models:
                 idx = self._fallback_index % len(leader_models)
                 chosen = leader_models[idx]
                 reason = f"Сложная задача → модель-лидер: {chosen['name']}"
+            elif free_models:
+                idx = self._fallback_index % len(free_models)
+                chosen = free_models[idx]
+                reason = f"Сложная задача, нет лидеров → {chosen['name']}"
             else:
-                # Нет лидеров — берём любую валидную (с ротацией)
-                paid = [m for m in available_models
-                        if m.get("type") == "paid" and m.get("status") in ("valid", "available")]
-                pool = paid if paid else available_models
-                if pool:
-                    idx = self._fallback_index % len(pool)
-                    chosen = pool[idx]
-                    reason = f"Сложная задача, лидеры недоступны → {chosen['name']}"
-                else:
-                    chosen = None
-                    reason = "Сложная задача: нет моделей"
+                chosen = None
+                reason = "Нет проверенных моделей для сложной задачи"
 
         # Инкрементируем индекс ротации
         self._fallback_index += 1

@@ -138,6 +138,14 @@ DANGEROUS_COMMAND_PATTERNS = [
 ]
 
 
+def _check_dangerous_command(command: str) -> str | None:
+    """Проверить команду на опасные паттерны. Возвращает описание или None."""
+    for pattern, description in DANGEROUS_COMMAND_PATTERNS:
+        if re.search(pattern, command, re.IGNORECASE):
+            return description
+    return None
+
+
 # ═══════════════════════════════════════════════════════
 # TOKEN COMPRESSION FOR TOOL OUTPUTS (inspired by SlopLobster)
 # ═══════════════════════════════════════════════════════
@@ -1099,7 +1107,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         mid = m["id"]
         if mid in models_to_try:
             continue
-        # Only models that PASSED probe
+        # Only models that PASSED probe (строго!)
         if probed_ids and mid not in probed_ids:
             continue
         if m.get("status") not in ("valid", "available", "rate_limited"):
@@ -1113,14 +1121,14 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             continue
         models_to_try.append(mid)
 
-    # --- Phase 2: Remaining valid models (fallback if no probed) ---
+    # --- Phase 2: Если probe ещё не завершён (нет результатов) — берём валидные ---
     if not probed_ids:
         for m in all_models:
             mid = m["id"]
             if mid in models_to_try:
                 continue
             if mid in failed_probe_ids:
-                continue  # Skip models we KNOW failed probe
+                continue
             if m.get("status") not in ("valid", "available"):
                 continue
             if m.get("type") == "free" and m.get("status") == "no_key":
@@ -1349,7 +1357,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
             continue
         models_to_try.append(mid)
 
-    # Phase 2: Fallback (if no probed results yet)
+    # Phase 2: Если probe ещё не завершён — берём валидные
     if not probed_ids:
         for m in all_models:
             mid = m["id"]
@@ -1912,12 +1920,8 @@ async def probe_models(websocket=None) -> list[dict]:
         if m.get("status") in ("valid", "rate_limited", "available")
     ]
 
-    if websocket:
-        await _send_log(
-            websocket,
-            f"🔬 Зондирование: {len(candidates)} моделей для проверки...",
-            "info",
-        )
+    # ТИХИЙ РЕЖИМ: probe НЕ отправляет логи на frontend — только print() на сервере
+    print(f"  [probe] Starting probe: {len(candidates)} models to check")
 
     async def _probe_one(model_info: dict) -> dict | None:
         """Зондировать одну модель. Возвращает результат или None при ошибке."""
@@ -1997,20 +2001,10 @@ async def probe_models(websocket=None) -> list[dict]:
                 return result
 
             except asyncio.TimeoutError:
-                if websocket:
-                    await _send_log(
-                        websocket,
-                        f"⏱️ {model_name}: таймаут (15с)",
-                        "warning",
-                    )
+                print(f"  [probe] TIMEOUT: {model_name} (15s)")
                 return None
             except Exception as e:
-                if websocket:
-                    await _send_log(
-                        websocket,
-                        f"⚠️ {model_name}: {str(e)[:80]}",
-                        "warning",
-                    )
+                print(f"  [probe] FAIL: {model_name}: {str(e)[:80]}")
                 return None
 
     # Запускаем все зондирования параллельно (ограничено семафором)
@@ -2033,20 +2027,14 @@ async def probe_models(websocket=None) -> list[dict]:
     # Сортируем по времени ответа (быстрые первые)
     _probed.sort(key=lambda x: x.get("response_time_ms", 999999))
 
-    if websocket:
-        tools_count = sum(1 for m in _probed if m.get("supports_tools"))
-        await _send_log(
-            websocket,
-            f"✅ Зондирование завершено: {len(_probed)}/{len(candidates)} моделей доступны "
-            f"(tools: {tools_count})",
-            "success",
-        )
-
     logger.log(
         f"probe_models: {len(_probed)}/{len(candidates)} models responsive",
         level="info",
         source="agent",
     )
+
+    # Тихий режим: НЕ отправляем итог на frontend — только серверный лог
+    print(f"  [probe] Done: {len(_probed)}/{len(candidates)} models responsive")
 
     # Сбрасываем мёртвых провайдеров — probe свежий, даём всем второй шанс
     _reset_dead_providers()

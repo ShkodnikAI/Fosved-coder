@@ -1838,20 +1838,11 @@ function handleProbedModels(models) {
     if (barFill && total > 0) {
         barFill.style.width = Math.round(((models ? models.length : 0) / total) * 100) + '%';
     }
-    // Обновить статусы моделей в allModels и перерисовать
+    // Перезагрузить модели с фильтром — только проверенные
     if (models && models.length) {
-        models.forEach(probed => {
-            const mid = probed.model_id || probed.id;
-            const m = allModels.find(x => x.id === mid);
-            if (m) {
-                if (probed.status) m.status = probed.status;
-            }
-        });
-        renderModels();
+        loadModels(); // loadModels() теперь сама решает: probed_only или все
     }
-    if (models && models.length) {
-        showToast(`Зондировано ${models.length}/${total} моделей`, 'success');
-    }
+    // НЕ показываем toast — тихий режим
 }
 
 /** Анкета создана */
@@ -2039,7 +2030,10 @@ function cycleModelPriority(id) {
 
 async function loadModels() {
     try {
-        const resp = await fetch("/api/v1/models");
+        // Если есть результаты probe — запрашиваем только проверенные модели
+        const hasProbeData = window._probedModelIds && window._probedModelIds.length > 0;
+        const url = hasProbeData ? '/api/v1/models?probed_only=true' : '/api/v1/models';
+        const resp = await fetch(url);
         const data = await resp.json();
         allModels = data.models || [];
         renderModels();
@@ -2416,11 +2410,7 @@ function addLogEntryToPanel(entry) {
 function handleAutoLog(data) {
     const entry = {level:data.level||'info',source:data.source||'',action:data.content||data.message||data.action||'',time:data.time||new Date().toLocaleTimeString()};
     addLogEntryToPanel(entry);
-    // Auto-switch to Logs tab when first log arrives
-    if (autoLogCount === 1) {
-        if (currentScreen === 'main') switchHubRightTab('hub-logs');
-        else switchProjRightTab('proj-logs');
-    }
+    // НЕ переключаем автоматически на вкладку логов — тихий режим
 }
 
 function updateLogBadge() {

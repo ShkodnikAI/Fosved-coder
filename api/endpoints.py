@@ -509,10 +509,23 @@ async def convert_draft_to_project(draft_id: int):
 
 
 @router.get("/models")
-async def get_all_models():
-    """Список всех доступных моделей (платные + локальные + бесплатные + кастомные)."""
+async def get_all_models_endpoint(probed_only: bool = Query(False)):
+    """Список всех доступных моделей (платные + локальные + бесплатные + кастомные).
+    probed_only=true — только модели, прошедшие probe-валидацию.
+    """
     _api("GET", "/api/v1/models")
-    return {"models": keys_manager.get_all_models()}
+    all_models = keys_manager.get_all_models()
+
+    # Если запрошены только проверенные модели — фильтруем по кэшу probe
+    if probed_only and keys_manager._probed_model_ids:
+        filtered = [
+            m for m in all_models
+            if m["id"] in keys_manager._probed_model_ids
+            or m.get("type") in ("local", "custom")  # local/custom всегда показываем
+        ]
+        return {"models": filtered}
+
+    return {"models": all_models}
 
 @router.post("/models/validate/{provider_id}")
 async def revalidate_provider(provider_id: str):

@@ -535,7 +535,25 @@ body {
     border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) 4px;
     border: 1px solid var(--border);
     white-space: normal;
+    position: relative;
 }
+.msg-copy-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.2s;
+    z-index: 5;
+}
+.msg.ai:hover .msg-copy-btn { opacity: 1; }
+.msg-copy-btn:hover { background: var(--accent); color: #000; }
 .msg.ai p { margin: 0 0 8px 0; }
 .msg.ai p:last-child { margin-bottom: 0; }
 .msg.ai ul, .msg.ai ol { margin: 5px 0; padding-left: 20px; }

@@ -226,15 +226,10 @@ async def websocket_chat(websocket: WebSocket):
     except Exception:
         pass
 
-    # Inject memory context from previous sessions (claude-mem inspired)
+    # Inject memory context from previous sessions (claude-mem inspired) — тихо, без UI логов
     try:
         memory_ctx = await assemble_context(project_id=None, max_tokens=300)
-        if memory_ctx:
-            await safe_ws_send(websocket, {
-                "type": "auto_log",
-                "content": f"🧠 Память загружена",
-                "level": "info",
-            })
+        # Тихо — не отправляем на frontend
     except Exception:
         pass
 
