@@ -389,10 +389,24 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 os.makedirs(dir_path, exist_ok=True)
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
+
+            # Write verification — read-back to confirm (inspired by SlopLobster)
+            verification_msg = ""
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    written = f.read()
+                if written == content:
+                    verification_msg = " ✓ verified"
+                else:
+                    verification_msg = f" ⚠️ verification failed (wrote {len(content)} chars, read {len(written)} chars)"
+                    logger.log(f"write_verify_failed: {path}", level="warning", source="agent")
+            except Exception:
+                verification_msg = " ⚠️ verification error"
+
             logger.log(f"tool: write_file {path} ({len(content)} chars)", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": path, "size": len(content)}, "status": "done"})
-            await _send_log(websocket, f"💾 Записываю: {path} ({len(content)} симв.)", "file")
-            return f"Файл {path} сохранён ({len(content)} символов)"
+            await _send_log(websocket, f"💾 Записываю: {path} ({len(content)} симв.){verification_msg}", "file")
+            return f"Файл {path} сохранён ({len(content)} символов){verification_msg}"
 
         elif name == "list_files":
             rel_path = arguments.get("path", ".")
