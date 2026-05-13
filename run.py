@@ -335,14 +335,16 @@ async def websocket_chat(websocket: WebSocket):
                     continue
 
                 # Handle start_questionnaire (создание анкеты из UI)
+                # Тихий режим: ответы идут ТОЛЬКО в панель логов, не на главный экран
                 if payload.get("type") == "start_questionnaire":
                     q_title = payload.get("title", "Новый проект")
-                    q_id = await save_questionnaire({"title": q_title, "project_id": project_id})
+                    q_id = await save_questionnaire({"title": q_title, "project_id": current_project_id})
                     await safe_ws_send(websocket, {"type": "questionnaire_created", "id": q_id})
+                    await safe_ws_send(websocket, {"type": "auto_log", "content": f"📝 Тихий опрос: {q_title}", "level": "info"})
                     from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
                     questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {q_title}"
                     try:
-                        await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
+                        await handle_chat_message(questionnaire_prompt, current_project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled, _silent=True)
                     except Exception as q_err:
                         err_msg = str(q_err)[:300]
                         logger.log("questionnaire_error", level="error", source="ws", error=err_msg)

@@ -225,6 +225,16 @@ class IntelligentRouter:
             if status in ("invalid", "no_key"):
                 continue
 
+            # Пропускаем модели от провайдеров в глобальном 429 cooldown
+            try:
+                from core.agent import _is_rate_limited
+                from core.keys_manager import keys_manager as _km
+                _mcfg = _km.get_model_config(model_id)
+                if _mcfg and _is_rate_limited(_mcfg.get("provider", "")):
+                    continue
+            except Exception:
+                pass
+
             # Определяем: это модель-лидер?
             is_leader = any(
                 pattern in model_id or pattern in model_name

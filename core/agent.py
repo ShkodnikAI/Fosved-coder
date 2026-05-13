@@ -58,6 +58,31 @@ def get_platform_info() -> str:
     return "СЕРВЕР: неизвестная ОС. Используй стандартные bash-команды."
 logger = get_logger()
 
+# ═══════════════════════════════════════════════════════
+# GLOBAL 429 RATE-LIMIT COOLDOWN
+# ═══════════════════════════════════════════════════════
+# Tracks providers that returned 429 so we skip them for a while.
+# Key: provider_id, Value: timestamp when cooldown expires
+_rate_limit_cooldowns: dict[str, float] = {}
+_RATE_LIMIT_COOLDOWN_SEC = 120  # 2 minutes cooldown
+
+
+def _is_rate_limited(provider_id: str) -> bool:
+    """Check if a provider is currently in 429 cooldown."""
+    if provider_id in _rate_limit_cooldowns:
+        if time.time() < _rate_limit_cooldowns[provider_id]:
+            return True
+        else:
+            # Cooldown expired — remove it
+            del _rate_limit_cooldowns[provider_id]
+    return False
+
+
+def _mark_rate_limited(provider_id: str):
+    """Mark a provider as rate-limited for COOLDOWN_SEC seconds."""
+    _rate_limit_cooldowns[provider_id] = time.time() + _RATE_LIMIT_COOLDOWN_SEC
+    print(f"  [agent] 429 cooldown: {provider_id} for {_RATE_LIMIT_COOLDOWN_SEC}s")
+
 
 def _now():
     """Current UTC time as HH:MM:SS string."""
@@ -514,7 +539,7 @@ def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
 async def stream_llm_response(prompt: str, history: list, websocket,
                               model: str = None, system_prompt: str = None,
                               project_path: str | None = None, use_tools: bool = True,
-                              _error_info: dict = None, _cancel_check=None):
+                              _error_info: dict = None, _cancel_check=None, _silent: bool = False):
     """Stream AI response with tool calling support. Loops until no more tool calls.
     _cancel_check: optional callable() -> bool, if True → abort immediately."""
     if model is None:
@@ -625,7 +650,11 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
                 # Stream content chunks to client in real-time
                 if delta.content:
-                    await safe_ws_send(websocket, {"type": "chunk", "content": delta.content})
+                    if _silent:
+                        # Silent mode: send to log panel only, not main chat screen
+                        await _send_log(websocket, f"📝 {delta.content}", "info")
+                    else:
+                        await safe_ws_send(websocket, {"type": "chunk", "content": delta.content})
                     full_response += delta.content
                     current_content += delta.content
 
@@ -779,7 +808,7 @@ async def _route_with_priority(prompt: str, priority_models: list[str]) -> str |
 # MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════
 
-async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None):
+async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None, _silent: bool = False):
     """Main entry point: get history, build context, stream response with tool calling and fallback."""
     print(f"  [agent] handle_chat_message: prompt='{prompt[:80]}', project_id={project_id}, model_id={model_id}")
     history = await get_history(project_id)
@@ -871,6 +900,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                 continue
             if m.get("type") == "local" and not m.get("base_url"):
                 continue
+            # Skip models from providers in global 429 cooldown
+            _m_cfg = keys_manager.get_model_config(m["id"])
+            if _m_cfg and _is_rate_limited(_m_cfg.get("provider", "")):
+                continue
             models_to_try.append(m["id"])
 
     if not models_to_try:
@@ -920,6 +953,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if model_provider in rate_limited_providers:
             print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} rate limited")
             continue
+        # Skip models from providers in global 429 cooldown
+        if _is_rate_limited(model_provider):
+            print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} in cooldown")
+            continue
 
         tried_count += 1
         print(f"  [agent] trying model #{i}: {model_to_try}")
@@ -927,12 +964,14 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         # Send display name (not raw ID) to frontend
         m_info = next((m for m in all_models if m["id"] == model_to_try), None)
         display_model = m_info["name"] if m_info else model_to_try
-        await safe_ws_send(websocket, {"type": "typing", "model": display_model})
+        if not _silent:
+            await safe_ws_send(websocket, {"type": "typing", "model": display_model})
 
         if i > 0:
             m_info = next((m for m in all_models if m["id"] == model_to_try), None)
             model_name = m_info["name"] if m_info else model_to_try
-            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {model_name} (попытка {tried_count})...", "level": "info"})
+            if not _silent:
+                await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {model_name} (попытка {tried_count})...", "level": "info"})
             await _send_log(websocket, f"🔄 Переключаюсь на {model_name} (попытка {tried_count})", "warning")
 
         error_info = {}
@@ -940,14 +979,16 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             prompt, history, websocket,
             model=model_to_try, system_prompt=system_prompt,
             project_path=project_path, use_tools=True,
-            _error_info=error_info, _cancel_check=_cancel_check
+            _error_info=error_info, _cancel_check=_cancel_check, _silent=_silent
         )
         print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, no_tools={error_info.get('no_tools')}, no_credits={error_info.get('no_credits')}, rate_limited={error_info.get('rate_limited')}")
         if error_info.get("no_credits") and model_provider:
             no_credits_providers.add(model_provider)
+            _mark_rate_limited(model_provider)
             await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
         if error_info.get("rate_limited") and model_provider:
             rate_limited_providers.add(model_provider)
+            _mark_rate_limited(model_provider)
             await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (rate limit)", "warning")
         if ai_response is not None:
             # Prompt injection fallback: model doesn't support tools but we have a project
@@ -1089,6 +1130,10 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
                 continue
             if m.get("type") == "local" and not m.get("base_url"):
                 continue
+            # Skip models from providers in global 429 cooldown
+            _m_cfg = keys_manager.get_model_config(m["id"])
+            if _m_cfg and _is_rate_limited(_m_cfg.get("provider", "")):
+                continue
             models_to_try.append(m["id"])
 
     if not models_to_try:
@@ -1116,6 +1161,10 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
             continue
         if model_provider in rate_limited_providers:
             continue
+        # Skip models from providers in global 429 cooldown
+        if _is_rate_limited(model_provider):
+            print(f"  [agent] hub: skipping #{i} {model_to_try} — provider {model_provider} in cooldown")
+            continue
 
         tried_count += 1
         print(f"  [agent] hub: trying #{i}: {model_to_try} (key={has_key}, local={is_local})")
@@ -1139,8 +1188,10 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, rate_limited={error_info.get('rate_limited')}")
         if error_info.get("no_credits") and model_provider:
             no_credits_providers.add(model_provider)
+            _mark_rate_limited(model_provider)
         if error_info.get("rate_limited") and model_provider:
             rate_limited_providers.add(model_provider)
+            _mark_rate_limited(model_provider)
             await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (rate limit)", "warning")
         if ai_response is not None:
             break
