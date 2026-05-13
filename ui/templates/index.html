@@ -1624,7 +1624,7 @@ function wsConnect() {
             return;
         }
 
-        // ─── Ошибка — в чат И в панель логов ───
+        // ─── Ошибка — в панель логов; на главном экране НЕ в чат ───
         if (data.type === "error") {
             const ctx = getActiveAiContext();
             if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
@@ -1633,7 +1633,10 @@ function wsConnect() {
             updateHeaderModelBadge(null);
             if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
             else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
-            addMessage("error", data.content || "Произошла ошибка");
+            // На главном экране — только в логи (не засоряем чат системными ошибками)
+            if (currentScreen !== "main") {
+                addMessage("error", data.content || "Произошла ошибка");
+            }
             addLogEntryToPanel({level:'error',source:'error',action:data.content||'Произошла ошибка',time:new Date().toLocaleTimeString()});
             return;
         }

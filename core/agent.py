@@ -726,6 +726,9 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             # Signal 402 to caller for provider skipping in fallback
             if _error_info is not None and ("402" in error_msg or "insufficient credits" in error_msg.lower()):
                 _error_info["no_credits"] = True
+            # Signal 429 to caller for provider rate-limit skipping
+            if _error_info is not None and "429" in error_msg:
+                _error_info["rate_limited"] = True
             return None
 
     # Max iterations reached
@@ -897,6 +900,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     ai_response = None
     tried_count = 0
     no_credits_providers = set()  # providers that returned 402 — skip remaining models from them
+    rate_limited_providers = set()  # providers that returned 429 — skip remaining models from them
 
     for i, model_to_try in enumerate(models_to_try):
         model_config = keys_manager.get_model_config(model_to_try)
@@ -911,6 +915,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         model_provider = model_config.get("provider", "")
         if model_provider in no_credits_providers:
             print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} has no credits")
+            continue
+        # Skip models from providers with rate limit (429)
+        if model_provider in rate_limited_providers:
+            print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} rate limited")
             continue
 
         tried_count += 1
@@ -934,10 +942,13 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             project_path=project_path, use_tools=True,
             _error_info=error_info, _cancel_check=_cancel_check
         )
-        print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, no_tools={error_info.get('no_tools')}, no_credits={error_info.get('no_credits')}")
+        print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, no_tools={error_info.get('no_tools')}, no_credits={error_info.get('no_credits')}, rate_limited={error_info.get('rate_limited')}")
         if error_info.get("no_credits") and model_provider:
             no_credits_providers.add(model_provider)
             await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
+        if error_info.get("rate_limited") and model_provider:
+            rate_limited_providers.add(model_provider)
+            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (rate limit)", "warning")
         if ai_response is not None:
             # Prompt injection fallback: model doesn't support tools but we have a project
             if error_info.get("no_tools") and project_path:
@@ -1089,6 +1100,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
     ai_response = None
     tried_count = 0
     no_credits_providers = set()
+    rate_limited_providers = set()
 
     for i, model_to_try in enumerate(models_to_try):
         model_config = keys_manager.get_model_config(model_to_try)
@@ -1101,6 +1113,8 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
 
         model_provider = model_config.get("provider", "")
         if model_provider in no_credits_providers:
+            continue
+        if model_provider in rate_limited_providers:
             continue
 
         tried_count += 1
@@ -1122,9 +1136,12 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
             _error_info=error_info,
             _cancel_check=_cancel_check,
         )
-        print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
+        print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, rate_limited={error_info.get('rate_limited')}")
         if error_info.get("no_credits") and model_provider:
             no_credits_providers.add(model_provider)
+        if error_info.get("rate_limited") and model_provider:
+            rate_limited_providers.add(model_provider)
+            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (rate limit)", "warning")
         if ai_response is not None:
             break
 
