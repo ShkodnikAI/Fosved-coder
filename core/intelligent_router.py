@@ -182,6 +182,7 @@ class IntelligentRouter:
         probed_model_ids: set = None,
         failed_probe_ids: set = None,
         has_been_probed: bool = False,
+        priority_models: list = None,
     ) -> dict:
         """
         Выбрать модель на основе классификации задачи.
@@ -193,6 +194,7 @@ class IntelligentRouter:
             probed_model_ids: множество ID моделей, прошедших probe
             failed_probe_ids: множество ID моделей, НЕ прошедших probe
             has_been_probed: True если probe когда-либо запускался
+            priority_models: список ID моделей в порядке приоритета (от клиента)
 
         Returns:
             {
@@ -214,18 +216,33 @@ class IntelligentRouter:
                 "overridden": False,
             }
 
+        # Если пользователь выставил приоритеты — берём первую приоритетную модель
+        # из тех, что прошли probe (номера на карточках = порядок)
+        if priority_models:
+            probed_set = probed_model_ids or set()
+            for pm_id in priority_models:
+                if pm_id in probed_set:
+                    m = next((x for x in available_models if x.get("id") == pm_id), None)
+                    if m:
+                        return {
+                            "model_id": m["id"],
+                            "model_name": m.get("name", m["id"]),
+                            "complexity": "priority",
+                            "reason": f"Приоритетная модель #{priority_models.index(pm_id)+1}: {m.get('name', m['id'])}",
+                            "overridden": True,
+                        }
+
         classification = self.classify(user_prompt)
         complexity = classification["complexity"]
 
         # ── ФИКС glm-5.1 cycling ──
-        # Если probe БЫЛ запущен (has_been_probed=True), но НЕТ проверенных моделей —
-        # НЕ пытаемся подобрать модель. Пользователь должен запустить /probe.
+        # Если probe БЫЛ запущен, но НЕТ проверенных моделей — возврат пустой
         if has_been_probed and not probed_model_ids:
             return {
                 "model_id": "",
                 "model_name": "",
                 "complexity": complexity,
-                "reason": "Нет моделей, прошедших опрос. Запустите /probe.",
+                "reason": "Нет моделей, прошедших опрос.",
                 "overridden": False,
             }
 

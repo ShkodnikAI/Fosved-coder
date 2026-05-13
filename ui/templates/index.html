@@ -1389,14 +1389,16 @@ function sendMessage() {
     const input = document.getElementById("project-user-input");
     const text = input.value.trim();
     if (!text && !attachedFile) return;
-    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
-    if (!activeModelId) { showToast("Выберите модель", "error"); return; }
+    // Если нет явного выбора — роутер сам подберёт модель
+    // Но нужны проверенные модели!
+    if (explicitlyProbedIds.size === 0 && !activeModelId) { showToast("Сначала опросите модели", "error"); return; }
     addClientLog('project_message', 'Sent project message: ' + text.substring(0, 80));
     let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
     addMessage("user", displayText);
     setWaitingAI(true);
-    let payload = { type: "chat", prompt: text, model: activeModelId, mode: workMode, project_id: currentProjectId };
+    let payload = { type: "chat", prompt: text, model: activeModelId || null, mode: workMode, project_id: currentProjectId };
     if (priorityModels.length) payload.priority_models = priorityModels;
+    payload.explicitly_probed_ids = [...explicitlyProbedIds];
     if (attachedFile) payload.file_content = attachedFile.content;
     wsSend(payload);
     lastSentMessage = text;
@@ -1410,12 +1412,11 @@ function sendMessage() {
 
 function retryLastMessage() {
     if (!lastSentPayload) return;
-    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
-    if (!activeModelId) return;
     addMessage("user", "🔄 [Повтор] " + (lastSentMessage||''));
     setWaitingAI(true);
-    let payload = { ...lastSentPayload, model: activeModelId };
+    let payload = { ...lastSentPayload, model: activeModelId || null };
     if (priorityModels.length) payload.priority_models = priorityModels;
+    payload.explicitly_probed_ids = [...explicitlyProbedIds];
     wsSend(payload);
 }
 
@@ -1426,15 +1427,14 @@ function sendHubMessage() {
     const input = document.getElementById("hub-user-input");
     const text = input.value.trim();
     if (!text && !hubAttachedFile) return;
-    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
-    if (!activeModelId) { showToast("Выберите модель", "error"); return; }
+    if (explicitlyProbedIds.size === 0 && !activeModelId) { showToast("Сначала опросите модели", "error"); return; }
     addClientLog('hub_message', 'Sent hub message: ' + text.substring(0, 80));
     let displayText = hubAttachedFile ? "📎 " + hubAttachedFile.filename + "\n" + text : text;
     addMessageTo("user", displayText);
     setHubWaitingAI(true);
-    // Отправляем как hub_chat
-    let payload = { type: "hub_chat", prompt: text, model_id: activeModelId };
+    let payload = { type: "hub_chat", prompt: text, model_id: activeModelId || null };
     if (priorityModels.length) payload.priority_models = priorityModels;
+    payload.explicitly_probed_ids = [...explicitlyProbedIds];
     if (hubAttachedFile) payload.file_content = hubAttachedFile.content;
     wsSend(payload);
     lastHubSentMessage = text;
@@ -1448,12 +1448,11 @@ function sendHubMessage() {
 
 function retryHubMessage() {
     if (!lastHubSentPayload) return;
-    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
-    if (!activeModelId) return;
     addMessageTo("user", "🔄 [Повтор] " + (lastHubSentMessage||''), hubChatBox);
     setHubWaitingAI(true);
-    let payload = { ...lastHubSentPayload, model_id: activeModelId };
+    let payload = { ...lastHubSentPayload, model_id: activeModelId || null };
     if (priorityModels.length) payload.priority_models = priorityModels;
+    payload.explicitly_probed_ids = [...explicitlyProbedIds];
     wsSend(payload);
 }
 

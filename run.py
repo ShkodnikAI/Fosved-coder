@@ -257,6 +257,8 @@ async def websocket_chat(websocket: WebSocket):
                     model_id = payload.get("model")
                     priority = payload.get("priority_models", [])
                     mode = payload.get("mode", current_mode)
+                    # Список явно проверенных моделей с клиента (из localStorage)
+                    explicitly_probed_ids = set(payload.get("explicitly_probed_ids", []))
                     # Sync project_id from client (critical: keeps project context)
                     client_project_id = payload.get("project_id")
                     if client_project_id is not None:
@@ -411,12 +413,37 @@ async def websocket_chat(websocket: WebSocket):
                                 project["path"], current_project_id
                             )
 
-                # Задача 5: Intelligent Router — ВЫКЛЮЧЕН
-                # Модель выбирается ТОЛЬКО пользователем вручную из левой панели.
-                # Роутер НЕ подбирает модель автоматически.
+                # Задача 5: Intelligent Router — выбирает модель по сложности
+                # ТОЛЬКО из явно проверенных моделей (explicitly_probed_ids с клиента)
+                # Если пользователь выставил приоритеты (priority) — используем их
                 if not model_id:
-                    await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Модель не выбрана. Откройте вкладку Модели справа → Опросить выбранные → выберите модель слева.", "level": "warning"})
-                    continue
+                    if not explicitly_probed_ids:
+                        await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет проверенных моделей. Откройте вкладку Модели → Опросить выбранные.", "level": "warning"})
+                        continue
+                    try:
+                        from core.keys_manager import keys_manager
+                        all_models = keys_manager.get_all_models()
+                        route_result = intelligent_router.select_model(
+                            prompt, all_models,
+                            user_preferred_model=None,
+                            probed_model_ids=explicitly_probed_ids,
+                            failed_probe_ids=set(),
+                            has_been_probed=True,
+                            priority_models=priority,
+                        )
+                        if route_result.get("model_id"):
+                            model_id = route_result["model_id"]
+                            print(f"  [router] {route_result.get('reason', '')} → {model_id}")
+                        else:
+                            await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Не удалось подобрать модель. Выберите вручную.", "level": "warning"})
+                            continue
+                    except Exception as route_err:
+                        try:
+                            logger.log("intelligent_router_error", level="warning", source="ws", error=str(route_err)[:200])
+                        except Exception:
+                            pass
+                        await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Ошибка роутера. Выберите модель вручную.", "level": "warning"})
+                        continue
 
                 # Route based on mode
                 if mode == "auto":
