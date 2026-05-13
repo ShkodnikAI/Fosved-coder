@@ -7,7 +7,6 @@ import yaml
 import asyncio
 import aiohttp
 import litellm
-from typing import Optional
 
 from core.action_logger import get_logger
 logger = get_logger()
@@ -1344,14 +1343,6 @@ class KeysManager:
                 }
 
         return None
-
-    def toggle_provider(self, provider_id: str, enabled: bool) -> dict:
-        """Включить/выключить провайдер (модели скрываются из списка)."""
-        if provider_id not in self.providers:
-            return {"success": False, "error": f"Провайдер {provider_id} не настроен"}
-        self.providers[provider_id]["enabled"] = enabled
-        self._save_keys()
-        return {"success": True, "provider": provider_id, "enabled": enabled}
 
     def get_provider_status(self) -> dict:
         """Статус всех провайдеров."""

@@ -3,7 +3,6 @@ Fosved Coder v2.0 — Context Compressor
 Сжатие контекста для больших проектов: LLM-based + regex fallback.
 """
 import re
-import json
 import litellm
 from datetime import datetime, timezone
 

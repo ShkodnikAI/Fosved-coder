@@ -10,8 +10,6 @@ Fosved Coder V2.0 — Intelligent Router (Task 5)
 Работает прозрачно: пользователь пишет как обычно, система сама решает.
 Все действия отображаются в лог-панели.
 """
-import re
-
 from core.action_logger import get_logger
 logger = get_logger()
 

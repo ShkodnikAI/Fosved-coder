@@ -19,8 +19,8 @@ import os
 import shlex
 import asyncio
 from datetime import datetime, timezone
-from core.agent import stream_llm_response, _get_priority_models, get_platform_info, _safe_join
-from core.memory import get_project, get_history, save_message, CONFIG
+from core.agent import stream_llm_response, get_platform_info, _safe_join
+from core.memory import get_project, get_history
 from core.executor import CommandExecutor
 from core.action_logger import get_logger
 

@@ -531,10 +531,10 @@
                     <textarea id="project-user-input" placeholder="Опишите задачу для ИИ..." rows="4" onkeydown="handleProjectKeyDown(event)"></textarea>
                         <div class="input-actions">
                             <div class="input-left">
-                                <label class="file-label file-label-attach">📎 <input type="file" id="project-file-input" style="display:none" onchange="handleProjectFile(event)" multiple>
+                                <label class="file-label file-label-attach">📎 <input type="file" id="project-file-input" style="display:none" onchange="handleFile(event)" multiple>
                                     <span id="project-file-preview" style="display:none" class="file-preview"></span>
                                 </label>
-                                <button id="project-file-remove" class="file-remove" onclick="removeProjectAttachedFile()" style="display:none" title="Убрать">✕</button>
+                                <button id="project-file-remove" class="file-remove" onclick="removeAttachedFile()" style="display:none" title="Убрать">✕</button>
                                 <button id="project-retry-btn" class="btn-retry" onclick="retryLastMessage()" style="display:none">🔄</button>
                             </div>
                             <div class="input-center">
@@ -1657,6 +1657,13 @@ function wsConnect() {
             return;
         }
 
+        // Сервер запросил очистку очереди сообщений
+        if (data.type === "clear_queue") {
+            wsMessageQueue = [];
+            persistQ();
+            return;
+        }
+
         // ─── Стриминг чанков ───
         if (data.type === "chunk") {
             // Определяем, куда направлять — в зависимости от текущего экрана или источника
@@ -1998,7 +2005,7 @@ function buildModelCard(m, type) {
 
     const activeCheck = isActive ? ' <span style="color:var(--green);font-size:11px;margin-left:2px;">✓</span>' : '';
 
-    return `<div class="model-card-with-priority${isActive?' active':''}" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name||'').toLowerCase()}" onclick="selectModel('${escapeHtml(m.id)}')" oncontextmenu="event.preventDefault();toggleModelPriority('${escapeHtml(m.id)}')">
+    return `<div class="model-card-with-priority${isActive?' active':''}" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name||'').toLowerCase()}" onclick="selectModel('${escapeHtml(m.id).replace(/'/g, "\\'")}')" oncontextmenu="event.preventDefault();toggleModelPriority('${escapeHtml(m.id).replace(/'/g, "\\'")}')">
         <div class="model-priority-btn${pActive}" onclick="event.stopPropagation();cycleModelPriority('${escapeHtml(m.id)}')" title="Приоритет: ${pLabel||'нет'}">${pLabel||'–'}</div>
         <div class="model-card-avatar" style="background:${avColor}">${initials}</div>
         <div class="model-card-info">

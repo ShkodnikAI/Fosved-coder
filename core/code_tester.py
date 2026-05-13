@@ -10,7 +10,6 @@ Fosved Coder v2.0 — Code Tester & Validator
 5. Сохранение тотального лога в файл + git push
 """
 import os
-import asyncio
 import re
 from datetime import datetime
 from core.executor import CommandExecutor
@@ -133,7 +132,7 @@ async def check_python_syntax(project_path: str) -> dict:
     for fpath in py_files[:30]:  # лимит 30 файлов
         rel = os.path.relpath(fpath, project_path).replace("\\", "/")
         result = await executor.execute(
-            f'python -m py_compile "{fpath}"',
+            f'python -m py_compile {shlex.quote(fpath)}',
             cwd=project_path,
             timeout=15
         )
@@ -172,7 +171,7 @@ async def check_js_syntax(project_path: str) -> dict:
     for fpath in js_files[:20]:
         rel = os.path.relpath(fpath, project_path).replace("\\", "/")
         result = await executor.execute(
-            f'node --check "{fpath}"',
+            f'node --check {shlex.quote(fpath)}',
             cwd=project_path,
             timeout=10
         )

@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 
-from core.memory import init_db, save_message, clear_history, get_project, get_repo_map, git_push_with_token, save_probed_models, get_probed_models, save_questionnaire, set_system_setting, get_system_setting
+from core.memory import init_db, clear_history, get_project, get_repo_map, git_push_with_token, save_questionnaire
 from core.keys_manager import keys_manager
 from core.agent import handle_chat_message, handle_hub_message
 from core.executor import CommandExecutor
@@ -16,7 +16,7 @@ from core.ideas_injector import IdeasInjector
 from core.context_manager import ContextManager
 from core.intelligent_router import intelligent_router
 from core.action_logger import get_logger
-from core.observation_manager import store_observation, assemble_context, generate_session_summary_async, ensure_observation_tables
+from core.observation_manager import assemble_context, generate_session_summary_async, ensure_observation_tables
 from api.endpoints import router as api_router
 
 logger = get_logger()
@@ -762,7 +762,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         await safe_ws_send(websocket, {"type": "questionnaire_created", "id": q_id})
         from core.agent import QUESTIONNAIRE_SYSTEM_PROMPT
         questionnaire_prompt = f"{QUESTIONNAIRE_SYSTEM_PROMPT}\n\nНачни опрос для проекта: {title}"
-        await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
+        await handle_chat_message(questionnaire_prompt, project_id, repo_map, websocket, model_id=model_id)
 
     elif command == "/help":
         help_text = (

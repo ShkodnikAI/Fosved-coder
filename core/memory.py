@@ -142,7 +142,7 @@ class Idea(Base):
 class ChatHistory(Base):
     __tablename__ = "chat_history"
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    project_id: Mapped[int | None] = mapped_column(nullable=True)
+    project_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
     thread_id: Mapped[int | None] = mapped_column(nullable=True, index=True, default=None)
     role: Mapped[str]
     content: Mapped[str] = mapped_column(Text)
@@ -249,7 +249,7 @@ async def check_db_connection(max_retries: int = 5, delay: float = 3.0) -> bool:
     for attempt in range(1, max_retries + 1):
         try:
             async with engine.connect() as conn:
-                result = await conn.execute(text("SELECT 1" if IS_POSTGRES else "SELECT 1"))
+                result = await conn.execute(text("SELECT 1"))
                 result.scalar()
             return True
         except Exception as e:

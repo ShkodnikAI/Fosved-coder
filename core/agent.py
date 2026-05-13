@@ -1,11 +1,9 @@
 import os
-import sys
 import platform
 import time
 import shlex
 import re
 import asyncio
-import glob as glob_mod
 import fnmatch
 import litellm
 import json
@@ -733,14 +731,6 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     return full_response
 
 
-# ═══════════════════════════════════════════════════════
-# PRIORITY ROUTING
-# DEPRECATED: _route_with_priority() дублирует логику
-# HybridRouter.route_task() из core/router.py.
-# Подлежит удалению после миграции на единый роутер.
-# См. core/router.py → class HybridRouter (также deprecated).
-# ═══════════════════════════════════════════════════════
-
 def _get_priority_models(project: dict) -> list[str]:
     """Extract up to 10 priority model IDs from project's selected_models."""
     if not project or not project.get("selected_models"):
@@ -754,28 +744,15 @@ def _get_priority_models(project: dict) -> list[str]:
     return []
 
 
-async def _route_with_priority(prompt: str, priority_models: list[str]) -> str | None:
-    """Route to cheapest or best model based on prompt complexity."""
-    prompt_lower = prompt.lower()
-
-    simple_keywords = ["fix typo", "формат", "xml", "json", "тест", "docstring", "комментарий", "простой", "trivial", "rename", "lint"]
-    for kw in simple_keywords:
-        if kw in prompt_lower:
-            return priority_models[-1] if len(priority_models) > 1 else priority_models[0]
-
-    complex_keywords = ["архитектур", "refactor", "redesign", "систем", "framework", "engine", "параллельн", "микросервис", "database schema", "security", "интеграц"]
-    for kw in complex_keywords:
-        if kw in prompt_lower:
-            return priority_models[0]
-
-    return priority_models[0]
-
-
 # ═══════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════
 
-async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None):
+# Глобальный список чекпоинтов (используется из run.py)
+_checkpoints: list[dict] = []
+
+
+async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None, _silent=False):
     """Main entry point: get history, build context, stream response with tool calling and fallback."""
     print(f"  [agent] handle_chat_message: prompt='{prompt[:80]}', project_id={project_id}, model_id={model_id}")
     history = await get_history(project_id)
@@ -1192,222 +1169,6 @@ async def _process_skill_tags(response_text: str, websocket):
 
 
 # ═══════════════════════════════════════════════════════
-# PROMPT INJECTION MODE — Fallback для моделей без tools
-# ═══════════════════════════════════════════════════════
-
-INJECTION_SYSTEM_PROMPT = """Ты Fosved Coder — AI-ассистент для разработки проекта.
-Ты работаешь с файлами проекта через специальный формат ответа.
-
-{project_context}
-
-{platform_info}
-
-ПРАВИЛА ФОРМАТИРОВАНИЯ ОТВЕТА:
-
-Для СОЗДАНИЯ или ПЕРЕЗАПИСИ файла используй:
-<file path="относительный/путь/файла.py">
-полное содержимое файла...
-</file>
-
-Альтернативный формат (code block с путём):
-```python:src/main.py
-содержимое файла...
-```
-
-Для ПОКАЗА ИЗМЕНЕНИЙ (diff):
-```diff
---- a/файл.py
-+++ b/файл.py
-@@ -10,5 +10,5 @@
--старая строка
-+новая строка
-```
-
-Для ВЫПОЛНЕНИЯ команды:
-<command>
-shell-команда
-</command>
-
-Для GIT ОПЕРАЦИЙ:
-<git operation="commit_push" message="feat: описание">
-</git>
-(Автоматически: git add -A → commit → push. БЕЗ force-push.)
-
-ВАЖНО:
-- Отвечай на том языке, на котором задан вопрос
-- Сначала объясни что делаешь, потом показывай файлы
-- Для чтения файлов — просто укажи <file path="..."> и система покажет содержимое
-- НЕ проси пользователя копировать код — пишши прямо в файлы
-- НЕ используй force-push — никогда
-"""
-
-
-async def handle_project_with_injection(
-    prompt: str, project_id, websocket, model_id: str = None,
-    repo_map: str | None = None,
-):
-    """
-    Дуальный режим для проекта:
-    1. Пробуем tool calling (для поддерживающих моделей)
-    2. Если не поддерживает — переключаемся на prompt injection
-    """
-    from core.prompt_injector import PromptInjector
-    from core.response_parser import ResponseParser, ActionExecutor
-
-    project = await get_project(project_id)
-    if not project:
-        await safe_ws_send(websocket, {"type": "error", "content": "Проект не найден"})
-        return
-
-    project_path = project.get("path", "")
-    history = await get_history(project_id)
-
-    # Build injector context
-    injector = PromptInjector(project_path)
-    context = await injector.build_context(
-        project_name=project.get("name", ""),
-        project_description=project.get("description", ""),
-        base_prompt=project.get("base_prompt", ""),
-        template=project.get("template", ""),
-        repo_map=repo_map or "",
-        include_git_status=True,
-    )
-
-    system_prompt = INJECTION_SYSTEM_PROMPT.format(
-        project_context=context,
-        platform_info=get_platform_info(),
-    )
-
-    await save_message(project_id, "user", prompt)
-
-    # Model list — НЕТ автоматического fallback на все модели
-    models_to_try = []
-    if model_id:
-        models_to_try.append(model_id)
-
-    if not models_to_try:
-        # Модель не выбрана — используем ТОЛЬКО проверенные модели
-        for pm in _get_priority_models(project):
-            models_to_try.append(pm)
-
-        all_models = keys_manager.get_all_models()
-        for m in all_models:
-            if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
-                if m["id"] not in keys_manager._probed_model_ids:
-                    continue
-                if m["id"] in keys_manager._failed_probe_ids:
-                    continue
-                if m.get("type") == "free" and m.get("status") == "no_key":
-                    continue
-                if m.get("type") == "local" and not m.get("base_url"):
-                    continue
-                models_to_try.append(m["id"])
-
-    if not models_to_try:
-        await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей."})
-        return
-
-    ai_response = None
-    tried_count = 0
-    no_credits_providers = set()
-    used_injection = False
-
-    for i, model_to_try in enumerate(models_to_try):
-        model_config = keys_manager.get_model_config(model_to_try)
-        if not model_config:
-            continue
-        has_key = bool(model_config.get("api_key"))
-        is_local = any(m["id"] == model_to_try and m.get("type") == "local" for m in all_models)
-        if not has_key and not is_local:
-            continue
-
-        model_provider = model_config.get("provider", "")
-        if model_provider in no_credits_providers:
-            continue
-
-        tried_count += 1
-        m_info = next((m for m in all_models if m["id"] == model_to_try), None)
-        display_model = m_info["name"] if m_info else model_to_try
-        await safe_ws_send(websocket, {"type": "typing", "model": display_model})
-
-        if i > 0:
-            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
-
-        error_info = {}
-
-        # СНАЧАЛА пробуем tool calling
-        tool_response = await stream_llm_response(
-            prompt, history, websocket,
-            model=model_to_try,
-            system_prompt=SYSTEM_PROMPT_TEMPLATE.format(
-                repo_map=f"СТРУКТУРА ПРОЕКТА (Repo Map):\n{repo_map}" if repo_map else "",
-                ideas_context="",
-                project_context="",
-                compressed_context="",
-                platform_info=get_platform_info(),
-            ),
-            project_path=project_path,
-            use_tools=True,
-            _error_info=error_info,
-        )
-
-        if tool_response is not None:
-            ai_response = tool_response
-            break
-
-        # Если tool calling не сработал — пробуем prompt injection
-        if error_info.get("no_tools"):
-            await _send_log(websocket, f"🔄 {display_model}: переключаюсь на prompt injection", "warning")
-            injection_response = await stream_llm_response(
-                prompt, history, websocket,
-                model=model_to_try,
-                system_prompt=system_prompt,
-                project_path=None,  # Контекст уже в промпте
-                use_tools=False,
-                _error_info=error_info,
-            )
-
-            if injection_response is not None:
-                # Парсим ответ и выполняем действия
-                parser = ResponseParser()
-                parse_result = parser.parse(injection_response)
-
-                if parse_result.actions:
-                    await _send_log(websocket, f"📝 Найдено {len(parse_result.actions)} действий в ответе", "info")
-                    executor = ActionExecutor(project_path)
-
-                    for action in parse_result.actions:
-                        result = await executor.execute(action, websocket)
-                        level = "success" if result["success"] else "error"
-                        await _send_log(websocket, f"{'✅' if result['success'] else '❌'} {result['message']}", level)
-
-                    # Показываем чистый текст пользователю
-                    clean_text = parse_result.clean_text.strip()
-                    if clean_text:
-                        # Отправляем как итоговый ответ
-                        await safe_ws_send(websocket, {"type": "chunk", "content": clean_text})
-                    ai_response = clean_text or injection_response
-                    used_injection = True
-
-                    # Обновляем кеш файлов в injector после изменений
-                    for action in parse_result.actions:
-                        if action.action_type == "write_file" and action.path:
-                            injector.invalidate_file(action.path)
-
-                    break
-
-        if error_info.get("no_credits") and model_provider:
-            no_credits_providers.add(model_provider)
-
-    if ai_response:
-        await save_message(project_id, "ai", ai_response)
-    elif tried_count == 0:
-        await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
-    else:
-        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
-
-
-# ═══════════════════════════════════════════════════════
 # PROMPT INJECTION STREAMING — Dual mode for no-tool models
 # ═══════════════════════════════════════════════════════
 
@@ -1706,7 +1467,6 @@ async def probe_selected_models(websocket, selected_model_ids: list[str]) -> lis
                 return None
 
     # Запускаем параллельно, с прогрессивной отправкой
-    import itertools
     tasks = {asyncio.ensure_future(_probe_one(m)): m for m in candidates}
     _failed_ids = []
     _done_count = 0
@@ -1816,7 +1576,6 @@ async def _do_probe(websocket=None, live: bool = False) -> list[dict]:
     # Запускаем ВСЕ параллельно, но при live — каждую успешную сразу отправляем
     if live and websocket:
         # Live-режим: запускаем по одной через as_completed
-        import itertools
         tasks = {asyncio.ensure_future(_probe_one(m)): m for m in candidates}
         _failed_ids = []
         for future in asyncio.as_completed(tasks):
