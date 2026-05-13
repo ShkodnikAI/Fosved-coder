@@ -1606,27 +1606,34 @@ async def stream_with_prompt_injection(
 
 # ═══════════════════════════════════════════════════════
 # SILENT PROBING — Тихое зондирование моделей
+# Алгоритм: опрашиваем ВСЕ модели, каждая успешная сразу
+# отправляется на клиент (прогрессивное заполнение панели).
+# ВСЕ логи — ТОЛЬКО в панель логов. На главном экране — НИЧЕГО.
 # ═══════════════════════════════════════════════════════
 
 async def probe_models(websocket=None) -> list[dict]:
     """
-    Тихое зондирование: проверить все доступные модели минимальным запросом.
-
-    Для каждой модели (status в valid/rate_limited, есть api_key):
-    1. Отправляет минимальный запрос: {"role": "user", "content": "Hi"}
-    2. Измеряет время ответа (response_time_ms)
-    3. Проверяет поддержку tools (supports_tools) — если ошибка при вызове с tools,
-       помечает как False
-
-    Возвращает список успешно проверенных моделей:
-    [{"id": ..., "name": ..., "response_time_ms": ..., "supports_tools": ...}]
-
-    Ограничения:
-    - max 3 одновременных зондирований (asyncio.Semaphore)
-    - таймаут 15 секунд на каждую модель
+    Зондирование без прогрессивной отправки (для фонового использования).
+    Возвращает список проверенных моделей.
     """
-    _sem = asyncio.Semaphore(3)
+    return await _do_probe(websocket, live=False)
+
+
+async def probe_models_live(websocket) -> list[dict]:
+    """
+    Зондирование с прогрессивной отправкой: каждая успешная модель
+    сразу отправляется клиенту через {"type": "probed_models", "models": [one]}.
+    """
+    return await _do_probe(websocket, live=True)
+
+
+async def _do_probe(websocket=None, live: bool = False) -> list[dict]:
+    """
+    Общее зондирование. Если live=True — отправляет каждую модель по мере проверки.
+    """
+    _sem = asyncio.Semaphore(5)
     _probed: list[dict] = []
+    _lock = asyncio.Lock()  # для потокобезопасного добавления
 
     all_models = keys_manager.get_all_models()
     candidates = [
@@ -1634,129 +1641,90 @@ async def probe_models(websocket=None) -> list[dict]:
         if m.get("status") in ("valid", "rate_limited", "available")
     ]
 
+    if not candidates:
+        if websocket:
+            await _send_log(websocket, "Нет моделей для опроса", "warning")
+        return []
+
     if websocket:
-        await _send_log(
-            websocket,
-            f"🔬 Зондирование: {len(candidates)} моделей для проверки...",
-            "info",
-        )
+        await _send_log(websocket, f"🔍 Опрос: {len(candidates)} моделей...", "info")
 
     async def _probe_one(model_info: dict) -> dict | None:
-        """Зондировать одну модель. Возвращает результат или None при ошибке."""
         model_id = model_info["id"]
         model_name = model_info.get("name", model_id)
 
-        # Получаем конфигурацию модели через _resolve_model
         litellm_model, api_key, api_base, _ = _resolve_model(model_id)
-
         if not api_key:
             return None
 
         probe_messages = [{"role": "user", "content": "Hi"}]
 
         async with _sem:
-            start = time.time()
             try:
-                # Обычный запрос (без tools) — проверяем базовую работоспособность
                 resp = await asyncio.wait_for(
                     litellm.acompletion(
                         model=litellm_model,
                         messages=probe_messages,
-                        max_tokens=5,
+                        max_tokens=3,
                         stream=False,
                         api_key=api_key,
                         **({"api_base": api_base} if api_base else {}),
                     ),
-                    timeout=15,
+                    timeout=12,
                 )
-                elapsed_ms = int((time.time() - start) * 1000)
-                # Модель ответила — проверяем поддержку tools
-                supports_tools = True
-                try:
-                    await asyncio.wait_for(
-                        litellm.acompletion(
-                            model=litellm_model,
-                            messages=probe_messages,
-                            max_tokens=5,
-                            stream=False,
-                            tools=TOOLS,
-                            api_key=api_key,
-                            **({"api_base": api_base} if api_base else {}),
-                        ),
-                        timeout=15,
-                    )
-                except Exception as tool_err:
-                    err_str = str(tool_err).lower()
-                    _tool_patterns = [
-                        "does not support tool", "tools are not supported",
-                        "tool use is not enabled", "tool_choice", "tool calling",
-                        "does not support function calling", "invalid tool",
-                        "unknown tool", "unsupported tool",
-                    ]
-                    if any(p in err_str for p in _tool_patterns):
-                        supports_tools = False
-                    else:
-                        # Ошибка не связана с tools (_timeout, 429, etc.) — оставляем True
-                        pass
-
-                result = {
-                    "id": model_id,
-                    "name": model_name,
-                    "response_time_ms": elapsed_ms,
-                    "supports_tools": supports_tools,
-                }
+                result = {"id": model_id, "name": model_name, "status": "valid"}
                 return result
 
             except asyncio.TimeoutError:
-                if websocket:
-                    await _send_log(
-                        websocket,
-                        f"⏱️ {model_name}: таймаут (15с)",
-                        "warning",
-                    )
                 return None
-            except Exception as e:
-                if websocket:
-                    await _send_log(
-                        websocket,
-                        f"⚠️ {model_name}: {str(e)[:80]}",
-                        "warning",
-                    )
+            except Exception:
                 return None
 
-    # Запускаем все зондирования параллельно (ограничено семафором)
-    tasks = [_probe_one(m) for m in candidates]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    # Collect successful and failed model IDs
-    _failed_ids = []
-    for i, r in enumerate(results):
-        if isinstance(r, dict) and r is not None:
-            _probed.append(r)
-        elif r is None and i < len(candidates):
-            _failed_ids.append(candidates[i]["id"])
-        elif isinstance(r, Exception) and i < len(candidates):
-            _failed_ids.append(candidates[i]["id"])
+    # Запускаем ВСЕ параллельно, но при live — каждую успешную сразу отправляем
+    if live and websocket:
+        # Live-режим: запускаем по одной через as_completed
+        import itertools
+        tasks = {asyncio.ensure_future(_probe_one(m)): m for m in candidates}
+        _failed_ids = []
+        for future in asyncio.as_completed(tasks):
+            try:
+                result = await future
+                if isinstance(result, dict) and result:
+                    async with _lock:
+                        _probed.append(result)
+                    # Сразу отправляем клиенту — модель появится в панели
+                    await safe_ws_send(websocket, {"type": "probed_models", "models": [result]})
+                    keys_manager._probed_model_ids.add(result["id"])
+                    # Убираем из failed если там была
+                    keys_manager._failed_probe_ids.discard(result["id"])
+                else:
+                    model_info = tasks[future]
+                    _failed_ids.append(model_info["id"])
+                    keys_manager._failed_probe_ids.add(model_info["id"])
+            except Exception:
+                pass
 
-    # Update failed probe IDs cache in keys_manager
-    if _failed_ids:
-        keys_manager.update_failed_probe_ids(_failed_ids)
+        # Сохраняем результаты
+        if _failed_ids:
+            keys_manager.update_failed_probe_ids(_failed_ids)
+        await save_probed_models(_probed)
 
-    # Сортируем по времени ответа (быстрые первые)
-    _probed.sort(key=lambda x: x.get("response_time_ms", 999999))
-
-    if websocket:
-        tools_count = sum(1 for m in _probed if m.get("supports_tools"))
-        await _send_log(
-            websocket,
-            f"✅ Зондирование завершено: {len(_probed)}/{len(candidates)} моделей доступны "
-            f"(tools: {tools_count})",
-            "success",
-        )
-
-    logger.log(
-        f"probe_models: {len(_probed)}/{len(candidates)} models responsive",
-        level="info",
-        source="agent",
-    )
-
-    return _probed
+        if websocket:
+            await _send_log(websocket, f"✅ Опрос завершён: {len(_probed)}/{len(candidates)} моделей работают", "success")
+        return _probed
+    else:
+        # Обычный режим: все параллельно, результат в конце
+        tasks = [_probe_one(m) for m in candidates]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        _failed_ids = []
+        for i, r in enumerate(results):
+            if isinstance(r, dict) and r is not None:
+                _probed.append(r)
+            elif i < len(candidates):
+                _failed_ids.append(candidates[i]["id"])
+        if _failed_ids:
+            keys_manager.update_failed_probe_ids(_failed_ids)
+        _probed.sort(key=lambda x: x.get("response_time_ms", 999999))
+        if websocket:
+            await _send_log(websocket, f"✅ Опрос: {len(_probed)}/{len(candidates)} моделей", "success")
+        return _probed

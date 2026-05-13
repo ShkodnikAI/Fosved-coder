@@ -105,44 +105,15 @@ async def lifespan(app: FastAPI):
             print(f"  [abacus] Фоновая загрузка: {e}")
     asyncio.create_task(_bg_load_abacus())
 
-    # Тихое зондирование моделей при старте (фоновая задача)
-    # Пробуем при старте + повторяем раз в 24 часа
-    PROBE_TTL_SECONDS = 24 * 60 * 60  # 24 часа
-
-    async def _background_probe():
-        try:
-            import time as _time
-            # Проверяем TTL — не пора ли перепробовать?
-            needs_probe = True
-            try:
-                cached = await get_probed_models()
-                if cached:
-                    keys_manager.update_probed_model_ids(cached)
-                    ts_raw = await get_system_setting("probed_models_ts")
-                    if ts_raw:
-                        last_probe_time = float(ts_raw)
-                        if _time.time() - last_probe_time < PROBE_TTL_SECONDS:
-                            needs_probe = False
-                            print(f"  [startup] Probe cache fresh ({len(cached)} models, age={int(_time.time()-last_probe_time)}s < {PROBE_TTL_SECONDS}s)")
-                elif cached:
-                    print(f"  [startup] Restored probe cache: {len(cached)} models (no timestamp, will re-probe)")
-            except Exception:
-                pass
-
-            if not needs_probe:
-                return
-
-            from core.agent import probe_models
-            results = await probe_models()
-            if results:
-                await save_probed_models(results)
-                await set_system_setting("probed_models_ts", str(_time.time()))
-                print(f"  [startup] Probed {len(results)} models successfully")
-            else:
-                print(f"  [startup] No models responded to probing")
-        except Exception as e:
-            print(f"  [startup] Probe failed: {e}")
-    asyncio.create_task(_background_probe())
+    # При старте — только восстановить кэш probe из БД (без автопроба)
+    # Пользователь запускает probe вручную через кнопку или /probe
+    try:
+        cached = await get_probed_models()
+        if cached:
+            keys_manager.update_probed_model_ids(cached)
+            print(f"  [startup] Restored probe cache: {len(cached)} models")
+    except Exception:
+        pass
 
     # Init observation/memory tables (claude-mem inspired)
     try:
@@ -234,28 +205,11 @@ async def websocket_chat(websocket: WebSocket):
             pass
     keepalive_task = asyncio.create_task(_ws_keepalive())
 
-    # Задача 2: Отправить клиенту кэшированные результаты probing
-    # Если TTL истёк — запустить перепробивание в фоне
+    # Отправить клиенту кэшированные результаты probing (без автопроба)
     try:
         probed = await get_probed_models()
         if probed:
             await safe_ws_send(websocket, {"type": "probed_models", "models": probed})
-        # Проверяем TTL — если истёк, перепробиваем
-        import time as _time
-        ts_raw = await get_system_setting("probed_models_ts")
-        if ts_raw:
-            last_ts = float(ts_raw)
-            if _time.time() - last_ts >= PROBE_TTL_SECONDS:
-                async def _reprobe():
-                    try:
-                        from core.agent import probe_models
-                        results = await probe_models()
-                        if results:
-                            await save_probed_models(results)
-                            await set_system_setting("probed_models_ts", str(_time.time()))
-                    except Exception:
-                        pass
-                asyncio.create_task(_reprobe())
     except Exception:
         pass
 
@@ -726,12 +680,13 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             await safe_ws_send(websocket, {"type": "auto_log", "content": "Выберите проект для построения Repo Map.", "level": "info"})
 
     elif command == "/probe":
-        probed = await get_probed_models()
-        await safe_ws_send(websocket, {"type": "probed_models", "models": probed})
-        if probed:
-            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Зондировано моделей: {len(probed)}", "level": "info"})
-        else:
-            await safe_ws_send(websocket, {"type": "auto_log", "content": "Нет результатов зондирования. Попробуйте позже.", "level": "info"})
+        # Принудительный опрос моделей — тихий, с прогрессивной отправкой результатов
+        await safe_ws_send(websocket, {"type": "auto_log", "content": "🔍 Начинаю опрос моделей...", "level": "info"})
+        try:
+            from core.agent import probe_models_live
+            await probe_models_live(websocket)
+        except Exception as probe_err:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"❌ Ошибка опроса: {str(probe_err)[:100]}", "level": "error"})
 
     elif command == "/checkpoints":
         from core.agent import _checkpoints
