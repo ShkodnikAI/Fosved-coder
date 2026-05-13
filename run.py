@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 
-from core.memory import init_db, save_message, clear_history, get_project, get_repo_map, git_push_with_token, save_probed_models, get_probed_models, save_questionnaire
+from core.memory import init_db, save_message, clear_history, get_project, get_repo_map, git_push_with_token, save_probed_models, get_probed_models, save_questionnaire, set_system_setting, get_system_setting
 from core.keys_manager import keys_manager
 from core.agent import handle_chat_message, handle_hub_message
 from core.executor import CommandExecutor
@@ -106,21 +106,37 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_bg_load_abacus())
 
     # Тихое зондирование моделей при старте (фоновая задача)
+    # Пробуем при старте + повторяем раз в 24 часа
+    PROBE_TTL_SECONDS = 24 * 60 * 60  # 24 часа
+
     async def _background_probe():
         try:
-            # Сначала восстановить кэш probing из БД (если есть)
+            import time as _time
+            # Проверяем TTL — не пора ли перепробовать?
+            needs_probe = True
             try:
                 cached = await get_probed_models()
                 if cached:
                     keys_manager.update_probed_model_ids(cached)
-                    print(f"  [startup] Restored probe cache: {len(cached)} models")
+                    ts_raw = await get_system_setting("probed_models_ts")
+                    if ts_raw:
+                        last_probe_time = float(ts_raw)
+                        if _time.time() - last_probe_time < PROBE_TTL_SECONDS:
+                            needs_probe = False
+                            print(f"  [startup] Probe cache fresh ({len(cached)} models, age={int(_time.time()-last_probe_time)}s < {PROBE_TTL_SECONDS}s)")
+                elif cached:
+                    print(f"  [startup] Restored probe cache: {len(cached)} models (no timestamp, will re-probe)")
             except Exception:
                 pass
+
+            if not needs_probe:
+                return
 
             from core.agent import probe_models
             results = await probe_models()
             if results:
                 await save_probed_models(results)
+                await set_system_setting("probed_models_ts", str(_time.time()))
                 print(f"  [startup] Probed {len(results)} models successfully")
             else:
                 print(f"  [startup] No models responded to probing")
@@ -219,10 +235,27 @@ async def websocket_chat(websocket: WebSocket):
     keepalive_task = asyncio.create_task(_ws_keepalive())
 
     # Задача 2: Отправить клиенту кэшированные результаты probing
+    # Если TTL истёк — запустить перепробивание в фоне
     try:
         probed = await get_probed_models()
         if probed:
             await safe_ws_send(websocket, {"type": "probed_models", "models": probed})
+        # Проверяем TTL — если истёк, перепробиваем
+        import time as _time
+        ts_raw = await get_system_setting("probed_models_ts")
+        if ts_raw:
+            last_ts = float(ts_raw)
+            if _time.time() - last_ts >= PROBE_TTL_SECONDS:
+                async def _reprobe():
+                    try:
+                        from core.agent import probe_models
+                        results = await probe_models()
+                        if results:
+                            await save_probed_models(results)
+                            await set_system_setting("probed_models_ts", str(_time.time()))
+                    except Exception:
+                        pass
+                asyncio.create_task(_reprobe())
     except Exception:
         pass
 
@@ -418,7 +451,11 @@ async def websocket_chat(websocket: WebSocket):
                     try:
                         from core.keys_manager import keys_manager
                         all_models = keys_manager.get_all_models()
-                        route_result = intelligent_router.select_model(prompt, all_models)
+                        route_result = intelligent_router.select_model(
+                            prompt, all_models,
+                            probed_model_ids=keys_manager._probed_model_ids,
+                            failed_probe_ids=keys_manager._failed_probe_ids,
+                        )
                         if route_result.get("model_id") and route_result.get("overridden"):
                             model_id = route_result["model_id"]
                             logger.log("intelligent_router_selected", level="info", source="ws",

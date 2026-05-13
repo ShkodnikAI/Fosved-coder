@@ -58,181 +58,6 @@ def get_platform_info() -> str:
     return "СЕРВЕР: неизвестная ОС. Используй стандартные bash-команды."
 logger = get_logger()
 
-# ═══════════════════════════════════════════════════════
-# DEAD PROVIDERS — простая модель без таймингов
-# ═══════════════════════════════════════════════════════
-# Провайдеры, которые вернули 429/402 при рантайме.
-# Сбрасывается при следующем probing (probe_models).
-# Никаких таймеров — если провайдер сдох, он сдох до следующего probe.
-_dead_providers: set[str] = set()
-
-
-def _is_provider_dead(provider_id: str) -> bool:
-    """Проверить, сдох ли провайдер."""
-    return provider_id in _dead_providers
-
-
-def _mark_provider_dead(provider_id: str):
-    """Пометить провайдера как мёртвый (429/402)."""
-    if provider_id and provider_id not in _dead_providers:
-        _dead_providers.add(provider_id)
-        print(f"  [agent] Provider DEAD: {provider_id}")
-
-
-def _reset_dead_providers():
-    """Сбросить список мёртвых провайдеров (вызывается после probe)."""
-    if _dead_providers:
-        print(f"  [agent] Resetting dead providers: {len(_dead_providers)} removed")
-        _dead_providers.clear()
-
-
-def _safe_parse_tool_args(args_str: str) -> dict:
-    """
-    Parse tool call arguments with truncated JSON rescue.
-    If JSON.parse fails (e.g. truncated by max_tokens), try to extract
-    key fields (path, command, message, pattern, content) via regex.
-    Inspired by SlopLobster's safeParseArgs.
-    """
-    import json as _json
-    try:
-        return _json.loads(args_str)
-    except (_json.JSONDecodeError, TypeError):
-        pass
-
-    # Rescue: extract key fields from truncated JSON
-    rescued = {}
-    for m in re.finditer(r'"(path|command|message|pattern|content|file_pattern|model|name)":\s*"((?:[^"\\]|\\.)*)"', args_str):
-        rescued[m.group(1)] = m.group(2)
-
-    # Try to extract integer/boolean values too
-    for m in re.finditer(r'"(timeout|max_tokens|temperature)":\s*(\d+(?:\.\d+)?)', args_str):
-        val = m.group(2)
-        rescued[m.group(1)] = float(val) if '.' in val else int(val)
-
-    if rescued:
-        rescued["_parse_error"] = "truncated JSON — arguments were cut off, partial fields rescued"
-        print(f"  [agent] Truncated JSON rescued: {list(rescued.keys())}")
-
-    return rescued
-
-
-# ═══════════════════════════════════════════════════════
-# DANGEROUS COMMAND DETECTION (inspired by SlopLobster)
-# ═══════════════════════════════════════════════════════
-
-DANGEROUS_COMMAND_PATTERNS = [
-    (r"\brm\s+(-[rfRF]+\s+)?/\b", "rm -rf / — удаление корневой директории"),
-    (r"\brm\s+(-[rfRF]+\s+)?\*\b", "rm -rf * — удаление всех файлов"),
-    (r"\bdd\s+.*of=/dev/", "dd с записью на устройство"),
-    (r"\bmkfs\b", "форматирование файловой системы"),
-    (r">\s*/dev/", "перенаправление в устройство"),
-    (r"\bchmod\s+(-R\s+)?777\s+[\/.]", "chmod 777 на системные файлы"),
-    (r"\bchown\s+(-R\s+)", "chown -R на системные файлы"),
-    (r"\bgit\s+(reset\s+--hard|clean\s+-fdx|push\s+--force)\b", "деструктивная git операция"),
-    (r"\b(shutdown|reboot|halt|poweroff)\b", "shutdown/reboot системы"),
-    (r"\|\s*(ba)?sh\b", "pipe в shell"),
-    (r"\b(curl|wget)\s+.*\|\s*(ba)?sh\b", "curl/wget | sh — выполнение из сети"),
-    (r"\bdrop\s+(table|database|schema)\b", "DROP TABLE/DATABASE"),
-    (r"\bDELETE\s+FROM\s+\w+\s*;", "DELETE FROM без WHERE"),
-    (r"\bTRUNCATE\s+", "TRUNCATE TABLE"),
-]
-
-
-def _check_dangerous_command(command: str) -> str | None:
-    """Проверить команду на опасные паттерны. Возвращает описание или None."""
-    for pattern, description in DANGEROUS_COMMAND_PATTERNS:
-        if re.search(pattern, command, re.IGNORECASE):
-            return description
-    return None
-
-
-# ═══════════════════════════════════════════════════════
-# TOKEN COMPRESSION FOR TOOL OUTPUTS (inspired by SlopLobster)
-# ═══════════════════════════════════════════════════════
-
-# Maximum chars for tool outputs going into context
-_TOOL_OUTPUT_MAX_CHARS = {
-    "read_file": 30000,       # Already trimmed in execute_tool
-    "write_file": 500,        # Just confirmation
-    "list_files": 5000,       # Directory listing
-    "search_files": 8000,     # Search results (max 30 matches)
-    "execute_command": 7000,  # Command output
-    "git_commit_push": 1000,  # Git output
-}
-
-# Search result snippet limit
-_SEARCH_SNIPPET_MAX = 150
-
-
-def _compress_tool_output(tool_name: str, output: str) -> str:
-    """
-    Compress tool output to save context window tokens.
-    Trims to max chars per tool type, with smart truncation messages.
-    Returns compressed output string.
-    """
-    max_chars = _TOOL_OUTPUT_MAX_CHARS.get(tool_name, 10000)
-
-    if len(output) <= max_chars:
-        return output
-
-    # Smart truncation: keep beginning and end
-    keep_start = max_chars * 2 // 3
-    keep_end = max_chars // 3
-
-    compressed = output[:keep_start]
-    compressed += f"\n\n... [обрезано: {len(output) - max_chars} символов пропущено] ...\n\n"
-    compressed += output[-keep_end:]
-
-    print(f"  [agent] Tool output compressed: {tool_name} {len(output)} -> {max_chars} chars")
-    return compressed
-
-
-# ═══════════════════════════════════════════════════════
-# CHECKPOINT SYSTEM (inspired by SlopLobster)
-# File snapshots before modifications for potential undo.
-# ═══════════════════════════════════════════════════════
-
-_MAX_CHECKPOINTS = 30
-_checkpoints: list[dict] = []  # [{id, timestamp, description, files: {path: content}}]
-
-
-def _save_checkpoint(project_path: str | None, description: str = ""):
-    """Save a checkpoint with current state of modified files (if project open)."""
-    if not project_path or not os.path.isdir(project_path):
-        return
-    # Only save if there are recent changes (simplified: save if < MAX)
-    if len(_checkpoints) >= _MAX_CHECKPOINTS:
-        _checkpoints.pop(0)  # Remove oldest
-    _checkpoints.append({
-        "id": int(time.time() * 1000),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "description": description or "auto checkpoint",
-        "files": {},  # We populate on write_file
-    })
-    if len(_checkpoints) > 5:
-        print(f"  [agent] Checkpoints: {len(_checkpoints)} saved (max {_MAX_CHECKPOINTS})")
-
-
-def _snapshot_file_before_write(project_path: str, rel_path: str) -> str | None:
-    """
-    Snapshot a file before it gets overwritten.
-    Returns: original content or None if file doesn't exist.
-    """
-    full_path = _safe_join(project_path, rel_path)
-    if not full_path or not os.path.isfile(full_path):
-        return None
-    try:
-        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read()
-    except Exception:
-        return None
-
-
-def _store_in_checkpoint(rel_path: str, original_content: str):
-    """Store original file content in the latest checkpoint."""
-    if _checkpoints and original_content is not None:
-        _checkpoints[-1]["files"][rel_path] = original_content
-
 
 def _now():
     """Current UTC time as HH:MM:SS string."""
@@ -502,35 +327,15 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             full_path = _safe_join(project_path, path)
             if not full_path:
                 return f"Ошибка: путь вне проекта: {path}"
-
-            # Checkpoint: snapshot file before overwriting
-            original = _snapshot_file_before_write(project_path, path)
-            if original is not None:
-                _store_in_checkpoint(path, original)
-
             dir_path = os.path.dirname(full_path)
             if dir_path and not os.path.exists(dir_path):
                 os.makedirs(dir_path, exist_ok=True)
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
-
-            # Write verification — read-back to confirm (inspired by SlopLobster)
-            verification_msg = ""
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    written = f.read()
-                if written == content:
-                    verification_msg = " ✓ verified"
-                else:
-                    verification_msg = f" ⚠️ verification failed (wrote {len(content)} chars, read {len(written)} chars)"
-                    logger.log(f"write_verify_failed: {path}", level="warning", source="agent")
-            except Exception:
-                verification_msg = " ⚠️ verification error"
-
             logger.log(f"tool: write_file {path} ({len(content)} chars)", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": path, "size": len(content)}, "status": "done"})
-            await _send_log(websocket, f"💾 Записываю: {path} ({len(content)} симв.){verification_msg}", "file")
-            return f"Файл {path} сохранён ({len(content)} символов){verification_msg}"
+            await _send_log(websocket, f"💾 Записываю: {path} ({len(content)} симв.)", "file")
+            return f"Файл {path} сохранён ({len(content)} символов)"
 
         elif name == "list_files":
             rel_path = arguments.get("path", ".")
@@ -616,36 +421,10 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             exec_cwd = project_path
             if not exec_cwd and any(cmd in command.lower() for cmd in ["git ", "git\n", "npm ", "pip ", "python "]):
                 return f"Ошибка: нет пути к проекту (project_path is None). Команда '{command[:50]}' требует рабочую директорию. Откройте проект перед выполнением."
-
-            # Auto-timeout extension for package managers (inspired by SlopLobster)
-            cmd_lower = command.lower().strip()
-            _long_patterns = [
-                r"\bpip\s+install\b", r"\bpip3\s+install\b", r"\buv\s+pip\s+install\b",
-                r"\bnpm\s+install\b", r"\byarn\s+add\b", r"\byarn\s+install\b",
-                r"\bcargo\s+install\b", r"\bcargo\s+build\b",
-                r"\bgem\s+install\b", r"\bcomposer\s+(require|install)\b",
-                r"\bapt-get\s+install\b", r"\bbrew\s+install\b",
-                r"\bgit\s+clone\b",  # Large repos can be slow
-                r"\bdocker\s+build\b", r"\bdocker\s+pull\b",
-            ]
-            exec_timeout = 60  # Default
-            if any(re.search(p, cmd_lower) for p in _long_patterns):
-                exec_timeout = 300  # 5 minutes for package managers
-                await _send_log(websocket, f"⏱️ Авто-таймаут: 5 мин (пакетный менеджер)", "info")
-
             logger.log(f"tool: execute_command '{command[:100]}'", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
             await _send_log(websocket, f"⚡ Выполняю: $ {command[:120]}", "command")
-
-            # Dangerous command check (inspired by SlopLobster)
-            danger = _check_dangerous_command(command)
-            if danger:
-                await _send_log(websocket, f"🚨 ОПАСНАЯ КОМАНДА: {danger}", "error")
-                await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "status": "warning"})
-                # Don't block execution — just warn (approval system in executor handles the rest)
-                # But log it prominently
-
-            result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=exec_timeout)
+            result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=60)
             output = ""
             if result.get("stdout"):
                 output += result["stdout"][:5000]
@@ -718,7 +497,7 @@ def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
         # Fallback: ищем модель по списку провайдеров
         bare_name = model.split("/")[-1]
         for provider_id, config in keys_manager.providers.items():
-            if config.get("status") in ("valid", "available") and config.get("api_key"):
+            if config.get("status") in ("valid", "rate_limited") and config.get("api_key"):
                 for model_name in config.get("models", []):
                     if model_name == bare_name:
                         prefix = config.get("litellm_prefix", provider_id)
@@ -735,7 +514,7 @@ def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
 async def stream_llm_response(prompt: str, history: list, websocket,
                               model: str = None, system_prompt: str = None,
                               project_path: str | None = None, use_tools: bool = True,
-                              _error_info: dict = None, _cancel_check=None, _silent: bool = False):
+                              _error_info: dict = None, _cancel_check=None):
     """Stream AI response with tool calling support. Loops until no more tool calls.
     _cancel_check: optional callable() -> bool, if True → abort immediately."""
     if model is None:
@@ -748,13 +527,11 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     if not api_key:
         logger.log(f"no_api_key: {model}", level="error", source="agent")
         print(f"  [agent] ERROR: no_api_key for model={model}")
-        await safe_ws_send(websocket, {"type": "error", "content": f"Нет API ключа для модели '{model}'. Добавьте ключ в настройках."})
         await _send_log(websocket, f"❌ Нет API ключа для {model}", "error")
         return None
 
     print(f"  [agent] stream_llm_response: model={model}, has_key=True, tools={'ON' if use_tools else 'OFF'}, thinking={is_thinking}, project={project_path}, api_base={'yes' if api_base else 'no'}")
-    # Silent: model name only in server console, not in UI logs
-    print(f"  [agent] Using model: {model}")
+    await _send_log(websocket, f"🧠 Модель: {model}", "info")
 
     # Extended Thinking: уведомить клиента и настроить параметры
     if is_thinking:
@@ -847,11 +624,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
                 # Stream content chunks to client in real-time
                 if delta.content:
-                    if _silent:
-                        # Silent mode: send to log panel only, not main chat screen
-                        await _send_log(websocket, f"📝 {delta.content}", "info")
-                    else:
-                        await safe_ws_send(websocket, {"type": "chunk", "content": delta.content})
+                    await safe_ws_send(websocket, {"type": "chunk", "content": delta.content})
                     full_response += delta.content
                     current_content += delta.content
 
@@ -897,10 +670,10 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                 # Execute each tool call
                 for tc_data in tool_calls_list:
                     fn_name = tc_data["function"]["name"]
-                    fn_args = _safe_parse_tool_args(tc_data["function"]["arguments"])
-
-                    if fn_args.get("_parse_error"):
-                        await _send_log(websocket, f"⚠️ {fn_name}: {fn_args['_parse_error']}", "warning")
+                    try:
+                        fn_args = json.loads(tc_data["function"]["arguments"])
+                    except json.JSONDecodeError:
+                        fn_args = {}
 
                     await safe_ws_send(websocket, {
                         "type": "tool_call",
@@ -910,9 +683,6 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                     })
 
                     result = await execute_tool(fn_name, fn_args, project_path, websocket)
-
-                    # Compress tool output before adding to context (token budget)
-                    result = _compress_tool_output(fn_name, result)
 
                     messages.append({
                         "role": "tool",
@@ -928,8 +698,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             duration = (time.time() - start_time) * 1000
             tokens = len(full_response) // 4
             logger.ai_response(model=model, tokens=tokens, success=True, duration_ms=duration)
-            # Silent: response stats only in server console
-            print(f"  [agent] Response OK: {model} — {len(full_response)} chars, {(duration/1000):.1f}s")
+            await _send_log(websocket, f"✅ Ответ от {model}: {len(full_response)} симв., {(duration/1000):.1f}с", "success")
             return full_response
 
         except Exception as e:
@@ -951,16 +720,11 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             else:
                 error_msg = f"Ошибка ИИ: {error_msg}"
             logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
-            await safe_ws_send(websocket, {"type": "error", "content": error_msg})
+            # Ошибки API (401/429/402/500) — ТОЛЬКО в панель логов, НЕ на главный экран
             await _send_log(websocket, f"❌ {model}: {error_msg}", "error")
-            # Signal 402/429 to caller for provider skipping
-            if _error_info is not None:
-                if "429" in error_msg:
-                    _error_info["provider_dead"] = True
-                elif "402" in error_msg or "insufficient credits" in error_msg.lower():
-                    _error_info["provider_dead"] = True
-                if "no_tools" not in _error_info:
-                    _error_info["raw_error"] = error_msg
+            # Signal 402 to caller for provider skipping in fallback
+            if _error_info is not None and ("402" in error_msg or "insufficient credits" in error_msg.lower()):
+                _error_info["no_credits"] = True
             return None
 
     # Max iterations reached
@@ -1011,7 +775,7 @@ async def _route_with_priority(prompt: str, priority_models: list[str]) -> str |
 # MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════
 
-async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None, _silent: bool = False):
+async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None):
     """Main entry point: get history, build context, stream response with tool calling and fallback."""
     print(f"  [agent] handle_chat_message: prompt='{prompt[:80]}', project_id={project_id}, model_id={model_id}")
     history = await get_history(project_id)
@@ -1086,11 +850,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     await save_message(project_id, "user", prompt)
 
-    # Build model list — PREFER PROBED models (they actually responded)
-    all_models = keys_manager.get_all_models()
-    probed_ids = keys_manager._probed_model_ids  # Модели, прошедшие probe
-    failed_probe_ids = keys_manager._failed_probe_ids  # Модели, НЕ прошедшие probe
-
+    # Build model list with fallback
     models_to_try = []
     if model_id:
         models_to_try.append(model_id)
@@ -1100,60 +860,55 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if pm not in models_to_try:
             models_to_try.append(pm)
 
-    dead_providers_seen = set()  # Провайдеры, сдохшие при обработке ЭТОГО сообщения
-
-    # --- Phase 1: Probed models (GUARANTEED working) ---
+    all_models = keys_manager.get_all_models()
+    has_probe_data = bool(keys_manager._probed_model_ids) or bool(keys_manager._failed_probe_ids)
     for m in all_models:
         mid = m["id"]
         if mid in models_to_try:
             continue
-        # Only models that PASSED probe (строго!)
-        if probed_ids and mid not in probed_ids:
+        if m.get("status") not in ("valid", "rate_limited", "available"):
             continue
-        if m.get("status") not in ("valid", "available", "rate_limited"):
-            continue
+        # Если есть probe данные — ТОЛЬКО проверенные модели
+        if has_probe_data:
+            if keys_manager._failed_probe_ids and mid in keys_manager._failed_probe_ids:
+                continue
+            if keys_manager._probed_model_ids and mid not in keys_manager._probed_model_ids:
+                continue
         if m.get("type") == "free" and m.get("status") == "no_key":
             continue
         if m.get("type") == "local" and not m.get("base_url"):
             continue
-        _m_cfg = keys_manager.get_model_config(mid)
-        if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
-            continue
         models_to_try.append(mid)
-
-    # --- Phase 2: Если probe ещё не завершён (нет результатов) — берём валидные ---
-    if not probed_ids:
-        for m in all_models:
-            mid = m["id"]
-            if mid in models_to_try:
-                continue
-            if mid in failed_probe_ids:
-                continue
-            if m.get("status") not in ("valid", "available"):
-                continue
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            _m_cfg = keys_manager.get_model_config(mid)
-            if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
-                continue
-            models_to_try.append(mid)
 
     if not models_to_try:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         await _send_log(websocket, "❌ Нет доступных моделей", "error")
         return
 
-    # Пробуем модели — максимум 2 попытки (никакого цикла по всем моделям)
+    # Автоперевалидация rate_limited провайдеров перед первой попыткой
+    validated_providers = set()
+    for m_id in models_to_try:
+        if "__" in m_id:
+            pid = m_id.split("__")[0]
+        elif m_id.startswith("local_") or m_id.startswith("custom_"):
+            continue
+        else:
+            # bare model name — skip
+            continue
+        if pid not in validated_providers:
+            config = keys_manager.providers.get(pid, {})
+            if config.get("status") == "rate_limited":
+                new_status = await keys_manager.ensure_provider_active(pid)
+                if new_status == "valid":
+                    await _send_log(websocket, f"✓ {pid} перевалидирован и активен", "success")
+            validated_providers.add(pid)
+
+    # Try each model
     ai_response = None
     tried_count = 0
-    MAX_ATTEMPTS = 2
+    no_credits_providers = set()  # providers that returned 402 — skip remaining models from them
 
     for i, model_to_try in enumerate(models_to_try):
-        if _cancel_check and _cancel_check():
-            break  # Пользователь отменил — не пробуем дальше
-
         model_config = keys_manager.get_model_config(model_to_try)
         if not model_config:
             continue
@@ -1162,9 +917,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if not has_key and not is_local:
             continue
 
+        # Skip models from providers with no credits (402)
         model_provider = model_config.get("provider", "")
-        # Skip providers that died during THIS message processing
-        if model_provider in dead_providers_seen:
+        if model_provider in no_credits_providers:
+            print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} has no credits")
             continue
 
         tried_count += 1
@@ -1173,30 +929,25 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         # Send display name (not raw ID) to frontend
         m_info = next((m for m in all_models if m["id"] == model_to_try), None)
         display_model = m_info["name"] if m_info else model_to_try
-        if not _silent:
-            await safe_ws_send(websocket, {"type": "typing", "model": display_model})
+        await safe_ws_send(websocket, {"type": "typing", "model": display_model})
 
         if i > 0:
+            m_info = next((m for m in all_models if m["id"] == model_to_try), None)
             model_name = m_info["name"] if m_info else model_to_try
-            if not _silent:
-                await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {model_name}...", "level": "info"})
-            await _send_log(websocket, f"🔄 Переключаюсь на {model_name}", "warning")
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {model_name} (попытка {tried_count})...", "level": "info"})
+            await _send_log(websocket, f"🔄 Переключаюсь на {model_name} (попытка {tried_count})", "warning")
 
         error_info = {}
         ai_response = await stream_llm_response(
             prompt, history, websocket,
             model=model_to_try, system_prompt=system_prompt,
             project_path=project_path, use_tools=True,
-            _error_info=error_info, _cancel_check=_cancel_check, _silent=_silent
+            _error_info=error_info, _cancel_check=_cancel_check
         )
-        print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
-
-        # Провайдер сдох (429/402) — помечаем и пропускаем его модели
-        if error_info.get("provider_dead") and model_provider:
-            _mark_provider_dead(model_provider)
-            dead_providers_seen.add(model_provider)
-            await _send_log(websocket, f"☠️ {model_provider} недоступен", "warning")
-
+        print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, no_tools={error_info.get('no_tools')}, no_credits={error_info.get('no_credits')}")
+        if error_info.get("no_credits") and model_provider:
+            no_credits_providers.add(model_provider)
+            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
         if ai_response is not None:
             # Prompt injection fallback: model doesn't support tools but we have a project
             if error_info.get("no_tools") and project_path:
@@ -1210,10 +961,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                 )
                 if injection_result is not None:
                     ai_response = injection_result
-            break
-
-        # Максимум 2 попытки
-        if tried_count >= MAX_ATTEMPTS:
+                # If injection failed, keep the raw response as fallback
             break
 
     if ai_response:
@@ -1222,8 +970,8 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
         await _send_log(websocket, "❌ Нет модели с API ключом", "error")
     else:
-        await safe_ws_send(websocket, {"type": "error", "content": "Модели не ответили."})
-        await _send_log(websocket, "❌ Модели не ответили", "error")
+        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
+        await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
 
 
 # ═══════════════════════════════════════════════════════
@@ -1328,68 +1076,44 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
 
     await save_message(None, "user", prompt)
 
-    # Список моделей — PREFER PROBED models
-    all_models = keys_manager.get_all_models()
-    probed_ids = keys_manager._probed_model_ids
-    failed_probe_ids = keys_manager._failed_probe_ids
-
+    # Список моделей с fallback — ТОЛЬКО проверенные (прошедшие probe)
     models_to_try = []
     if model_id:
         models_to_try.append(model_id)
 
-    dead_providers_seen = set()
+    all_models = keys_manager.get_all_models()
+    has_probe_data = bool(keys_manager._probed_model_ids) or bool(keys_manager._failed_probe_ids)
 
-    # Phase 1: Probed models (GUARANTEED working)
     for m in all_models:
         mid = m["id"]
         if mid in models_to_try:
             continue
-        if probed_ids and mid not in probed_ids:
+        # Только валидные / rate_limited / available
+        if m.get("status") not in ("valid", "rate_limited", "available"):
             continue
-        if m.get("status") not in ("valid", "available", "rate_limited"):
-            continue
+        # Если есть probe данные — ТОЛЬКО проверенные модели
+        if has_probe_data:
+            if keys_manager._failed_probe_ids and mid in keys_manager._failed_probe_ids:
+                continue
+            if keys_manager._probed_model_ids and mid not in keys_manager._probed_model_ids:
+                continue
         if m.get("type") == "free" and m.get("status") == "no_key":
             continue
         if m.get("type") == "local" and not m.get("base_url"):
             continue
-        _m_cfg = keys_manager.get_model_config(mid)
-        if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
-            continue
         models_to_try.append(mid)
 
-    # Phase 2: Если probe ещё не завершён — берём валидные
-    if not probed_ids:
-        for m in all_models:
-            mid = m["id"]
-            if mid in models_to_try:
-                continue
-            if mid in failed_probe_ids:
-                continue
-            if m.get("status") not in ("valid", "available"):
-                continue
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            _m_cfg = keys_manager.get_model_config(mid)
-            if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
-                continue
-            models_to_try.append(mid)
-
     if not models_to_try:
-        print(f"  [agent] hub: NO models available! all_models={len(all_models)}, probed={len(probed_ids)}")
+        print(f"  [agent] hub: NO models available! all_models={len(all_models)}")
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         return
 
     print(f"  [agent] hub: models_to_try={len(models_to_try)}, first={models_to_try[0] if models_to_try else 'none'}")
     ai_response = None
     tried_count = 0
-    MAX_ATTEMPTS = 2
+    no_credits_providers = set()
 
     for i, model_to_try in enumerate(models_to_try):
-        if _cancel_check and _cancel_check():
-            break  # Пользователь отменил
-
         model_config = keys_manager.get_model_config(model_to_try)
         if not model_config:
             continue
@@ -1399,8 +1123,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
             continue
 
         model_provider = model_config.get("provider", "")
-        # Skip providers that died during THIS message processing
-        if model_provider in dead_providers_seen:
+        if model_provider in no_credits_providers:
             continue
 
         tried_count += 1
@@ -1410,7 +1133,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         await safe_ws_send(websocket, {"type": "typing", "model": display_model})
 
         if i > 0:
-            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {display_model}...", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
 
         error_info = {}
         ai_response = await stream_llm_response(
@@ -1423,18 +1146,9 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
             _cancel_check=_cancel_check,
         )
         print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
-
-        # Провайдер сдох (429/402) — помечаем и пропускаем его модели
-        if error_info.get("provider_dead") and model_provider:
-            _mark_provider_dead(model_provider)
-            dead_providers_seen.add(model_provider)
-            await _send_log(websocket, f"☠️ {model_provider} недоступен", "warning")
-
+        if error_info.get("no_credits") and model_provider:
+            no_credits_providers.add(model_provider)
         if ai_response is not None:
-            break
-
-        # Максимум 2 попытки
-        if tried_count >= MAX_ATTEMPTS:
             break
 
     if ai_response:
@@ -1442,9 +1156,9 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         # Проверяем есть ли <skill> теги в ответе — парсим и выполняем
         await _process_skill_tags(ai_response, websocket)
     elif tried_count == 0:
-        await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
+        await _send_log(websocket, "❌ Нет модели с API ключом", "error")
     else:
-        await safe_ws_send(websocket, {"type": "error", "content": "Модели не ответили."})
+        await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
 
 
 async def _process_skill_tags(response_text: str, websocket):
@@ -1568,7 +1282,7 @@ async def handle_project_with_injection(
 
     all_models = keys_manager.get_all_models()
     for m in all_models:
-        if m["id"] not in models_to_try and m.get("status") in ("valid", "available"):
+        if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
             if m.get("type") == "free" and m.get("status") == "no_key":
                 continue
             if m.get("type") == "local" and not m.get("base_url"):
@@ -1920,8 +1634,12 @@ async def probe_models(websocket=None) -> list[dict]:
         if m.get("status") in ("valid", "rate_limited", "available")
     ]
 
-    # ТИХИЙ РЕЖИМ: probe НЕ отправляет логи на frontend — только print() на сервере
-    print(f"  [probe] Starting probe: {len(candidates)} models to check")
+    if websocket:
+        await _send_log(
+            websocket,
+            f"🔬 Зондирование: {len(candidates)} моделей для проверки...",
+            "info",
+        )
 
     async def _probe_one(model_info: dict) -> dict | None:
         """Зондировать одну модель. Возвращает результат или None при ошибке."""
@@ -1952,17 +1670,6 @@ async def probe_models(websocket=None) -> list[dict]:
                     timeout=15,
                 )
                 elapsed_ms = int((time.time() - start) * 1000)
-
-                # Модель ответила — обновляем статус провайдера на valid
-                model_config = keys_manager.get_model_config(model_id)
-                if model_config:
-                    provider_id = model_config.get("provider", "")
-                    if provider_id and provider_id in keys_manager.providers:
-                        prov = keys_manager.providers[provider_id]
-                        if prov.get("status") in ("rate_limited",):
-                            prov["status"] = "valid"
-                            print(f"  [probe] Provider {provider_id}: rate_limited → valid (probe OK)")
-
                 # Модель ответила — проверяем поддержку tools
                 supports_tools = True
                 try:
@@ -2001,10 +1708,20 @@ async def probe_models(websocket=None) -> list[dict]:
                 return result
 
             except asyncio.TimeoutError:
-                print(f"  [probe] TIMEOUT: {model_name} (15s)")
+                if websocket:
+                    await _send_log(
+                        websocket,
+                        f"⏱️ {model_name}: таймаут (15с)",
+                        "warning",
+                    )
                 return None
             except Exception as e:
-                print(f"  [probe] FAIL: {model_name}: {str(e)[:80]}")
+                if websocket:
+                    await _send_log(
+                        websocket,
+                        f"⚠️ {model_name}: {str(e)[:80]}",
+                        "warning",
+                    )
                 return None
 
     # Запускаем все зондирования параллельно (ограничено семафором)
@@ -2027,16 +1744,19 @@ async def probe_models(websocket=None) -> list[dict]:
     # Сортируем по времени ответа (быстрые первые)
     _probed.sort(key=lambda x: x.get("response_time_ms", 999999))
 
+    if websocket:
+        tools_count = sum(1 for m in _probed if m.get("supports_tools"))
+        await _send_log(
+            websocket,
+            f"✅ Зондирование завершено: {len(_probed)}/{len(candidates)} моделей доступны "
+            f"(tools: {tools_count})",
+            "success",
+        )
+
     logger.log(
         f"probe_models: {len(_probed)}/{len(candidates)} models responsive",
         level="info",
         source="agent",
     )
-
-    # Тихий режим: НЕ отправляем итог на frontend — только серверный лог
-    print(f"  [probe] Done: {len(_probed)}/{len(candidates)} models responsive")
-
-    # Сбрасываем мёртвых провайдеров — probe свежий, даём всем второй шанс
-    _reset_dead_providers()
 
     return _probed
