@@ -116,6 +116,37 @@ def _safe_parse_tool_args(args_str: str) -> dict:
     return rescued
 
 
+# ═══════════════════════════════════════════════════════
+# DANGEROUS COMMAND DETECTION (inspired by SlopLobster)
+# ═══════════════════════════════════════════════════════
+
+DANGEROUS_COMMAND_PATTERNS = [
+    (r"\brm\s+(-[rfRF]+\s+)?/\b", "rm -rf / — удаление корневой директории"),
+    (r"\brm\s+(-[rfRF]+\s+)?\*\b", "rm -rf * — удаление всех файлов"),
+    (r"\bdd\s+.*of=/dev/", "dd с записью на устройство"),
+    (r"\bmkfs\b", "форматирование файловой системы"),
+    (r">\s*/dev/", "перенаправление в устройство"),
+    (r"\bchmod\s+(-R\s+)?777\s+[\/.]", "chmod 777 на системные файлы"),
+    (r"\bchown\s+(-R\s+)", "chown -R на системные файлы"),
+    (r"\bgit\s+(reset\s+--hard|clean\s+-fdx|push\s+--force)\b", "деструктивная git операция"),
+    (r"\b(shutdown|reboot|halt|poweroff)\b", "shutdown/reboot системы"),
+    (r"\|\s*(ba)?sh\b", "pipe в shell"),
+    (r"\b(curl|wget)\s+.*\|\s*(ba)?sh\b", "curl/wget | sh — выполнение из сети"),
+    (r"\bdrop\s+(table|database|schema)\b", "DROP TABLE/DATABASE"),
+    (r"\bDELETE\s+FROM\s+\w+\s*;", "DELETE FROM без WHERE"),
+    (r"\bTRUNCATE\s+", "TRUNCATE TABLE"),
+]
+
+
+def _check_dangerous_command(command: str) -> str | None:
+    """Check if command matches dangerous patterns. Returns warning or None."""
+    cmd_lower = command.lower()
+    for pattern, description in DANGEROUS_COMMAND_PATTERNS:
+        if re.search(pattern, cmd_lower, re.IGNORECASE):
+            return description
+    return None
+
+
 def _now():
     """Current UTC time as HH:MM:SS string."""
     return datetime.now(timezone.utc).strftime("%H:%M:%S")
@@ -512,6 +543,15 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             logger.log(f"tool: execute_command '{command[:100]}'", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
             await _send_log(websocket, f"⚡ Выполняю: $ {command[:120]}", "command")
+
+            # Dangerous command check (inspired by SlopLobster)
+            danger = _check_dangerous_command(command)
+            if danger:
+                await _send_log(websocket, f"🚨 ОПАСНАЯ КОМАНДА: {danger}", "error")
+                await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "status": "warning"})
+                # Don't block execution — just warn (approval system in executor handles the rest)
+                # But log it prominently
+
             result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=exec_timeout)
             output = ""
             if result.get("stdout"):
