@@ -181,6 +181,7 @@ async def websocket_chat(websocket: WebSocket):
     current_mode = "manual"  # "manual" or "auto"
     model_id = None
     ws_session_id = str(__import__('uuid').uuid4())  # Unique session ID for memory
+    _no_models_warned = False  # Спам-защита: предупреждение "нет моделей" только 1 раз
     logger.log("websocket_connected", level="info", source="ws")
 
     # ── Force client to clear any stale message queue from localStorage ──
@@ -418,7 +419,9 @@ async def websocket_chat(websocket: WebSocket):
                 # Если пользователь выставил приоритеты (priority) — используем их
                 if not model_id:
                     if not explicitly_probed_ids:
-                        await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет проверенных моделей. Откройте вкладку Модели → Опросить выбранные.", "level": "warning"})
+                        if not _no_models_warned:
+                            _no_models_warned = True
+                            await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет проверенных моделей. Откройте вкладку Модели → Опросить выбранные.", "level": "warning"})
                         continue
                     try:
                         from core.keys_manager import keys_manager

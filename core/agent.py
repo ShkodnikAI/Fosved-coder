@@ -11,7 +11,7 @@ import litellm
 import json
 from pathlib import Path
 from datetime import datetime, timezone
-from core.memory import CONFIG, save_message, get_history, get_project, get_project_token_by_path, git_push_with_token
+from core.memory import CONFIG, save_message, get_history, get_project, get_project_token_by_path, git_push_with_token, save_probed_models
 from core.keys_manager import keys_manager
 from core.context_compressor import ContextCompressor
 from core.action_logger import get_logger
@@ -850,35 +850,37 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     await save_message(project_id, "user", prompt)
 
-    # Build model list with fallback
+    # Build model list — NO automatic fallback to all models.
+    # Если пользователь ЯВНО выбрал модель — пробуем только её.
+    # Если модель НЕ выбрана — используем ТОЛЬКО проверенные (probed) модели.
     models_to_try = []
     if model_id:
+        # Пользователь явно выбрал модель — только она, без fallback
         models_to_try.append(model_id)
+    else:
+        # Модель не выбрана — используем приоритетные + проверенные
+        project = await get_project(project_id) if project_id else None
+        for pm in _get_priority_models(project):
+            if pm not in models_to_try:
+                models_to_try.append(pm)
 
-    project = await get_project(project_id) if project_id else None
-    for pm in _get_priority_models(project):
-        if pm not in models_to_try:
-            models_to_try.append(pm)
-
-    all_models = keys_manager.get_all_models()
-    has_probe_data = bool(keys_manager._probed_model_ids) or bool(keys_manager._failed_probe_ids)
-    for m in all_models:
-        mid = m["id"]
-        if mid in models_to_try:
-            continue
-        if m.get("status") not in ("valid", "rate_limited", "available"):
-            continue
-        # Если есть probe данные — ТОЛЬКО проверенные модели
-        if has_probe_data:
-            if keys_manager._failed_probe_ids and mid in keys_manager._failed_probe_ids:
+        all_models = keys_manager.get_all_models()
+        for m in all_models:
+            mid = m["id"]
+            if mid in models_to_try:
                 continue
-            if keys_manager._probed_model_ids and mid not in keys_manager._probed_model_ids:
+            # Только проверенные модели (probed)
+            if mid not in keys_manager._probed_model_ids:
                 continue
-        if m.get("type") == "free" and m.get("status") == "no_key":
-            continue
-        if m.get("type") == "local" and not m.get("base_url"):
-            continue
-        models_to_try.append(mid)
+            if m.get("status") not in ("valid", "rate_limited", "available"):
+                continue
+            if mid in keys_manager._failed_probe_ids:
+                continue
+            if m.get("type") == "free" and m.get("status") == "no_key":
+                continue
+            if m.get("type") == "local" and not m.get("base_url"):
+                continue
+            models_to_try.append(mid)
 
     if not models_to_try:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
@@ -969,6 +971,9 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     elif tried_count == 0:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
         await _send_log(websocket, "❌ Нет модели с API ключом", "error")
+    elif tried_count == 1:
+        await safe_ws_send(websocket, {"type": "error", "content": "Выбранная модель не ответила. Попробуйте другую."})
+        await _send_log(websocket, "❌ Модель не ответила", "error")
     else:
         await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
         await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
@@ -1076,32 +1081,31 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
 
     await save_message(None, "user", prompt)
 
-    # Список моделей с fallback — ТОЛЬКО проверенные (прошедшие probe)
+    # Список моделей — НЕТ автоматического fallback на все модели.
+    # Если пользователь ЯВНО выбрал модель — пробуем только её.
     models_to_try = []
     if model_id:
         models_to_try.append(model_id)
 
-    all_models = keys_manager.get_all_models()
-    has_probe_data = bool(keys_manager._probed_model_ids) or bool(keys_manager._failed_probe_ids)
-
-    for m in all_models:
-        mid = m["id"]
-        if mid in models_to_try:
-            continue
-        # Только валидные / rate_limited / available
-        if m.get("status") not in ("valid", "rate_limited", "available"):
-            continue
-        # Если есть probe данные — ТОЛЬКО проверенные модели
-        if has_probe_data:
-            if keys_manager._failed_probe_ids and mid in keys_manager._failed_probe_ids:
+    if not models_to_try:
+        # Модель не выбрана — используем ТОЛЬКО проверенные (probed) модели
+        all_models = keys_manager.get_all_models()
+        for m in all_models:
+            mid = m["id"]
+            if mid in models_to_try:
                 continue
-            if keys_manager._probed_model_ids and mid not in keys_manager._probed_model_ids:
+            # Только проверенные модели
+            if mid not in keys_manager._probed_model_ids:
                 continue
-        if m.get("type") == "free" and m.get("status") == "no_key":
-            continue
-        if m.get("type") == "local" and not m.get("base_url"):
-            continue
-        models_to_try.append(mid)
+            if m.get("status") not in ("valid", "rate_limited", "available"):
+                continue
+            if mid in keys_manager._failed_probe_ids:
+                continue
+            if m.get("type") == "free" and m.get("status") == "no_key":
+                continue
+            if m.get("type") == "local" and not m.get("base_url"):
+                continue
+            models_to_try.append(mid)
 
     if not models_to_try:
         print(f"  [agent] hub: NO models available! all_models={len(all_models)}")
@@ -1156,8 +1160,13 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         # Проверяем есть ли <skill> теги в ответе — парсим и выполняем
         await _process_skill_tags(ai_response, websocket)
     elif tried_count == 0:
+        await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         await _send_log(websocket, "❌ Нет модели с API ключом", "error")
+    elif tried_count == 1:
+        await safe_ws_send(websocket, {"type": "error", "content": "Выбранная модель не ответила. Попробуйте другую."})
+        await _send_log(websocket, "❌ Модель не ответила", "error")
     else:
+        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
         await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
 
 
@@ -1271,23 +1280,28 @@ async def handle_project_with_injection(
 
     await save_message(project_id, "user", prompt)
 
-    # Model list with fallback
+    # Model list — НЕТ автоматического fallback на все модели
     models_to_try = []
     if model_id:
         models_to_try.append(model_id)
 
-    for pm in _get_priority_models(project):
-        if pm not in models_to_try:
+    if not models_to_try:
+        # Модель не выбрана — используем ТОЛЬКО проверенные модели
+        for pm in _get_priority_models(project):
             models_to_try.append(pm)
 
-    all_models = keys_manager.get_all_models()
-    for m in all_models:
-        if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            models_to_try.append(m["id"])
+        all_models = keys_manager.get_all_models()
+        for m in all_models:
+            if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
+                if m["id"] not in keys_manager._probed_model_ids:
+                    continue
+                if m["id"] in keys_manager._failed_probe_ids:
+                    continue
+                if m.get("type") == "free" and m.get("status") == "no_key":
+                    continue
+                if m.get("type") == "local" and not m.get("base_url"):
+                    continue
+                models_to_try.append(m["id"])
 
     if not models_to_try:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей."})
