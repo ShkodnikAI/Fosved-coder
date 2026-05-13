@@ -59,33 +59,31 @@ def get_platform_info() -> str:
 logger = get_logger()
 
 # ═══════════════════════════════════════════════════════
-# GLOBAL 429 RATE-LIMIT COOLDOWN
+# DEAD PROVIDERS — простая модель без таймингов
 # ═══════════════════════════════════════════════════════
-# Tracks providers that returned 429 so we skip them for a while.
-# Key: provider_id, Value: timestamp when cooldown expires
-_rate_limit_cooldowns: dict[str, float] = {}
-_RATE_LIMIT_COOLDOWN_SEC = 120  # 2 minutes cooldown
-
-# Global "no models available" cooldown — prevents spam when all providers disabled
-_no_models_cooldown_until: float = 0
-_NO_MODELS_COOLDOWN_SEC = 60  # 1 minute cooldown
+# Провайдеры, которые вернули 429/402 при рантайме.
+# Сбрасывается при следующем probing (probe_models).
+# Никаких таймеров — если провайдер сдох, он сдох до следующего probe.
+_dead_providers: set[str] = set()
 
 
-def _is_rate_limited(provider_id: str) -> bool:
-    """Check if a provider is currently in 429 cooldown."""
-    if provider_id in _rate_limit_cooldowns:
-        if time.time() < _rate_limit_cooldowns[provider_id]:
-            return True
-        else:
-            # Cooldown expired — remove it
-            del _rate_limit_cooldowns[provider_id]
-    return False
+def _is_provider_dead(provider_id: str) -> bool:
+    """Проверить, сдох ли провайдер."""
+    return provider_id in _dead_providers
 
 
-def _mark_rate_limited(provider_id: str):
-    """Mark a provider as rate-limited for COOLDOWN_SEC seconds."""
-    _rate_limit_cooldowns[provider_id] = time.time() + _RATE_LIMIT_COOLDOWN_SEC
-    print(f"  [agent] 429 cooldown: {provider_id} for {_RATE_LIMIT_COOLDOWN_SEC}s")
+def _mark_provider_dead(provider_id: str):
+    """Пометить провайдера как мёртвый (429/402)."""
+    if provider_id and provider_id not in _dead_providers:
+        _dead_providers.add(provider_id)
+        print(f"  [agent] Provider DEAD: {provider_id}")
+
+
+def _reset_dead_providers():
+    """Сбросить список мёртвых провайдеров (вызывается после probe)."""
+    if _dead_providers:
+        print(f"  [agent] Resetting dead providers: {len(_dead_providers)} removed")
+        _dead_providers.clear()
 
 
 def _now():
@@ -526,7 +524,7 @@ def _resolve_model(model_id: str) -> tuple[str, str, str, bool]:
         # Fallback: ищем модель по списку провайдеров
         bare_name = model.split("/")[-1]
         for provider_id, config in keys_manager.providers.items():
-            if config.get("status") in ("valid", "rate_limited") and config.get("api_key"):
+            if config.get("status") in ("valid", "available") and config.get("api_key"):
                 for model_name in config.get("models", []):
                     if model_name == bare_name:
                         prefix = config.get("litellm_prefix", provider_id)
@@ -756,12 +754,14 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
             await safe_ws_send(websocket, {"type": "error", "content": error_msg})
             await _send_log(websocket, f"❌ {model}: {error_msg}", "error")
-            # Signal 402 to caller for provider skipping in fallback
-            if _error_info is not None and ("402" in error_msg or "insufficient credits" in error_msg.lower()):
-                _error_info["no_credits"] = True
-            # Signal 429 to caller for provider rate-limit skipping
-            if _error_info is not None and "429" in error_msg:
-                _error_info["rate_limited"] = True
+            # Signal 402/429 to caller for provider skipping
+            if _error_info is not None:
+                if "429" in error_msg:
+                    _error_info["provider_dead"] = True
+                elif "402" in error_msg or "insufficient credits" in error_msg.lower():
+                    _error_info["provider_dead"] = True
+                if "no_tools" not in _error_info:
+                    _error_info["raw_error"] = error_msg
             return None
 
     # Max iterations reached
@@ -898,52 +898,33 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             models_to_try.append(pm)
 
     all_models = keys_manager.get_all_models()
+    dead_providers_seen = set()  # Провайдеры, сдохшие при обработке ЭТОГО сообщения
     for m in all_models:
-        if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
+        if m["id"] not in models_to_try and m.get("status") in ("valid", "available"):
             if m.get("type") == "free" and m.get("status") == "no_key":
                 continue
             if m.get("type") == "local" and not m.get("base_url"):
                 continue
-            # Skip models from providers in global 429 cooldown
+            # Skip models from dead providers
             _m_cfg = keys_manager.get_model_config(m["id"])
-            if _m_cfg and _is_rate_limited(_m_cfg.get("provider", "")):
+            if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
                 continue
             models_to_try.append(m["id"])
 
     if not models_to_try:
-        global _no_models_cooldown_until
-        if time.time() < _no_models_cooldown_until:
-            return  # Silent drop — don't spam
-        _no_models_cooldown_until = time.time() + _NO_MODELS_COOLDOWN_SEC
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
-        await _send_log(websocket, "❌ Нет доступных моделей (повторная попытка через 60с)", "error")
+        await _send_log(websocket, "❌ Нет доступных моделей", "error")
         return
 
-    # Автоперевалидация rate_limited провайдеров перед первой попыткой
-    validated_providers = set()
-    for m_id in models_to_try:
-        if "__" in m_id:
-            pid = m_id.split("__")[0]
-        elif m_id.startswith("local_") or m_id.startswith("custom_"):
-            continue
-        else:
-            # bare model name — skip
-            continue
-        if pid not in validated_providers:
-            config = keys_manager.providers.get(pid, {})
-            if config.get("status") == "rate_limited":
-                new_status = await keys_manager.ensure_provider_active(pid)
-                if new_status == "valid":
-                    await _send_log(websocket, f"✓ {pid} перевалидирован и активен", "success")
-            validated_providers.add(pid)
-
-    # Try each model
+    # Пробуем модели — максимум 2 попытки (никакого цикла по всем моделям)
     ai_response = None
     tried_count = 0
-    no_credits_providers = set()  # providers that returned 402 — skip remaining models from them
-    rate_limited_providers = set()  # providers that returned 429 — skip remaining models from them
+    MAX_ATTEMPTS = 2
 
     for i, model_to_try in enumerate(models_to_try):
+        if _cancel_check and _cancel_check():
+            break  # Пользователь отменил — не пробуем дальше
+
         model_config = keys_manager.get_model_config(model_to_try)
         if not model_config:
             continue
@@ -952,18 +933,9 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if not has_key and not is_local:
             continue
 
-        # Skip models from providers with no credits (402)
         model_provider = model_config.get("provider", "")
-        if model_provider in no_credits_providers:
-            print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} has no credits")
-            continue
-        # Skip models from providers with rate limit (429)
-        if model_provider in rate_limited_providers:
-            print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} rate limited")
-            continue
-        # Skip models from providers in global 429 cooldown
-        if _is_rate_limited(model_provider):
-            print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} in cooldown")
+        # Skip providers that died during THIS message processing
+        if model_provider in dead_providers_seen:
             continue
 
         tried_count += 1
@@ -976,11 +948,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             await safe_ws_send(websocket, {"type": "typing", "model": display_model})
 
         if i > 0:
-            m_info = next((m for m in all_models if m["id"] == model_to_try), None)
             model_name = m_info["name"] if m_info else model_to_try
             if not _silent:
-                await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {model_name} (попытка {tried_count})...", "level": "info"})
-            await _send_log(websocket, f"🔄 Переключаюсь на {model_name} (попытка {tried_count})", "warning")
+                await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {model_name}...", "level": "info"})
+            await _send_log(websocket, f"🔄 Переключаюсь на {model_name}", "warning")
 
         error_info = {}
         ai_response = await stream_llm_response(
@@ -989,15 +960,14 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             project_path=project_path, use_tools=True,
             _error_info=error_info, _cancel_check=_cancel_check, _silent=_silent
         )
-        print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, no_tools={error_info.get('no_tools')}, no_credits={error_info.get('no_credits')}, rate_limited={error_info.get('rate_limited')}")
-        if error_info.get("no_credits") and model_provider:
-            no_credits_providers.add(model_provider)
-            _mark_rate_limited(model_provider)
-            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
-        if error_info.get("rate_limited") and model_provider:
-            rate_limited_providers.add(model_provider)
-            _mark_rate_limited(model_provider)
-            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (rate limit)", "warning")
+        print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
+
+        # Провайдер сдох (429/402) — помечаем и пропускаем его модели
+        if error_info.get("provider_dead") and model_provider:
+            _mark_provider_dead(model_provider)
+            dead_providers_seen.add(model_provider)
+            await _send_log(websocket, f"☠️ {model_provider} недоступен", "warning")
+
         if ai_response is not None:
             # Prompt injection fallback: model doesn't support tools but we have a project
             if error_info.get("no_tools") and project_path:
@@ -1011,7 +981,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                 )
                 if injection_result is not None:
                     ai_response = injection_result
-                # If injection failed, keep the raw response as fallback
+            break
+
+        # Максимум 2 попытки
+        if tried_count >= MAX_ATTEMPTS:
             break
 
     if ai_response:
@@ -1020,8 +993,8 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
         await _send_log(websocket, "❌ Нет модели с API ключом", "error")
     else:
-        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
-        await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
+        await safe_ws_send(websocket, {"type": "error", "content": "Модели не ответили."})
+        await _send_log(websocket, "❌ Модели не ответили", "error")
 
 
 # ═══════════════════════════════════════════════════════
@@ -1132,34 +1105,33 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         models_to_try.append(model_id)
 
     all_models = keys_manager.get_all_models()
+    dead_providers_seen = set()  # Провайдеры, сдохшие при обработке ЭТОГО сообщения
     for m in all_models:
-        if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
+        if m["id"] not in models_to_try and m.get("status") in ("valid", "available"):
             if m.get("type") == "free" and m.get("status") == "no_key":
                 continue
             if m.get("type") == "local" and not m.get("base_url"):
                 continue
-            # Skip models from providers in global 429 cooldown
+            # Skip models from dead providers
             _m_cfg = keys_manager.get_model_config(m["id"])
-            if _m_cfg and _is_rate_limited(_m_cfg.get("provider", "")):
+            if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
                 continue
             models_to_try.append(m["id"])
 
     if not models_to_try:
         print(f"  [agent] hub: NO models available! all_models={len(all_models)}")
-        global _no_models_cooldown_until
-        if time.time() < _no_models_cooldown_until:
-            return  # Silent drop — don't spam
-        _no_models_cooldown_until = time.time() + _NO_MODELS_COOLDOWN_SEC
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         return
 
     print(f"  [agent] hub: models_to_try={len(models_to_try)}, first={models_to_try[0] if models_to_try else 'none'}")
     ai_response = None
     tried_count = 0
-    no_credits_providers = set()
-    rate_limited_providers = set()
+    MAX_ATTEMPTS = 2
 
     for i, model_to_try in enumerate(models_to_try):
+        if _cancel_check and _cancel_check():
+            break  # Пользователь отменил
+
         model_config = keys_manager.get_model_config(model_to_try)
         if not model_config:
             continue
@@ -1169,13 +1141,8 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
             continue
 
         model_provider = model_config.get("provider", "")
-        if model_provider in no_credits_providers:
-            continue
-        if model_provider in rate_limited_providers:
-            continue
-        # Skip models from providers in global 429 cooldown
-        if _is_rate_limited(model_provider):
-            print(f"  [agent] hub: skipping #{i} {model_to_try} — provider {model_provider} in cooldown")
+        # Skip providers that died during THIS message processing
+        if model_provider in dead_providers_seen:
             continue
 
         tried_count += 1
@@ -1185,7 +1152,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         await safe_ws_send(websocket, {"type": "typing", "model": display_model})
 
         if i > 0:
-            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {display_model}...", "level": "info"})
 
         error_info = {}
         ai_response = await stream_llm_response(
@@ -1197,15 +1164,19 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
             _error_info=error_info,
             _cancel_check=_cancel_check,
         )
-        print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, rate_limited={error_info.get('rate_limited')}")
-        if error_info.get("no_credits") and model_provider:
-            no_credits_providers.add(model_provider)
-            _mark_rate_limited(model_provider)
-        if error_info.get("rate_limited") and model_provider:
-            rate_limited_providers.add(model_provider)
-            _mark_rate_limited(model_provider)
-            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (rate limit)", "warning")
+        print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
+
+        # Провайдер сдох (429/402) — помечаем и пропускаем его модели
+        if error_info.get("provider_dead") and model_provider:
+            _mark_provider_dead(model_provider)
+            dead_providers_seen.add(model_provider)
+            await _send_log(websocket, f"☠️ {model_provider} недоступен", "warning")
+
         if ai_response is not None:
+            break
+
+        # Максимум 2 попытки
+        if tried_count >= MAX_ATTEMPTS:
             break
 
     if ai_response:
@@ -1215,7 +1186,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
     elif tried_count == 0:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
     else:
-        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
+        await safe_ws_send(websocket, {"type": "error", "content": "Модели не ответили."})
 
 
 async def _process_skill_tags(response_text: str, websocket):
@@ -1339,7 +1310,7 @@ async def handle_project_with_injection(
 
     all_models = keys_manager.get_all_models()
     for m in all_models:
-        if m["id"] not in models_to_try and m.get("status") in ("valid", "rate_limited", "available"):
+        if m["id"] not in models_to_try and m.get("status") in ("valid", "available"):
             if m.get("type") == "free" and m.get("status") == "no_key":
                 continue
             if m.get("type") == "local" and not m.get("base_url"):
@@ -1727,6 +1698,17 @@ async def probe_models(websocket=None) -> list[dict]:
                     timeout=15,
                 )
                 elapsed_ms = int((time.time() - start) * 1000)
+
+                # Модель ответила — обновляем статус провайдера на valid
+                model_config = keys_manager.get_model_config(model_id)
+                if model_config:
+                    provider_id = model_config.get("provider", "")
+                    if provider_id and provider_id in keys_manager.providers:
+                        prov = keys_manager.providers[provider_id]
+                        if prov.get("status") in ("rate_limited",):
+                            prov["status"] = "valid"
+                            print(f"  [probe] Provider {provider_id}: rate_limited → valid (probe OK)")
+
                 # Модель ответила — проверяем поддержку tools
                 supports_tools = True
                 try:
@@ -1815,5 +1797,8 @@ async def probe_models(websocket=None) -> list[dict]:
         level="info",
         source="agent",
     )
+
+    # Сбрасываем мёртвых провайдеров — probe свежий, даём всем второй шанс
+    _reset_dead_providers()
 
     return _probed

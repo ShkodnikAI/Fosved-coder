@@ -202,8 +202,8 @@ async def websocket_chat(websocket: WebSocket):
 
     # ── Cancellation flag: set by client to abort current generation ──
     ws_cancelled = False
-    # ── Stop cooldown: after user presses stop, ignore queued messages for N seconds ──
-    _stop_cooldown_until = 0.0  # timestamp when cooldown expires
+    # ── Drop counter: after stop, drop N queued messages (no timers!) ──
+    _messages_to_drop = 0
 
     # ── Server-side keepalive: ping every 4 sec to prevent proxy idle kill ──
     async def _ws_keepalive():
@@ -306,24 +306,23 @@ async def websocket_chat(websocket: WebSocket):
                     await safe_ws_send(websocket, {"type": "auto_log", "content": f"Режим: {'Автоматический' if new_mode == 'auto' else 'Ручной'}", "level": "info"})
                     continue
 
-                # Handle stop_generation — abort current LLM call + cooldown
+                # Handle stop_generation — abort current LLM call + drop queued messages
                 if payload.get("type") == "stop_generation":
                     ws_cancelled = True
-                    # Set cooldown: ignore all queued chat messages for 30 seconds
-                    import time as _time
-                    _stop_cooldown_until = _time.time() + 30
+                    # Drop all queued messages (no timer — just a counter)
+                    _messages_to_drop = 100
                     logger.user_action("stop_generation", project_id=current_project_id)
                     await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
                     continue
 
-                # ── Check stop cooldown: drop queued messages after stop ──
+                # ── Drop queued messages after stop (no timers!) ──
                 _msg_type = payload.get("type", "")
                 _is_gen_msg = _msg_type in ("chat", "hub_chat", "refactor", "start_questionnaire")
+                if _is_gen_msg and _messages_to_drop > 0:
+                    _messages_to_drop -= 1
+                    print(f"  [ws] DROP queued message ({_messages_to_drop} remaining)")
+                    continue
                 if _is_gen_msg:
-                    import time as _time
-                    if _time.time() < _stop_cooldown_until:
-                        print(f"  [ws] DROP queued message during stop cooldown: {_msg_type}")
-                        continue
                     ws_cancelled = False
 
                 # Handle hub chat (главный экран — без контекста проекта)
@@ -332,11 +331,6 @@ async def websocket_chat(websocket: WebSocket):
                     hub_prompt = payload.get("prompt", "")
                     hub_model = payload.get("model_id")
                     if hub_prompt:
-                        # Check stop cooldown for hub_chat too
-                        import time as _time
-                        if _time.time() < _stop_cooldown_until:
-                            print(f"  [ws] DROP hub_chat during stop cooldown")
-                            continue
                         logger.user_action("hub_chat", details={"model": hub_model})
                         try:
                             await handle_hub_message(hub_prompt, websocket, model_id=hub_model, _cancel_check=lambda: ws_cancelled)

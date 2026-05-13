@@ -1314,9 +1314,9 @@ function stopGeneration() {
     // 2. Clear ALL queued messages — prevent auto-flood after stop
     if (wsMessageQueue.length > 0) {
         addClientLog('ws', 'Cleared ' + wsMessageQueue.length + ' queued messages');
-        wsMessageQueue = [];
-        persistQ();
     }
+    wsMessageQueue = [];
+    try { localStorage.removeItem("fosved-ws-q"); } catch(e) {}
     // 3. Immediately hide stop button, reset waiting state
     setWaitingAI(false);
     setHubWaitingAI(false);
@@ -1753,9 +1753,9 @@ function wsConnect() {
         if (data.type === "clear_queue") {
             if (wsMessageQueue.length > 0) {
                 addClientLog('ws', 'Queue cleared by server: ' + wsMessageQueue.length + ' messages');
-                wsMessageQueue = [];
-                persistQ();
             }
+            wsMessageQueue = [];
+            try { localStorage.removeItem("fosved-ws-q"); } catch(e) {}
             return;
         }
 

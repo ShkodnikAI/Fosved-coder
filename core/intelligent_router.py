@@ -225,12 +225,12 @@ class IntelligentRouter:
             if status in ("invalid", "no_key"):
                 continue
 
-            # Пропускаем модели от провайдеров в глобальном 429 cooldown
+            # Пропускаем модели от мёртвых провайдеров
             try:
-                from core.agent import _is_rate_limited
+                from core.agent import _is_provider_dead
                 from core.keys_manager import keys_manager as _km
                 _mcfg = _km.get_model_config(model_id)
-                if _mcfg and _is_rate_limited(_mcfg.get("provider", "")):
+                if _mcfg and _is_provider_dead(_mcfg.get("provider", "")):
                     continue
             except Exception:
                 pass
@@ -241,9 +241,9 @@ class IntelligentRouter:
                 for pattern in LEADER_MODEL_PATTERNS
             )
 
-            if is_leader and status in ("valid", "rate_limited"):
+            if is_leader and status in ("valid", "available"):
                 leader_models.append(m)
-            elif model_type == "free" and status in ("valid", "available", "rate_limited"):
+            elif model_type == "free" and status in ("valid", "available"):
                 free_models.append(m)
 
         # Выбор модели
@@ -257,7 +257,7 @@ class IntelligentRouter:
                 reason = f"Простая задача, но нет бесплатных → лидер: {chosen['name']}"
             else:
                 # Fallback: первая доступная модель
-                usable = [m for m in available_models if m.get("status") in ("valid", "available", "rate_limited")]
+                usable = [m for m in available_models if m.get("status") in ("valid", "available")]
                 chosen = usable[0] if usable else available_models[0] if available_models else None
                 reason = f"Fallback: {chosen['name'] if chosen else 'нет моделей'}"
         else:
@@ -268,7 +268,7 @@ class IntelligentRouter:
             else:
                 # Нет лидеров — берём любую валидную платную
                 paid = [m for m in available_models
-                        if m.get("type") == "paid" and m.get("status") in ("valid", "rate_limited")]
+                        if m.get("type") == "paid" and m.get("status") in ("valid", "available")]
                 chosen = paid[0] if paid else available_models[0] if available_models else None
                 reason = f"Сложная задача, лидеры недоступны → {chosen['name'] if chosen else 'нет моделей'}"
 

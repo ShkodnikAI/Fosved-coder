@@ -259,7 +259,7 @@ class ContextCompressor:
         # 1. Abacus.AI route-llm — умная маршрутизация автоматически выбирает
         #    лучшую модель по соотношению цена/качество. Идеально для фоновых задач.
         abacus_config = keys_manager.providers.get("abacus", {})
-        if abacus_config.get("api_key") and abacus_config.get("status") in ("valid", "rate_limited"):
+        if abacus_config.get("api_key") and abacus_config.get("status") in ("valid", "available"):
             abacus_def = PROVIDER_DEFS.get("abacus", {})
             models = abacus_config.get("models", abacus_def.get("suggested_models", []))
             # Ищем route-llm в списке моделей
@@ -282,7 +282,7 @@ class ContextCompressor:
         # 2. Try any model with a valid key (pick the first available)
         all_models = keys_manager.get_all_models()
         for m in all_models:
-            if m.get("status") in ("valid", "rate_limited", "available"):
+            if m.get("status") in ("valid", "available"):
                 model_type = m.get("type", "")
                 # Пропускаем модели без ключа (free но без openrouter ключа, local без сервера)
                 if model_type in ("local",) and not m.get("base_url"):
