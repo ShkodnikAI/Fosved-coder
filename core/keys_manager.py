@@ -1273,6 +1273,7 @@ class KeysManager:
                             result = {
                                 "model": litellm_name,
                                 "api_key": config.get("api_key", ""),
+                                "provider": provider_id,
                             }
                             if _thinking:
                                 result["thinking"] = True
@@ -1295,6 +1296,7 @@ class KeysManager:
                     result = {
                         "model": litellm_name,
                         "api_key": config.get("api_key", ""),
+                        "provider": provider_id,
                     }
                     if _thinking:
                         result["thinking"] = True
@@ -1326,6 +1328,7 @@ class KeysManager:
                     "model": f"openrouter/{fm['model']}",
                     "api_key": or_key,
                     "api_base": or_base,
+                    "provider": "openrouter",
                 }
         # Кастомные модели
         for cm in self.custom_models:

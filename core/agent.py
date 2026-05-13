@@ -66,6 +66,10 @@ logger = get_logger()
 _rate_limit_cooldowns: dict[str, float] = {}
 _RATE_LIMIT_COOLDOWN_SEC = 120  # 2 minutes cooldown
 
+# Global "no models available" cooldown — prevents spam when all providers disabled
+_no_models_cooldown_until: float = 0
+_NO_MODELS_COOLDOWN_SEC = 60  # 1 minute cooldown
+
 
 def _is_rate_limited(provider_id: str) -> bool:
     """Check if a provider is currently in 429 cooldown."""
@@ -907,8 +911,12 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
             models_to_try.append(m["id"])
 
     if not models_to_try:
+        global _no_models_cooldown_until
+        if time.time() < _no_models_cooldown_until:
+            return  # Silent drop — don't spam
+        _no_models_cooldown_until = time.time() + _NO_MODELS_COOLDOWN_SEC
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
-        await _send_log(websocket, "❌ Нет доступных моделей", "error")
+        await _send_log(websocket, "❌ Нет доступных моделей (повторная попытка через 60с)", "error")
         return
 
     # Автоперевалидация rate_limited провайдеров перед первой попыткой
@@ -1138,6 +1146,10 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
 
     if not models_to_try:
         print(f"  [agent] hub: NO models available! all_models={len(all_models)}")
+        global _no_models_cooldown_until
+        if time.time() < _no_models_cooldown_until:
+            return  # Silent drop — don't spam
+        _no_models_cooldown_until = time.time() + _NO_MODELS_COOLDOWN_SEC
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         return
 

@@ -309,9 +309,9 @@ async def websocket_chat(websocket: WebSocket):
                 # Handle stop_generation — abort current LLM call + cooldown
                 if payload.get("type") == "stop_generation":
                     ws_cancelled = True
-                    # Set cooldown: ignore all queued chat messages for 10 seconds
+                    # Set cooldown: ignore all queued chat messages for 30 seconds
                     import time as _time
-                    _stop_cooldown_until = _time.time() + 10
+                    _stop_cooldown_until = _time.time() + 30
                     logger.user_action("stop_generation", project_id=current_project_id)
                     await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
                     continue
@@ -332,6 +332,11 @@ async def websocket_chat(websocket: WebSocket):
                     hub_prompt = payload.get("prompt", "")
                     hub_model = payload.get("model_id")
                     if hub_prompt:
+                        # Check stop cooldown for hub_chat too
+                        import time as _time
+                        if _time.time() < _stop_cooldown_until:
+                            print(f"  [ws] DROP hub_chat during stop cooldown")
+                            continue
                         logger.user_action("hub_chat", details={"model": hub_model})
                         try:
                             await handle_hub_message(hub_prompt, websocket, model_id=hub_model, _cancel_check=lambda: ws_cancelled)

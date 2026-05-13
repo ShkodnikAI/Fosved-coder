@@ -611,9 +611,13 @@ body {
 /* Copy button on code blocks */
 .code-btn-bar {
     position: absolute; top: 6px; right: 6px;
-    display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; z-index: 2;
+    display: flex; gap: 4px; opacity: 0.5; transition: opacity 0.15s; z-index: 2;
 }
 pre:hover .code-btn-bar { opacity: 1; }
+/* Touch devices: always visible */
+@media (hover: none) {
+    .code-btn-bar { opacity: 1; }
+}
 .code-btn {
     padding: 2px 8px; background: var(--bg-tertiary);
     border: 1px solid var(--border); color: var(--text-secondary);
@@ -630,9 +634,13 @@ pre:hover .code-btn-bar { opacity: 1; }
     border: 1px solid var(--border); color: var(--text-dim);
     border-radius: var(--radius-sm); cursor: pointer;
     font-size: 11px; text-align: center;
-    opacity: 0; transition: opacity 0.2s;
+    opacity: 0.5; transition: opacity 0.2s;
 }
 .msg.ai:hover .msg-copy-btn { opacity: 1; }
+/* Touch devices: always visible */
+@media (hover: none) {
+    .msg-copy-btn { opacity: 1; }
+}
 .msg-copy-btn:hover { background: var(--bg-active); color: var(--text-primary); border-color: var(--accent); }
 
 /* Tool call message */
