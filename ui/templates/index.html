@@ -1898,12 +1898,11 @@ function _showProbedOnlyModels() {
         return;
     }
     renderModels();
-    // Авто-выбор первой проверенной модели
-    if (!activeModelId || !explicitlyProbedIds.has(activeModelId)) {
-        if (probed.length > 0) {
-            activeModelId = probed[0].id;
-            updateInputPlaceholders();
-        }
+    // НЕ авто-выбираем модель — пользователь выбирает вручную из левой панели
+    // Если activeModelId не в explicitlyProbedIds — сбрасываем
+    if (activeModelId && !explicitlyProbedIds.has(activeModelId)) {
+        activeModelId = null;
+        updateInputPlaceholders();
     }
     document.getElementById('setup-banner').style.display = 'none';
 }

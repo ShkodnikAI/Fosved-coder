@@ -105,15 +105,14 @@ async def lifespan(app: FastAPI):
             print(f"  [abacus] Фоновая загрузка: {e}")
     asyncio.create_task(_bg_load_abacus())
 
-    # При старте — только восстановить кэш probe из БД (без автопроба)
-    # Пользователь запускает probe вручную через кнопку или /probe
-    try:
-        cached = await get_probed_models()
-        if cached:
-            keys_manager.update_probed_model_ids(cached)
-            print(f"  [startup] Restored probe cache: {len(cached)} models")
-    except Exception:
-        pass
+    # При старте — НЕ восстанавливаем кэш probe.
+    # Модели доступны ТОЛЬКО после ручного опроса через кнопку в UI.
+    # (DB-кэш используется только для восстановления списка на клиенте,
+    #  но роутер на сервере НЕ использует эти данные до явного probe_selected)
+    # keys_manager._probed_model_ids остаётся пустым до probe_selected
+    keys_manager._probed_model_ids = set()
+    keys_manager._failed_probe_ids = set()
+    print(f"  [startup] Probed models: empty (manual probe required)")
 
     # Init observation/memory tables (claude-mem inspired)
     try:
@@ -205,13 +204,9 @@ async def websocket_chat(websocket: WebSocket):
             pass
     keepalive_task = asyncio.create_task(_ws_keepalive())
 
-    # Отправить клиенту кэшированные результаты probing (без автопроба)
-    try:
-        probed = await get_probed_models()
-        if probed:
-            await safe_ws_send(websocket, {"type": "probed_models", "models": probed})
-    except Exception:
-        pass
+    # НЕ отправляем кэшированные результаты probe.
+    # Клиент сам восстанавливает список из localStorage.
+    # Модели активны только после явного ручного опроса (probe_selected).
 
     # Inject memory context from previous sessions (claude-mem inspired) — тихо, без UI логов
     try:
@@ -416,32 +411,12 @@ async def websocket_chat(websocket: WebSocket):
                                 project["path"], current_project_id
                             )
 
-                # Задача 5: Intelligent Router — выбрать модель если не указана
+                # Задача 5: Intelligent Router — ВЫКЛЮЧЕН
+                # Модель выбирается ТОЛЬКО пользователем вручную из левой панели.
+                # Роутер НЕ подбирает модель автоматически.
                 if not model_id:
-                    try:
-                        from core.keys_manager import keys_manager
-                        all_models = keys_manager.get_all_models()
-                        route_result = intelligent_router.select_model(
-                            prompt, all_models,
-                            probed_model_ids=keys_manager._probed_model_ids,
-                            failed_probe_ids=keys_manager._failed_probe_ids,
-                            has_been_probed=bool(keys_manager._failed_probe_ids),
-                        )
-                        if route_result.get("model_id") and route_result.get("overridden"):
-                            model_id = route_result["model_id"]
-                            logger.log("intelligent_router_selected", level="info", source="ws",
-                                       details={"model": model_id, "complexity": route_result.get("complexity"),
-                                                "reason": route_result.get("reason", "")[:200]})
-                            # Silent routing — no UI log, only server console
-                            print(f"  [router] {route_result.get('reason', '')} → {model_id}")
-                        elif not route_result.get("model_id") and keys_manager._failed_probe_ids and not keys_manager._probed_model_ids:
-                            # Probe был запущен, но НИ ОДНА модель не прошла
-                            await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет моделей, прошедших опрос. Откройте вкладку 🤖 Модели и нажмите 'Опросить выбранные'", "level": "warning"})
-                    except Exception as route_err:
-                        try:
-                            logger.log("intelligent_router_error", level="warning", source="ws", error=str(route_err)[:200])
-                        except Exception:
-                            pass
+                    await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Модель не выбрана. Откройте вкладку Модели справа → Опросить выбранные → выберите модель слева.", "level": "warning"})
+                    continue
 
                 # Route based on mode
                 if mode == "auto":
