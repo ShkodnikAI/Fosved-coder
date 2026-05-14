@@ -744,6 +744,50 @@ def _get_priority_models(project: dict) -> list[str]:
     return []
 
 
+def _build_models_to_try(
+    model_id: str | None,
+    all_models: list[dict],
+    project: dict | None = None,
+) -> list[str]:
+    """Единая функция построения списка моделей для попытки (DRY).
+
+    Логика:
+    1. Если model_id задан — ТОЛЬКО эта модель (без fallback)
+    2. Если не задан — приоритетные модели проекта + ТОЛЬКО проверенные (probed)
+    3. Фильтры: status valid/available/rate_limited, skip free+no_key/local без base_url,
+       skip failed_probe_ids
+
+    Returns: list[model_id, ...]
+    """
+    models_to_try: list[str] = []
+
+    if model_id:
+        return [model_id]
+
+    # Приоритетные модели проекта
+    for pm in _get_priority_models(project):
+        models_to_try.append(pm)
+
+    # ТОЛЬКО проверенные (probed) модели
+    for m in all_models:
+        mid = m["id"]
+        if mid in models_to_try:
+            continue
+        if mid not in keys_manager._probed_model_ids:
+            continue
+        if m.get("status") not in ("valid", "available", "rate_limited"):
+            continue
+        if mid in keys_manager._failed_probe_ids:
+            continue
+        if m.get("type") == "free" and m.get("status") == "no_key":
+            continue
+        if m.get("type") == "local" and not m.get("base_url"):
+            continue
+        models_to_try.append(mid)
+
+    return models_to_try
+
+
 # ═══════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════
@@ -827,37 +871,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     await save_message(project_id, "user", prompt)
 
-    # Build model list — NO automatic fallback to all models.
-    # Если пользователь ЯВНО выбрал модель — пробуем только её.
-    # Если модель НЕ выбрана — используем ТОЛЬКО проверенные (probed) модели.
-    models_to_try = []
-    if model_id:
-        # Пользователь явно выбрал модель — только она, без fallback
-        models_to_try.append(model_id)
-    else:
-        # Модель не выбрана — используем приоритетные + проверенные
-        project = await get_project(project_id) if project_id else None
-        for pm in _get_priority_models(project):
-            if pm not in models_to_try:
-                models_to_try.append(pm)
-
-        all_models = keys_manager.get_all_models()
-        for m in all_models:
-            mid = m["id"]
-            if mid in models_to_try:
-                continue
-            # Только проверенные модели (probed)
-            if mid not in keys_manager._probed_model_ids:
-                continue
-            if m.get("status") not in ("valid", "rate_limited", "available"):
-                continue
-            if mid in keys_manager._failed_probe_ids:
-                continue
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            models_to_try.append(mid)
+    # Build model list — единая логика через _build_models_to_try()
+    all_models = keys_manager.get_all_models()
+    project = await get_project(project_id) if project_id else None
+    models_to_try = _build_models_to_try(model_id, all_models, project)
 
     if not models_to_try:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
@@ -1058,31 +1075,9 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
 
     await save_message(None, "user", prompt)
 
-    # Список моделей — НЕТ автоматического fallback на все модели.
-    # Если пользователь ЯВНО выбрал модель — пробуем только её.
-    models_to_try = []
-    if model_id:
-        models_to_try.append(model_id)
-
-    if not models_to_try:
-        # Модель не выбрана — используем ТОЛЬКО проверенные (probed) модели
-        all_models = keys_manager.get_all_models()
-        for m in all_models:
-            mid = m["id"]
-            if mid in models_to_try:
-                continue
-            # Только проверенные модели
-            if mid not in keys_manager._probed_model_ids:
-                continue
-            if m.get("status") not in ("valid", "rate_limited", "available"):
-                continue
-            if mid in keys_manager._failed_probe_ids:
-                continue
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            models_to_try.append(mid)
+    # Build model list — единая логика через _build_models_to_try()
+    all_models = keys_manager.get_all_models()
+    models_to_try = _build_models_to_try(model_id, all_models)
 
     if not models_to_try:
         print(f"  [agent] hub: NO models available! all_models={len(all_models)}")
