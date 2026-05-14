@@ -9,7 +9,6 @@ core/prompt_injector.py — "Прокладка" (Middleware)
 
 import os
 import re
-import shlex
 from pathlib import Path
 
 from core.action_logger import get_logger
@@ -453,7 +452,7 @@ class PromptInjector:
         Модель использует эти форматы, а ResponseParser их парсит.
         """
         return """ФОРМАТ ОТВЕТА — ИНСТРУКЦИИ:
-Для работы с файлами и командами используй следующие формуры:
+Для работы с файлами и командами используй следующие форматы:
 
 1. Создать или перезаписать файл:
 <file path="относительный/путь/файла.py">

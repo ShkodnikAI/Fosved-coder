@@ -13,10 +13,7 @@ FOSVED CODER V2.0 — Observation Manager (вдохновлено claude-mem)
 
 import json
 import re
-import time
-import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from sqlalchemy import Text, select, delete, func, String, Boolean, Integer, Float, Index, and_, or_, desc, asc, text as sa_text, DateTime
 from sqlalchemy.orm import Mapped, mapped_column

@@ -252,6 +252,23 @@
         background: rgba(200,169,126,0.08);
     }
     .model-card-with-priority .model-card-info { flex: 1; min-width: 0; }
+    .msg-copy-btn {
+        position: absolute; top: 6px; right: 6px;
+        background: var(--bg-secondary); border: 1px solid var(--border);
+        border-radius: 6px; padding: 4px 8px; cursor: pointer;
+        font-size: 14px; opacity: 0; transition: opacity 0.2s;
+        z-index: 2; line-height: 1;
+    }
+    .msg:hover .msg-copy-btn, .msg.ai:hover .msg-copy-btn { opacity: 1; }
+    .msg-copy-btn:hover { background: var(--accent); color: var(--bg-primary); }
+    .probe-btn {
+        background: var(--bg-secondary); border: 1px solid var(--border);
+        border-radius: 6px; padding: 2px 10px; cursor: pointer;
+        font-size: 12px; color: var(--text-secondary);
+        transition: all 0.2s; margin-left: auto;
+    }
+    .probe-btn:hover { background: var(--accent); color: var(--bg-primary); border-color: var(--accent); }
+    .probe-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -392,10 +409,11 @@
         <!-- Ручка изменения размера (правая) -->
         <div class="resize-handle" id="hub-right-resize-handle"></div>
 
-        <!-- ПРАВАЯ ПАНЕЛЬ: Скиллы | Логи -->
+        <!-- ПРАВАЯ ПАНЕЛЬ: Скиллы | Модели | Логи -->
         <div class="right-panel" id="hub-right-panel">
             <div class="right-panel-tabs">
                 <div class="right-panel-tab active" data-rptab="hub-skills" onclick="switchHubRightTab('hub-skills')">⚡ Скиллы</div>
+                <div class="right-panel-tab" data-rptab="hub-models-tab" onclick="switchHubRightTab('hub-models-tab')">🤖 Модели</div>
                 <div class="right-panel-tab" data-rptab="hub-logs" onclick="switchHubRightTab('hub-logs')">📋 Логи</div>
             </div>
             <div class="right-panel-content">
@@ -403,6 +421,26 @@
                 <div class="right-panel-pane active" id="rp-hub-skills">
                     <div class="skills-panel-list" id="hub-skills-list">
                         <div class="panel-list-empty">Загрузка...</div>
+                    </div>
+                </div>
+                <!-- Вкладка: Модели (выбор и опрос) -->
+                <div class="right-panel-pane" id="rp-hub-models-tab">
+                    <div style="padding:8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <input type="text" id="model-selector-search" placeholder="Поиск моделей..." oninput="filterModelSelector(this.value)" style="flex:1;padding:5px 8px;font-size:11px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-md);font-family:var(--font-ui);">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="modelSelectorSelectAll(true)">✓ Все</button>
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="modelSelectorSelectAll(false)">✕ Сброс</button>
+                        </div>
+                        <button class="probe-btn" id="probe-selected-btn" onclick="startProbeSelected()" style="width:100%;margin:0;padding:6px;font-size:12px;text-align:center;">🔍 Опросить выбранные</button>
+                        <div id="probe-progress-bar" style="display:none;margin-top:6px;">
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;" id="probe-progress-text">0/0</div>
+                            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="probe-progress-fill" style="height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%"></div></div>
+                        </div>
+                    </div>
+                    <div id="model-selector-list" style="flex:1;overflow-y:auto;padding:6px;">
+                        <div class="panel-list-empty">Загрузка моделей...</div>
                     </div>
                 </div>
                 <!-- Вкладка: Логи -->
@@ -493,10 +531,10 @@
                     <textarea id="project-user-input" placeholder="Опишите задачу для ИИ..." rows="4" onkeydown="handleProjectKeyDown(event)"></textarea>
                         <div class="input-actions">
                             <div class="input-left">
-                                <label class="file-label file-label-attach">📎 <input type="file" id="project-file-input" style="display:none" onchange="handleProjectFile(event)" multiple>
+                                <label class="file-label file-label-attach">📎 <input type="file" id="project-file-input" style="display:none" onchange="handleFile(event)" multiple>
                                     <span id="project-file-preview" style="display:none" class="file-preview"></span>
                                 </label>
-                                <button id="project-file-remove" class="file-remove" onclick="removeProjectAttachedFile()" style="display:none" title="Убрать">✕</button>
+                                <button id="project-file-remove" class="file-remove" onclick="removeAttachedFile()" style="display:none" title="Убрать">✕</button>
                                 <button id="project-retry-btn" class="btn-retry" onclick="retryLastMessage()" style="display:none">🔄</button>
                             </div>
                             <div class="input-center">
@@ -518,15 +556,36 @@
         <!-- Ручка изменения размера (правая) -->
         <div class="resize-handle" id="proj-right-resize-handle"></div>
 
-        <!-- ПРАВАЯ ПАНЕЛЬ: Логи | Git -->
+        <!-- ПРАВАЯ ПАНЕЛЬ: Модели | Логи | Git -->
         <div class="right-panel" id="project-right-panel">
             <div class="right-panel-tabs">
-                <div class="right-panel-tab active" data-rptab="proj-logs" onclick="switchProjRightTab('proj-logs')">📋 Логи</div>
+                <div class="right-panel-tab active" data-rptab="proj-models-tab" onclick="switchProjRightTab('proj-models-tab')">🤖 Модели</div>
+                <div class="right-panel-tab" data-rptab="proj-logs" onclick="switchProjRightTab('proj-logs')">📋 Логи</div>
                 <div class="right-panel-tab" data-rptab="proj-git" onclick="switchProjRightTab('proj-git')">🔀 Git</div>
             </div>
             <div class="right-panel-content">
+                <!-- Вкладка: Модели (выбор и опрос) -->
+                <div class="right-panel-pane active" id="rp-proj-models-tab">
+                    <div style="padding:8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <input type="text" id="proj-model-selector-search" placeholder="Поиск моделей..." oninput="filterProjModelSelector(this.value)" style="flex:1;padding:5px 8px;font-size:11px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-md);font-family:var(--font-ui);">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="projModelSelectorSelectAll(true)">✓ Все</button>
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="projModelSelectorSelectAll(false)">✕ Сброс</button>
+                        </div>
+                        <button class="probe-btn" id="proj-probe-selected-btn" onclick="startProbeSelected()" style="width:100%;margin:0;padding:6px;font-size:12px;text-align:center;">🔍 Опросить выбранные</button>
+                        <div id="proj-probe-progress-bar" style="display:none;margin-top:6px;">
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;" id="proj-probe-progress-text">0/0</div>
+                            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="proj-probe-progress-fill" style="height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%"></div></div>
+                        </div>
+                    </div>
+                    <div id="proj-model-selector-list" style="flex:1;overflow-y:auto;padding:6px;">
+                        <div class="panel-list-empty">Загрузка моделей...</div>
+                    </div>
+                </div>
                 <!-- Вкладка: Логи проекта -->
-                <div class="right-panel-pane active" id="rp-proj-logs">
+                <div class="right-panel-pane" id="rp-proj-logs">
                     <div class="right-panel-header" style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
                         <div class="right-panel-title">
                             Логи <span class="log-badge" id="proj-log-badge" style="display:none">0</span>
@@ -588,6 +647,10 @@
     <div class="status-section">
         <span class="status-label">Модель:</span>
         <span class="status-content" id="status-model">—</span>
+    </div>
+    <div class="status-section">
+        <span class="status-label">Модели:</span>
+        <span class="status-content" id="status-models-count">—</span>
     </div>
     <div class="status-section">
         <span class="status-label">Экран:</span>
@@ -791,6 +854,10 @@ let autoModeRunning = false;
 let priorityModels = [];
 // Восстановить приоритеты из localStorage
 try { const saved = localStorage.getItem('fosved-priority-models'); if (saved) priorityModels = JSON.parse(saved); } catch(e) {}
+// ═══ Явно проверенные модели (только через ручной опрос из UI) ═══
+let explicitlyProbedIds = new Set();
+try { const s = localStorage.getItem('fosved-probed-ids'); if (s) explicitlyProbedIds = new Set(JSON.parse(s)||[]); } catch(e) {}
+function _saveProbedIds() { try { localStorage.setItem('fosved-probed-ids', JSON.stringify([...explicitlyProbedIds])); } catch(e) {} }
 let currentLogFilter = "all";
 let autoLogCount = 0;
 let autoLogPanelVisible = true;
@@ -1049,7 +1116,7 @@ function addMessageTo(type, text, targetChatBox) {
     const chatBox = targetChatBox || getActiveChatBox();
     const div = document.createElement("div");
     div.className = "msg " + type;
-    if (type === "ai") { div.innerHTML = renderMarkdown(text); addCopyButtons(div); addMessageCopyButton(div); }
+    if (type === "ai") { div.innerHTML = renderMarkdown(text); addCopyButtons(div); _addFullCopyButton(div, text); }
     else if (type === "terminal") { const pre = document.createElement("pre"); const code = document.createElement("code"); code.textContent = text; pre.appendChild(code); div.appendChild(pre); }
     else if (type === "idea") { div.innerHTML = renderMarkdown(text); }
     else { div.textContent = text; }
@@ -1097,7 +1164,7 @@ function flushAiRender() {
     if (ctx.div) {
         ctx.div.innerHTML = renderMarkdown(ctx.text);
         addCopyButtons(ctx.div);
-        addMessageCopyButton(ctx.div);
+        _addFullCopyButton(ctx.div, ctx.text);
         ctx.chatBox.scrollTop = ctx.chatBox.scrollHeight;
     }
     _aiRenderPending = false;
@@ -1113,8 +1180,8 @@ function addCopyButtons(container) {
         const lang = langClass ? langClass.replace("language-", "") : "";
         const bar = document.createElement("div");
         bar.className = "code-btn-bar";
-        const cb = document.createElement("button"); cb.className = "code-btn"; cb.textContent = "📋";
-        cb.onclick = () => { navigator.clipboard.writeText(codeText).then(() => { cb.textContent = "✅"; setTimeout(() => cb.textContent = "📋", 2000); }); };
+        const cb = document.createElement("button"); cb.className = "code-btn"; cb.textContent = "Копировать";
+        cb.onclick = () => { navigator.clipboard.writeText(codeText).then(() => { cb.textContent = "OK"; setTimeout(() => cb.textContent = "Копировать", 2000); }); };
         bar.appendChild(cb);
         if (lang) {
             const sb = document.createElement("button"); sb.className = "code-btn save"; sb.textContent = "💾";
@@ -1126,19 +1193,19 @@ function addCopyButtons(container) {
     });
 }
 
-// ─── Кнопка копирования всего ответа ИИ ───
-function addMessageCopyButton(msgDiv) {
-    if (msgDiv.querySelector(".msg-copy-btn")) return;
-    if (!msgDiv.classList.contains("ai")) return;
-    const btn = document.createElement("button");
-    btn.className = "msg-copy-btn";
-    btn.textContent = "📋 Копировать";
-    btn.title = "Копировать весь ответ";
-    btn.onclick = () => {
-        const text = msgDiv.innerText || msgDiv.textContent;
-        navigator.clipboard.writeText(text).then(() => {
-            btn.textContent = "✅ Скопировано";
-            setTimeout(() => btn.textContent = "📋 Копировать", 2000);
+/** Добавить кнопку копирования всего ответа (в правый верхний угол сообщения) */
+function _addFullCopyButton(msgDiv, rawText) {
+    if (!rawText || msgDiv.querySelector('.msg-copy-btn')) return;
+    msgDiv.style.position = 'relative';
+    const btn = document.createElement('button');
+    btn.className = 'msg-copy-btn';
+    btn.textContent = '📋';
+    btn.title = 'Копировать ответ';
+    btn.onclick = (e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(rawText).then(() => {
+            btn.textContent = '✓';
+            setTimeout(() => { btn.textContent = '📋'; }, 1500);
         });
     };
     msgDiv.appendChild(btn);
@@ -1306,18 +1373,11 @@ function setHubWaitingAI(state) {
 }
 
 function stopGeneration() {
-    // 1. Send stop signal to server
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({type: "stop_generation"}));
         addClientLog('ws', '⛔ Stop generation requested');
     }
-    // 2. Clear ALL queued messages — prevent auto-flood after stop
-    if (wsMessageQueue.length > 0) {
-        addClientLog('ws', 'Cleared ' + wsMessageQueue.length + ' queued messages');
-    }
-    wsMessageQueue = [];
-    try { localStorage.removeItem("fosved-ws-q"); } catch(e) {}
-    // 3. Immediately hide stop button, reset waiting state
+    // Immediately hide stop button, reset waiting state
     setWaitingAI(false);
     setHubWaitingAI(false);
 }
@@ -1329,14 +1389,16 @@ function sendMessage() {
     const input = document.getElementById("project-user-input");
     const text = input.value.trim();
     if (!text && !attachedFile) return;
-    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
-    if (!activeModelId) { showToast("Выберите модель", "error"); return; }
+    // Если нет явного выбора — роутер сам подберёт модель
+    // Но нужны проверенные модели!
+    if (explicitlyProbedIds.size === 0 && !activeModelId) { showToast("Сначала опросите модели", "error"); return; }
     addClientLog('project_message', 'Sent project message: ' + text.substring(0, 80));
     let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
     addMessage("user", displayText);
     setWaitingAI(true);
-    let payload = { type: "chat", prompt: text, model: activeModelId, mode: workMode, project_id: currentProjectId };
+    let payload = { type: "chat", prompt: text, model: activeModelId || null, mode: workMode, project_id: currentProjectId };
     if (priorityModels.length) payload.priority_models = priorityModels;
+    payload.explicitly_probed_ids = [...explicitlyProbedIds];
     if (attachedFile) payload.file_content = attachedFile.content;
     wsSend(payload);
     lastSentMessage = text;
@@ -1350,12 +1412,11 @@ function sendMessage() {
 
 function retryLastMessage() {
     if (!lastSentPayload) return;
-    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
-    if (!activeModelId) return;
     addMessage("user", "🔄 [Повтор] " + (lastSentMessage||''));
     setWaitingAI(true);
-    let payload = { ...lastSentPayload, model: activeModelId };
+    let payload = { ...lastSentPayload, model: activeModelId || null };
     if (priorityModels.length) payload.priority_models = priorityModels;
+    payload.explicitly_probed_ids = [...explicitlyProbedIds];
     wsSend(payload);
 }
 
@@ -1366,15 +1427,14 @@ function sendHubMessage() {
     const input = document.getElementById("hub-user-input");
     const text = input.value.trim();
     if (!text && !hubAttachedFile) return;
-    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
-    if (!activeModelId) { showToast("Выберите модель", "error"); return; }
+    if (explicitlyProbedIds.size === 0 && !activeModelId) { showToast("Сначала опросите модели", "error"); return; }
     addClientLog('hub_message', 'Sent hub message: ' + text.substring(0, 80));
     let displayText = hubAttachedFile ? "📎 " + hubAttachedFile.filename + "\n" + text : text;
     addMessageTo("user", displayText);
     setHubWaitingAI(true);
-    // Отправляем как hub_chat
-    let payload = { type: "hub_chat", prompt: text, model_id: activeModelId };
+    let payload = { type: "hub_chat", prompt: text, model_id: activeModelId || null };
     if (priorityModels.length) payload.priority_models = priorityModels;
+    payload.explicitly_probed_ids = [...explicitlyProbedIds];
     if (hubAttachedFile) payload.file_content = hubAttachedFile.content;
     wsSend(payload);
     lastHubSentMessage = text;
@@ -1388,12 +1448,11 @@ function sendHubMessage() {
 
 function retryHubMessage() {
     if (!lastHubSentPayload) return;
-    if (!activeModelId && priorityModels.length) activeModelId = priorityModels[0];
-    if (!activeModelId) return;
     addMessageTo("user", "🔄 [Повтор] " + (lastHubSentMessage||''), hubChatBox);
     setHubWaitingAI(true);
-    let payload = { ...lastHubSentPayload, model_id: activeModelId };
+    let payload = { ...lastHubSentPayload, model_id: activeModelId || null };
     if (priorityModels.length) payload.priority_models = priorityModels;
+    payload.explicitly_probed_ids = [...explicitlyProbedIds];
     wsSend(payload);
 }
 
@@ -1534,9 +1593,8 @@ let wsIsStable = false;
 let wsStableTimer = null;
 let wsPingTimer = null;
 let wsMessageQueue = [];
-// DON'T load old messages from localStorage — they cause auto-replay floods
-// try { const s = localStorage.getItem("fosved-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
-function persistQ() { try { localStorage.setItem("fosved-ws-q", JSON.stringify(wsMessageQueue.slice(-3))); } catch(e) {} }
+try { const s = localStorage.getItem("fosved-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
+function persistQ() { try { localStorage.setItem("fosved-ws-q", JSON.stringify(wsMessageQueue.slice(-50))); } catch(e) {} }
 
 function wsSend(data) {
     const msg = typeof data === 'string' ? data : JSON.stringify(data);
@@ -1587,9 +1645,8 @@ function wsConnect() {
         if (allModels.length === 0) loadModels();
         if (allProjects.length === 0) loadProjects();
         loadServerLogs({limit: 200});
-        // DON'T drain queue on connect — server sends clear_queue to wipe stale messages.
-        // Queue is only for messages sent during brief WS disconnections in current session.
-        try { localStorage.removeItem("fosved-ws-q"); } catch(e) {}
+        while (wsMessageQueue.length > 0) { ws.send(wsMessageQueue.shift()); }
+        persistQ();
     };
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -1597,6 +1654,13 @@ function wsConnect() {
         // Пинг/понг
         if (data.type === "pong" || data.type === "ping") {
             if (data.type==="ping") try{ws.send(JSON.stringify({type:"pong"}));}catch(e){}
+            return;
+        }
+
+        // Сервер запросил очистку очереди сообщений
+        if (data.type === "clear_queue") {
+            wsMessageQueue = [];
+            persistQ();
             return;
         }
 
@@ -1652,7 +1716,7 @@ function wsConnect() {
             return;
         }
 
-        // ─── Ошибка — в панель логов; на главном экране НЕ в чат ───
+        // ─── Ошибка — в чат И в панель логов ───
         if (data.type === "error") {
             const ctx = getActiveAiContext();
             if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
@@ -1661,10 +1725,7 @@ function wsConnect() {
             updateHeaderModelBadge(null);
             if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
             else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
-            // На главном экране — только в логи (не засоряем чат системными ошибками)
-            if (currentScreen !== "main") {
-                addMessage("error", data.content || "Произошла ошибка");
-            }
+            addMessage("error", data.content || "Произошла ошибка");
             addLogEntryToPanel({level:'error',source:'error',action:data.content||'Произошла ошибка',time:new Date().toLocaleTimeString()});
             return;
         }
@@ -1749,13 +1810,9 @@ function wsConnect() {
             return;
         }
 
-        // ─── Сервер требует очистить очередь сообщений ───
-        if (data.type === "clear_queue") {
-            if (wsMessageQueue.length > 0) {
-                addClientLog('ws', 'Queue cleared by server: ' + wsMessageQueue.length + ' messages');
-            }
-            wsMessageQueue = [];
-            try { localStorage.removeItem("fosved-ws-q"); } catch(e) {}
+        // ─── Прогресс опроса выбранных моделей ───
+        if (data.type === "probe_progress") {
+            handleProbeProgress(data);
             return;
         }
 
@@ -1824,10 +1881,40 @@ function updateHeaderModelBadge(name, state) {
 // ОБРАБОТЧИКИ НОВЫХ ТИПОВ СООБЩЕНИЙ (V2.0)
 // ═══════════════════════════════════════════════════════
 
-/** Результаты зондирования моделей */
+/** Показать в панели ТОЛЬКО явно проверенные модели (прошедшие ручной probe) */
+function _showProbedOnlyModels() {
+    if (!allModels.length) {
+        ['hub-models-list', 'proj-models-list'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '<div class="panel-list-empty">Модели загружаются...</div>';
+        });
+        return;
+    }
+    // Фильтруем ТОЛЬКО по explicitlyProbedIds (не по status от key validation!)
+    const probed = allModels.filter(m => explicitlyProbedIds.has(m.id));
+    if (probed.length === 0) {
+        // Нет явно проверенных — сбрасываем активную модель
+        activeModelId = null;
+        updateInputPlaceholders();
+        ['hub-models-list', 'proj-models-list'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '<div class="panel-list-empty">Откройте вкладку \u{1F916} Модели справа и нажмите "\u{1F50D} Опросить выбранные"</div>';
+        });
+        updateStatusBar();
+        return;
+    }
+    renderModels();
+    // НЕ авто-выбираем модель — пользователь выбирает вручную из левой панели
+    // Если activeModelId не в explicitlyProbedIds — сбрасываем
+    if (activeModelId && !explicitlyProbedIds.has(activeModelId)) {
+        activeModelId = null;
+        updateInputPlaceholders();
+    }
+    document.getElementById('setup-banner').style.display = 'none';
+}
+
+/** Результаты зондирования моделей — ТОЛЬКО помечаем как явно проверенные */
 function handleProbedModels(models) {
-    // Store probed model IDs globally for renderModels filtering
-    window._probedModelIds = (models || []).map(m => m.model_id || m.id).filter(Boolean);
     const indicator = document.getElementById('probed-indicator');
     if (!indicator) return;
     const total = allModels.length;
@@ -1838,11 +1925,20 @@ function handleProbedModels(models) {
     if (barFill && total > 0) {
         barFill.style.width = Math.round(((models ? models.length : 0) / total) * 100) + '%';
     }
-    // Перезагрузить модели с фильтром — только проверенные
+    // Помечаем модели как ЯВНО проверенные и перерисовываем
     if (models && models.length) {
-        loadModels(); // loadModels() теперь сама решает: probed_only или все
+        models.forEach(probed => {
+            const mid = probed.model_id || probed.id;
+            explicitlyProbedIds.add(mid);  // Явная пометка
+            const m = allModels.find(x => x.id === mid);
+            if (m) {
+                if (probed.status) m.status = probed.status;
+                m._probed = true;
+            }
+        });
+        _saveProbedIds();
+        _showProbedOnlyModels();
     }
-    // НЕ показываем toast — тихий режим
 }
 
 /** Анкета создана */
@@ -1909,7 +2005,7 @@ function buildModelCard(m, type) {
 
     const activeCheck = isActive ? ' <span style="color:var(--green);font-size:11px;margin-left:2px;">✓</span>' : '';
 
-    return `<div class="model-card-with-priority${isActive?' active':''}" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name||'').toLowerCase()}" onclick="selectModel('${escapeHtml(m.id)}')" oncontextmenu="event.preventDefault();toggleModelPriority('${escapeHtml(m.id)}')">
+    return `<div class="model-card-with-priority${isActive?' active':''}" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name||'').toLowerCase()}" onclick="selectModel('${escapeHtml(m.id).replace(/'/g, "\\'")}')" oncontextmenu="event.preventDefault();toggleModelPriority('${escapeHtml(m.id).replace(/'/g, "\\'")}')">
         <div class="model-priority-btn${pActive}" onclick="event.stopPropagation();cycleModelPriority('${escapeHtml(m.id)}')" title="Приоритет: ${pLabel||'нет'}">${pLabel||'–'}</div>
         <div class="model-card-avatar" style="background:${avColor}">${initials}</div>
         <div class="model-card-info">
@@ -1932,26 +2028,14 @@ function renderModels() {
         updateStatusBar();
         return;
     }
-    // Only show models that passed probe (status=valid) or are local/custom
-    // Hide models that haven't been probed yet (still "available" without probe confirmation)
-    const probedIds = new Set((window._probedModelIds || []));
-    const hasProbeData = probedIds.size > 0;
-    const usable = allModels.filter(m => {
-        // Local/custom models always shown
-        if (m.type === 'local' || m.type === 'custom') return true;
-        // If no probe data yet, show valid/rate_limited only (hide plain "available")
-        if (!hasProbeData) return m.status === 'valid' || m.status === 'rate_limited';
-        // With probe data: only show probed models
-        if (m.status === 'valid') return true;
-        if (m.status === 'rate_limited') return true;
-        return probedIds.has(m.id);
-    });
+    // Показываем ТОЛЬКО явно проверенные модели (через ручной опрос)
+    const probedModels = allModels.filter(m => explicitlyProbedIds.has(m.id));
     const mc = document.getElementById('hub-models-count');
-    if (mc) mc.textContent = usable.length ? usable.length + '/' + allModels.length : '';
+    if (mc) mc.textContent = probedModels.length ? probedModels.length + '/' + allModels.length : '';
 
-    // Задача 4: Сортировка — valid → rate_limited(в низ) → available
+    // Сортировка — valid → rate_limited(в низ)
     const _probeRank = (s) => s === 'valid' ? 0 : s === 'rate_limited' ? 2 : s === 'available' ? 1 : 0;
-    const sorted = [...allModels].sort((a, b) => {
+    const sorted = [...probedModels].sort((a, b) => {
         // Приоритетные модели всегда первые
         const pa = priorityModels.indexOf(a.id);
         const pb = priorityModels.indexOf(b.id);
@@ -1965,9 +2049,9 @@ function renderModels() {
         return (a.name||'').localeCompare(b.name||'');
     });
 
-    const abacus = sorted.filter(m=>m.provider==='abacus'&&(m.status==='valid'||m.status==='rate_limited'));
-    const paidValid = sorted.filter(m=>m.type==="paid"&&(m.status==='valid'||m.status==='rate_limited')&&m.provider!=='abacus');
-    const free = sorted.filter(m=>m.type==='free');
+    const abacus = sorted.filter(m=>m.provider==='abacus');
+    const paidValid = sorted.filter(m=>m.type==="paid"&&m.provider!=='abacus');
+    const free = sorted.filter(m=>m.type==='free'&&(m.status==='valid'||m.status==='rate_limited'));
     const local = sorted.filter(m=>m.type==='local');
     const custom = sorted.filter(m=>m.type==='custom');
     let html = '';
@@ -2030,21 +2114,13 @@ function cycleModelPriority(id) {
 
 async function loadModels() {
     try {
-        // Если есть результаты probe — запрашиваем только проверенные модели
-        const hasProbeData = window._probedModelIds && window._probedModelIds.length > 0;
-        const url = hasProbeData ? '/api/v1/models?probed_only=true' : '/api/v1/models';
-        const resp = await fetch(url);
+        const resp = await fetch("/api/v1/models");
         const data = await resp.json();
         allModels = data.models || [];
-        renderModels();
-        const usable = allModels.filter(m => m.status==='valid'||m.status==='rate_limited'||m.status==='available');
-        if (usable.length===0 && allModels.length>0) {
-            document.getElementById('setup-banner').style.display = 'flex';
-            if (!activeModelId && allModels.length>0) activeModelId = allModels[0].id;
-        } else if (usable.length>0) {
-            document.getElementById('setup-banner').style.display = 'none';
-            if (!activeModelId) { activeModelId = usable[0].id; renderModels(); updateInputPlaceholders(); }
-        }
+        // НЕ рендерим сразу — показываем только проверенные модели.
+        // Пустая панель до тех пор, пока не придут результаты probe.
+        _showProbedOnlyModels();
+        renderModelSelectorLists(); // ← Заполняем селектор ВСЕМИ моделями
         updateLoadingBar(80, 'Модели загружены...');
         hideLoadingScreen();
     } catch(e) { console.error("Models error:", e); hideLoadingScreen(); }
@@ -2084,7 +2160,174 @@ function toggleModelPriority(id) {
 async function refreshModels() {
     showToast('Обновление моделей...', 'info');
     await loadModels();
+    renderModelSelectorLists();
     renderModels();
+}
+
+// ═══════════════════════════════════════════════════════
+// МОДЕЛЬНЫЙ СЕЛЕКТОР (вкладка 🤖 Модели в правой панели)
+// ═══════════════════════════════════════════════════════
+
+/** Состояние: какие модели отмечены в селекторе */
+let _modelSelectorChecked = new Set();
+
+/** Построить HTML строки для одной модели в селекторе */
+function _buildModelSelectorItem(m) {
+    const checked = _modelSelectorChecked.has(m.id) ? 'checked' : '';
+    const tagHtml = {paid:'<span class="type-tag paid">paid</span>',free:'<span class="type-tag free">free</span>',local:'<span class="type-tag local">local</span>',custom:'<span class="type-tag custom">custom</span>',abacus:'<span class="type-tag abacus">abacus</span>'}[m.type]||'';
+    const prov = m.provider_name ? escapeHtml(m.provider_name) : '';
+    const isProbed = m._probed ? '<span style="color:var(--green);font-size:10px;margin-left:2px;">✓</span>' : '';
+    return `<div class="model-selector-item" data-id="${escapeHtml(m.id)}" data-name="${escapeHtml((m.name||'').toLowerCase())}" style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;" onclick="this.querySelector('input').click()">
+        <input type="checkbox" ${checked} data-model-id="${escapeHtml(m.id)}" onchange="_modelSelectorToggle('${escapeHtml(m.id)}',this.checked)" style="flex-shrink:0;cursor:pointer;">
+        <div style="flex:1;min-width:0;">
+            <div style="font-size:11px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(m.name)}${isProbed}</div>
+            <div style="font-size:9px;color:var(--text-dim);">${prov} ${tagHtml}</div>
+        </div>
+    </div>`;
+}
+
+function _modelSelectorToggle(id, checked) {
+    if (checked) _modelSelectorChecked.add(id);
+    else _modelSelectorChecked.delete(id);
+}
+
+/** Отрендерить списки моделей в селекторе — сгруппированные по операторам с выбором блоками */
+function renderModelSelectorLists() {
+    if (!allModels.length) return;
+    // Группируем по провайдеру (оператору)
+    const groups = {};
+    allModels.forEach(m => {
+        const prov = m.provider_name || m.provider || 'Other';
+        if (!groups[prov]) groups[prov] = [];
+        groups[prov].push(m);
+    });
+    let html = '';
+    for (const [provName, models] of Object.entries(groups)) {
+        const allChecked = models.length > 0 && models.every(m => _modelSelectorChecked.has(m.id));
+        const someChecked = models.some(m => _modelSelectorChecked.has(m.id));
+        const checkIcon = allChecked ? '\u2705' : (someChecked ? '\u25A3' : '\u25A2');
+        const checkedCount = models.filter(m => _modelSelectorChecked.has(m.id)).length;
+        // Заголовок группы — кликабельный для выбора/снятия блока
+        html += `<div class="model-selector-group" style="border-bottom:1px solid var(--border);">`;
+        html += `<div class="model-selector-group-header" onclick="toggleModelSelectorGroup('${escapeHtml(provName)}')" style="display:flex;align-items:center;gap:6px;padding:6px 6px 2px;cursor:pointer;background:var(--bg-hover);">`;
+        html += `<span style="font-size:12px;">${checkIcon}</span>`;
+        html += `<div style="flex:1;min-width:0;">`;
+        html += `<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(provName)}</div>`;
+        html += `</div>`;
+        html += `<span style="font-size:9px;color:var(--text-dim);white-space:nowrap;">${checkedCount}/${models.length}</span>`;
+        html += `</div>`;
+        models.forEach(m => { html += _buildModelSelectorItem(m); });
+        html += `</div>`;
+    }
+    if (!html) html = '<div class="panel-list-empty">Нет моделей</div>';
+    const el1 = document.getElementById('model-selector-list');
+    const el2 = document.getElementById('proj-model-selector-list');
+    if (el1) el1.innerHTML = html;
+    if (el2) el2.innerHTML = html;
+}
+
+/** Выбрать/снять все модели в группе оператора */
+function toggleModelSelectorGroup(provName) {
+    const groupModels = allModels.filter(m => (m.provider_name || m.provider || 'Other') === provName);
+    const allChecked = groupModels.length > 0 && groupModels.every(m => _modelSelectorChecked.has(m.id));
+    if (allChecked) {
+        groupModels.forEach(m => _modelSelectorChecked.delete(m.id));
+    } else {
+        groupModels.forEach(m => _modelSelectorChecked.add(m.id));
+    }
+    renderModelSelectorLists();
+}
+
+function modelSelectorSelectAll(selectAll) {
+    if (selectAll) {
+        allModels.forEach(m => _modelSelectorChecked.add(m.id));
+    } else {
+        _modelSelectorChecked.clear();
+    }
+    renderModelSelectorLists();
+}
+
+function projModelSelectorSelectAll(selectAll) {
+    modelSelectorSelectAll(selectAll);
+}
+
+function filterModelSelector(q) {
+    q = q.toLowerCase();
+    document.querySelectorAll('#model-selector-list .model-selector-item').forEach(el => {
+        el.style.display = el.dataset.name.includes(q) ? '' : 'none';
+    });
+}
+
+function filterProjModelSelector(q) {
+    q = q.toLowerCase();
+    document.querySelectorAll('#proj-model-selector-list .model-selector-item').forEach(el => {
+        el.style.display = el.dataset.name.includes(q) ? '' : 'none';
+    });
+}
+
+/** Запустить опрос выбранных моделей */
+function startProbeSelected() {
+    const selected = Array.from(_modelSelectorChecked);
+    if (!selected.length) {
+        showToast('Выберите хотя бы одну модель', 'warning');
+        return;
+    }
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        showToast('Нет подключения к серверу', 'error');
+        return;
+    }
+    // Отключаем кнопку
+    document.querySelectorAll('#probe-selected-btn, #proj-probe-selected-btn').forEach(btn => {
+        btn.disabled = true;
+        btn.textContent = '⏳ Опрос...';
+    });
+    // Показать прогресс-бар
+    document.querySelectorAll('#probe-progress-bar, #proj-probe-progress-bar').forEach(el => {
+        el.style.display = 'block';
+        el.querySelector('[id$="-text"]').textContent = `0/${selected.length}`;
+        el.querySelector('[id$="-fill"]').style.width = '0%';
+    });
+    wsSend({ type: "probe_selected", models: selected });
+    // Таймаут разблокировки
+    setTimeout(() => {
+        document.querySelectorAll('#probe-selected-btn, #proj-probe-selected-btn').forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = '🔍 Опросить выбранные';
+        });
+    }, 120000);
+}
+
+/** Обработать probe_progress — обновить UI прогресс */
+function handleProbeProgress(data) {
+    const total = data.total || 0;
+    const done = data.done || 0;
+    const ok = data.ok || 0;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const text = `${ok}✓ ${done - ok}✗ / ${total}`;
+
+    document.querySelectorAll('#probe-progress-text, #proj-probe-progress-text').forEach(el => {
+        el.textContent = text;
+    });
+    document.querySelectorAll('#probe-progress-fill, #proj-probe-progress-fill').forEach(el => {
+        el.style.width = pct + '%';
+    });
+
+    if (data.finished) {
+        document.querySelectorAll('#probe-progress-bar, #proj-probe-progress-bar').forEach(el => {
+            setTimeout(() => { el.style.display = 'none'; }, 2000);
+        });
+        document.querySelectorAll('#probe-selected-btn, #proj-probe-selected-btn').forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = '🔍 Опросить выбранные';
+        });
+        // Пометить опрошенные модели в селекторе
+        allModels.forEach(m => {
+            // Модели, которые уже в probed_models списке, пометим
+            const probed = m.status === 'valid';
+            m._probed = probed;
+        });
+        renderModelSelectorLists();
+    }
 }
 
 function showAddLocalModelModal() {
@@ -2410,7 +2653,11 @@ function addLogEntryToPanel(entry) {
 function handleAutoLog(data) {
     const entry = {level:data.level||'info',source:data.source||'',action:data.content||data.message||data.action||'',time:data.time||new Date().toLocaleTimeString()};
     addLogEntryToPanel(entry);
-    // НЕ переключаем автоматически на вкладку логов — тихий режим
+    // Auto-switch to Logs tab when first log arrives
+    if (autoLogCount === 1) {
+        if (currentScreen === 'main') switchHubRightTab('hub-logs');
+        else switchProjRightTab('proj-logs');
+    }
 }
 
 function updateLogBadge() {
@@ -2498,7 +2745,7 @@ function renderBottomBar() {
         }
     } else {
         btns = [
-            {l:'🔍 Probe',a:"insertHubCommand('/probe ')"},
+            {l:'🔍 Probe',a:"startProbeSelected()"},
             {l:'📊 Stats',a:"showStats()"},
             {l:'⚙️ Settings',a:"showSettings()"},
             {l:'❓ Help',a:"showHelp()"},
@@ -2522,6 +2769,10 @@ function updateStatusBar() {
     const modelEl = document.getElementById('status-model');
     const m = allModels.find(x=>x.id===activeModelId);
     modelEl.innerHTML = m ? `<span class="status-dot green"></span>${escapeHtml(m.name)}` : '—';
+    // Модели: показываем сколько прошли опрос из скольких всего
+    const mcEl = document.getElementById('status-models-count');
+    const probedCount = allModels.filter(m => explicitlyProbedIds.has(m.id)).length;
+    mcEl.textContent = probedCount > 0 ? `${probedCount}/${allModels.length}` : `${allModels.length} всего`;
 }
 
 // ═══════════════════════════════════════════════════════

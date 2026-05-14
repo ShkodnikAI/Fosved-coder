@@ -7,7 +7,6 @@ import yaml
 import asyncio
 import aiohttp
 import litellm
-from typing import Optional
 
 from core.action_logger import get_logger
 logger = get_logger()
@@ -513,6 +512,9 @@ class KeysManager:
                 pass
             if "401" in error_str or "unauthorized" in error_str or "authentication" in error_str:
                 return {"status": "invalid", "error": "Неверный API ключ"}
+            elif "400" in error_str or "bad request" in error_str:
+                # 400 = клиентская ошибка (неправильный запрос/модель/формат) — ключ скорее всего нерабочий
+                return {"status": "invalid", "error": f"Ошибка запроса (400): {str(e)[:100]}"}
             elif "429" in error_str or "rate" in error_str or "quota" in error_str:
                 return {"status": "rate_limited", "error": "Лимит запросов исчерпан или нет средств"}
             elif "insufficient" in error_str or "billing" in error_str or "402" in error_str or "payment" in error_str or "credits" in error_str or "no credits" in error_str or "balance" in error_str:
@@ -1132,11 +1134,11 @@ class KeysManager:
         for provider_id, config in self.providers.items():
             if not config.get("enabled", True):
                 continue  # Пропускаем отключённые провайдеры
-            if config.get("status") in ("invalid",) and not config.get("api_key"):
-                continue  # Пропускаем невалидные без ключа
+            status = config.get("status", "not_configured")
+            if status in ("invalid", "no_key"):
+                continue  # Пропускаем невалидные провайдеры — их модели не работают
             provider_def = PROVIDER_DEFS.get(provider_id, {})
             prefix = config.get("litellm_prefix", provider_id)
-            status = config.get("status", "not_configured")
             thinking_models = provider_def.get("thinking_models", [])
             categories = provider_def.get("model_categories", {})
 
@@ -1341,14 +1343,6 @@ class KeysManager:
                 }
 
         return None
-
-    def toggle_provider(self, provider_id: str, enabled: bool) -> dict:
-        """Включить/выключить провайдер (модели скрываются из списка)."""
-        if provider_id not in self.providers:
-            return {"success": False, "error": f"Провайдер {provider_id} не настроен"}
-        self.providers[provider_id]["enabled"] = enabled
-        self._save_keys()
-        return {"success": True, "provider": provider_id, "enabled": enabled}
 
     def get_provider_status(self) -> dict:
         """Статус всех провайдеров."""

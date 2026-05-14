@@ -1,6 +1,5 @@
 import asyncio
 import re
-import sys
 import os
 import shlex
 from datetime import datetime

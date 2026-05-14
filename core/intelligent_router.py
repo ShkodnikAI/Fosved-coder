@@ -10,8 +10,6 @@ Fosved Coder V2.0 — Intelligent Router (Task 5)
 Работает прозрачно: пользователь пишет как обычно, система сама решает.
 Все действия отображаются в лог-панели.
 """
-import re
-
 from core.action_logger import get_logger
 logger = get_logger()
 
@@ -99,7 +97,6 @@ class IntelligentRouter:
 
     def __init__(self):
         self._classification_cache: dict = {}  # Кэш последних классификаций
-        self._fallback_index: int = 0  # Ротация fallback моделей
 
     def classify(self, user_prompt: str) -> dict:
         """
@@ -180,6 +177,10 @@ class IntelligentRouter:
         user_prompt: str,
         available_models: list[dict],
         user_preferred_model: str = None,
+        probed_model_ids: set = None,
+        failed_probe_ids: set = None,
+        has_been_probed: bool = False,
+        priority_models: list = None,
     ) -> dict:
         """
         Выбрать модель на основе классификации задачи.
@@ -188,6 +189,10 @@ class IntelligentRouter:
             user_prompt: текст сообщения пользователя
             available_models: список моделей от keys_manager.get_all_models()
             user_preferred_model: ID модели, выбранной пользователем вручную
+            probed_model_ids: множество ID моделей, прошедших probe
+            failed_probe_ids: множество ID моделей, НЕ прошедших probe
+            has_been_probed: True если probe когда-либо запускался
+            priority_models: список ID моделей в порядке приоритета (от клиента)
 
         Returns:
             {
@@ -209,20 +214,43 @@ class IntelligentRouter:
                 "overridden": False,
             }
 
+        # Если пользователь выставил приоритеты — берём первую приоритетную модель
+        # из тех, что прошли probe (номера на карточках = порядок)
+        if priority_models:
+            probed_set = probed_model_ids or set()
+            for pm_id in priority_models:
+                if pm_id in probed_set:
+                    m = next((x for x in available_models if x.get("id") == pm_id), None)
+                    if m:
+                        return {
+                            "model_id": m["id"],
+                            "model_name": m.get("name", m["id"]),
+                            "complexity": "priority",
+                            "reason": f"Приоритетная модель #{priority_models.index(pm_id)+1}: {m.get('name', m['id'])}",
+                            "overridden": True,
+                        }
+
         classification = self.classify(user_prompt)
         complexity = classification["complexity"]
 
+        # ── ФИКС glm-5.1 cycling ──
+        # Если probe БЫЛ запущен, но НЕТ проверенных моделей — возврат пустой
+        if has_been_probed and not probed_model_ids:
+            return {
+                "model_id": "",
+                "model_name": "",
+                "complexity": complexity,
+                "reason": "Нет моделей, прошедших опрос.",
+                "overridden": False,
+            }
+
+        # ── Фильтрация: ТОЛЬКО проверенные модели ──
+        # Если есть результаты probe — используем только проверенные модели
+        has_probe_data = probed_model_ids or failed_probe_ids
+
         # Разделяем модели на лидеров и бесплатные
-        # PREFER PROBED models — только те, что реально ответили на probe
         leader_models = []
         free_models = []
-        try:
-            from core.keys_manager import keys_manager as _km
-            _probed_ids = _km._probed_model_ids
-            _failed_ids = _km._failed_probe_ids
-        except Exception:
-            _probed_ids = set()
-            _failed_ids = set()
 
         for m in available_models:
             status = m.get("status", "")
@@ -234,22 +262,14 @@ class IntelligentRouter:
             if status in ("invalid", "no_key"):
                 continue
 
-            # СТРОГО: только модели, прошедшие probe
-            # Если есть результаты probe — пропускать ВСЕ непроверенные
-            if _probed_ids and model_id not in _probed_ids:
-                continue
-            # Пропускаем модели, явно провалившие probe
-            if model_id in _failed_ids:
-                continue
-
-            # Пропускаем модели от мёртвых провайдеров
-            try:
-                from core.agent import _is_provider_dead
-                _mcfg = _km.get_model_config(model_id)
-                if _mcfg and _is_provider_dead(_mcfg.get("provider", "")):
+            # Если probe запускался — пропускаем непроверенные и проваленные модели
+            if has_probe_data:
+                if failed_probe_ids and model_id in failed_probe_ids:
                     continue
-            except Exception:
-                pass
+                # Если есть список проверенных — пропускаем те, кого там нет
+                # (но только если probe_data не пустой — на старте до probe разрешаем все)
+                if probed_model_ids and model_id not in probed_model_ids:
+                    continue
 
             # Определяем: это модель-лидер?
             is_leader = any(
@@ -257,44 +277,39 @@ class IntelligentRouter:
                 for pattern in LEADER_MODEL_PATTERNS
             )
 
-            # Для выбора: считаем модель доступной если status valid/available/rate_limited
-            if is_leader and status in ("valid", "available", "rate_limited"):
+            if is_leader and status in ("valid", "rate_limited"):
                 leader_models.append(m)
             elif model_type == "free" and status in ("valid", "available", "rate_limited"):
                 free_models.append(m)
-            # Платные не-лидеры тоже добавляем как fallback
-            elif not is_leader and status in ("valid", "available", "rate_limited"):
-                free_models.append(m)  # Используем тот же список для ротации
 
-        # Выбор модели (с ротацией — не гоняем одну и ту же модель)
-        # СТРОГО: НЕТ fallback на непроверенные модели!
+        # Выбор модели (fallback только среди проверенных)
         if complexity == "simple":
+            # Простая задача → сначала бесплатная, fallback на лидера
             if free_models:
-                idx = self._fallback_index % len(free_models)
-                chosen = free_models[idx]
-                reason = f"Простая задача → модель: {chosen['name']}"
+                chosen = free_models[0]
+                reason = f"Простая задача → бесплатная модель: {chosen['name']}"
             elif leader_models:
-                idx = self._fallback_index % len(leader_models)
-                chosen = leader_models[idx]
-                reason = f"Простая задача, нет бесплатных → лидер: {chosen['name']}"
+                chosen = leader_models[0]
+                reason = f"Простая задача, но нет бесплатных → лидер: {chosen['name']}"
             else:
-                chosen = None
-                reason = "Нет проверенных моделей для простой задачи"
+                # Fallback: только среди проверенных
+                checked = [m for m in available_models
+                           if m.get("status") in ("valid", "available", "rate_limited")
+                           and (not has_probe_data or (probed_model_ids and m.get("id") in probed_model_ids))]
+                chosen = checked[0] if checked else None
+                reason = f"Fallback: {chosen['name'] if chosen else 'нет проверенных моделей'}"
         else:
+            # Сложная задача → сначала лидер, fallback на любую платную
             if leader_models:
-                idx = self._fallback_index % len(leader_models)
-                chosen = leader_models[idx]
+                chosen = leader_models[0]
                 reason = f"Сложная задача → модель-лидер: {chosen['name']}"
-            elif free_models:
-                idx = self._fallback_index % len(free_models)
-                chosen = free_models[idx]
-                reason = f"Сложная задача, нет лидеров → {chosen['name']}"
             else:
-                chosen = None
-                reason = "Нет проверенных моделей для сложной задачи"
-
-        # Инкрементируем индекс ротации
-        self._fallback_index += 1
+                # Нет лидеров — берём любую валидную из проверенных
+                paid = [m for m in available_models
+                        if m.get("type") == "paid" and m.get("status") in ("valid", "rate_limited")
+                        and (not has_probe_data or (probed_model_ids and m.get("id") in probed_model_ids))]
+                chosen = paid[0] if paid else None
+                reason = f"Сложная задача, лидеры недоступны → {chosen['name'] if chosen else 'нет проверенных моделей'}"
 
         if not chosen:
             return {
