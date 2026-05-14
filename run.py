@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import uvicorn
 import shlex
 import asyncio
@@ -268,7 +269,6 @@ async def websocket_chat(websocket: WebSocket):
                     continue
 
                 # Parse JSON payload (chat message with model/priority info)
-                import json
                 try:
                     payload = json.loads(data)
                     prompt = payload.get("prompt", data)

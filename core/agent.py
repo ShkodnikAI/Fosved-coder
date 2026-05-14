@@ -970,11 +970,7 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
 
 # ═══════════════════════════════════════════════════════
-# PRIORITY ROUTING
-# DEPRECATED: _route_with_priority() дублирует логику
-# HybridRouter.route_task() из core/router.py.
-# Подлежит удалению после миграции на единый роутер.
-# См. core/router.py → class HybridRouter (также deprecated).
+# PRIORITY MODELS
 # ═══════════════════════════════════════════════════════
 
 def _get_priority_models(project: dict) -> list[str]:
@@ -990,21 +986,80 @@ def _get_priority_models(project: dict) -> list[str]:
     return []
 
 
-async def _route_with_priority(prompt: str, priority_models: list[str]) -> str | None:
-    """Route to cheapest or best model based on prompt complexity."""
-    prompt_lower = prompt.lower()
+# ═══════════════════════════════════════════════════════
+# MODEL SELECTION — единая логика (DRY)
+# ═══════════════════════════════════════════════════════
 
-    simple_keywords = ["fix typo", "формат", "xml", "json", "тест", "docstring", "комментарий", "простой", "trivial", "rename", "lint"]
-    for kw in simple_keywords:
-        if kw in prompt_lower:
-            return priority_models[-1] if len(priority_models) > 1 else priority_models[0]
+def _build_models_to_try(
+    model_id: str | None,
+    all_models: list[dict],
+    project: dict | None = None,
+) -> list[str]:
+    """Единая функция построения списка моделей для попытки.
 
-    complex_keywords = ["архитектур", "refactor", "redesign", "систем", "framework", "engine", "параллельн", "микросервис", "database schema", "security", "интеграц"]
-    for kw in complex_keywords:
-        if kw in prompt_lower:
-            return priority_models[0]
+    Логика:
+    1. Если model_id задан — ТОЛЬКО эта модель (без fallback)
+    2. Приоритетные модели проекта (selected_models)
+    3. Probed-модели (гарантированно рабочие)
+    4. Если probe ещё не был — валидные модели (исключая failed_probe)
 
-    return priority_models[0]
+    Фильтры:
+    - status в (valid, available, rate_limited)
+    - пропускаем free+no_key, local без base_url
+    - пропускаем мёртвых провайдеров
+    - пропускаем failed_probe_ids
+    """
+    probed_ids = keys_manager._probed_model_ids
+    failed_probe_ids = keys_manager._failed_probe_ids
+
+    models_to_try: list[str] = []
+
+    # 1. Если пользователь явно выбрал модель — ТОЛЬКО она
+    if model_id:
+        return [model_id]
+
+    # 2. Приоритетные модели проекта
+    for pm in _get_priority_models(project):
+        models_to_try.append(pm)
+
+    # 3. Probed-модели (GUARANTEED working)
+    for m in all_models:
+        mid = m["id"]
+        if mid in models_to_try:
+            continue
+        if probed_ids and mid not in probed_ids:
+            continue
+        if m.get("status") not in ("valid", "available", "rate_limited"):
+            continue
+        if m.get("type") == "free" and m.get("status") == "no_key":
+            continue
+        if m.get("type") == "local" and not m.get("base_url"):
+            continue
+        _m_cfg = keys_manager.get_model_config(mid)
+        if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
+            continue
+        models_to_try.append(mid)
+
+    # 4. Если probe ещё не завершён — берём валидные
+    if not probed_ids:
+        for m in all_models:
+            mid = m["id"]
+            if mid in models_to_try:
+                continue
+            if mid in failed_probe_ids:
+                continue
+            if m.get("status") not in ("valid", "available"):
+                continue
+            if m.get("type") == "free" and m.get("status") == "no_key":
+                continue
+            if m.get("type") == "local" and not m.get("base_url"):
+                continue
+            _m_cfg = keys_manager.get_model_config(mid)
+            if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
+                continue
+            models_to_try.append(mid)
+
+    return models_to_try
 
 
 # ═══════════════════════════════════════════════════════
@@ -1086,59 +1141,12 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     await save_message(project_id, "user", prompt)
 
-    # Build model list — PREFER PROBED models (they actually responded)
+    # Build model list — единая логика через _build_models_to_try()
     all_models = keys_manager.get_all_models()
-    probed_ids = keys_manager._probed_model_ids  # Модели, прошедшие probe
-    failed_probe_ids = keys_manager._failed_probe_ids  # Модели, НЕ прошедшие probe
-
-    models_to_try = []
-    if model_id:
-        models_to_try.append(model_id)
-
     project = await get_project(project_id) if project_id else None
-    for pm in _get_priority_models(project):
-        if pm not in models_to_try:
-            models_to_try.append(pm)
+    models_to_try = _build_models_to_try(model_id, all_models, project)
 
     dead_providers_seen = set()  # Провайдеры, сдохшие при обработке ЭТОГО сообщения
-
-    # --- Phase 1: Probed models (GUARANTEED working) ---
-    for m in all_models:
-        mid = m["id"]
-        if mid in models_to_try:
-            continue
-        # Only models that PASSED probe (строго!)
-        if probed_ids and mid not in probed_ids:
-            continue
-        if m.get("status") not in ("valid", "available", "rate_limited"):
-            continue
-        if m.get("type") == "free" and m.get("status") == "no_key":
-            continue
-        if m.get("type") == "local" and not m.get("base_url"):
-            continue
-        _m_cfg = keys_manager.get_model_config(mid)
-        if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
-            continue
-        models_to_try.append(mid)
-
-    # --- Phase 2: Если probe ещё не завершён (нет результатов) — берём валидные ---
-    if not probed_ids:
-        for m in all_models:
-            mid = m["id"]
-            if mid in models_to_try:
-                continue
-            if mid in failed_probe_ids:
-                continue
-            if m.get("status") not in ("valid", "available"):
-                continue
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            _m_cfg = keys_manager.get_model_config(mid)
-            if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
-                continue
-            models_to_try.append(mid)
 
     if not models_to_try:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
@@ -1328,56 +1336,14 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
 
     await save_message(None, "user", prompt)
 
-    # Список моделей — PREFER PROBED models
+    # Build model list — единая логика через _build_models_to_try()
     all_models = keys_manager.get_all_models()
-    probed_ids = keys_manager._probed_model_ids
-    failed_probe_ids = keys_manager._failed_probe_ids
-
-    models_to_try = []
-    if model_id:
-        models_to_try.append(model_id)
+    models_to_try = _build_models_to_try(model_id, all_models)
 
     dead_providers_seen = set()
 
-    # Phase 1: Probed models (GUARANTEED working)
-    for m in all_models:
-        mid = m["id"]
-        if mid in models_to_try:
-            continue
-        if probed_ids and mid not in probed_ids:
-            continue
-        if m.get("status") not in ("valid", "available", "rate_limited"):
-            continue
-        if m.get("type") == "free" and m.get("status") == "no_key":
-            continue
-        if m.get("type") == "local" and not m.get("base_url"):
-            continue
-        _m_cfg = keys_manager.get_model_config(mid)
-        if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
-            continue
-        models_to_try.append(mid)
-
-    # Phase 2: Если probe ещё не завершён — берём валидные
-    if not probed_ids:
-        for m in all_models:
-            mid = m["id"]
-            if mid in models_to_try:
-                continue
-            if mid in failed_probe_ids:
-                continue
-            if m.get("status") not in ("valid", "available"):
-                continue
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            _m_cfg = keys_manager.get_model_config(mid)
-            if _m_cfg and _is_provider_dead(_m_cfg.get("provider", "")):
-                continue
-            models_to_try.append(mid)
-
     if not models_to_try:
-        print(f"  [agent] hub: NO models available! all_models={len(all_models)}, probed={len(probed_ids)}")
+        print(f"  [agent] hub: NO models available! all_models={len(all_models)}, probed={len(keys_manager._probed_model_ids)}")
         await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
         return
 
@@ -1471,212 +1437,6 @@ async def _process_skill_tags(response_text: str, websocket):
 # ═══════════════════════════════════════════════════════
 # PROMPT INJECTION MODE — Fallback для моделей без tools
 # ═══════════════════════════════════════════════════════
-
-INJECTION_SYSTEM_PROMPT = """Ты Fosved Coder — AI-ассистент для разработки проекта.
-Ты работаешь с файлами проекта через специальный формат ответа.
-
-{project_context}
-
-{platform_info}
-
-ПРАВИЛА ФОРМАТИРОВАНИЯ ОТВЕТА:
-
-Для СОЗДАНИЯ или ПЕРЕЗАПИСИ файла используй:
-<file path="относительный/путь/файла.py">
-полное содержимое файла...
-</file>
-
-Альтернативный формат (code block с путём):
-```python:src/main.py
-содержимое файла...
-```
-
-Для ПОКАЗА ИЗМЕНЕНИЙ (diff):
-```diff
---- a/файл.py
-+++ b/файл.py
-@@ -10,5 +10,5 @@
--старая строка
-+новая строка
-```
-
-Для ВЫПОЛНЕНИЯ команды:
-<command>
-shell-команда
-</command>
-
-Для GIT ОПЕРАЦИЙ:
-<git operation="commit_push" message="feat: описание">
-</git>
-(Автоматически: git add -A → commit → push. БЕЗ force-push.)
-
-ВАЖНО:
-- Отвечай на том языке, на котором задан вопрос
-- Сначала объясни что делаешь, потом показывай файлы
-- Для чтения файлов — просто укажи <file path="..."> и система покажет содержимое
-- НЕ проси пользователя копировать код — пишши прямо в файлы
-- НЕ используй force-push — никогда
-"""
-
-
-async def handle_project_with_injection(
-    prompt: str, project_id, websocket, model_id: str = None,
-    repo_map: str | None = None,
-):
-    """
-    Дуальный режим для проекта:
-    1. Пробуем tool calling (для поддерживающих моделей)
-    2. Если не поддерживает — переключаемся на prompt injection
-    """
-    from core.prompt_injector import PromptInjector
-    from core.response_parser import ResponseParser, ActionExecutor
-
-    project = await get_project(project_id)
-    if not project:
-        await safe_ws_send(websocket, {"type": "error", "content": "Проект не найден"})
-        return
-
-    project_path = project.get("path", "")
-    history = await get_history(project_id)
-
-    # Build injector context
-    injector = PromptInjector(project_path)
-    context = await injector.build_context(
-        project_name=project.get("name", ""),
-        project_description=project.get("description", ""),
-        base_prompt=project.get("base_prompt", ""),
-        template=project.get("template", ""),
-        repo_map=repo_map or "",
-        include_git_status=True,
-    )
-
-    system_prompt = INJECTION_SYSTEM_PROMPT.format(
-        project_context=context,
-        platform_info=get_platform_info(),
-    )
-
-    await save_message(project_id, "user", prompt)
-
-    # Model list with fallback
-    models_to_try = []
-    if model_id:
-        models_to_try.append(model_id)
-
-    for pm in _get_priority_models(project):
-        if pm not in models_to_try:
-            models_to_try.append(pm)
-
-    all_models = keys_manager.get_all_models()
-    for m in all_models:
-        if m["id"] not in models_to_try and m.get("status") in ("valid", "available"):
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            models_to_try.append(m["id"])
-
-    if not models_to_try:
-        await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей."})
-        return
-
-    ai_response = None
-    tried_count = 0
-    no_credits_providers = set()
-    used_injection = False
-
-    for i, model_to_try in enumerate(models_to_try):
-        model_config = keys_manager.get_model_config(model_to_try)
-        if not model_config:
-            continue
-        has_key = bool(model_config.get("api_key"))
-        is_local = any(m["id"] == model_to_try and m.get("type") == "local" for m in all_models)
-        if not has_key and not is_local:
-            continue
-
-        model_provider = model_config.get("provider", "")
-        if model_provider in no_credits_providers:
-            continue
-
-        tried_count += 1
-        m_info = next((m for m in all_models if m["id"] == model_to_try), None)
-        display_model = m_info["name"] if m_info else model_to_try
-        await safe_ws_send(websocket, {"type": "typing", "model": display_model})
-
-        if i > 0:
-            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Переключаюсь на {display_model} (попытка {tried_count})...", "level": "info"})
-
-        error_info = {}
-
-        # СНАЧАЛА пробуем tool calling
-        tool_response = await stream_llm_response(
-            prompt, history, websocket,
-            model=model_to_try,
-            system_prompt=SYSTEM_PROMPT_TEMPLATE.format(
-                repo_map=f"СТРУКТУРА ПРОЕКТА (Repo Map):\n{repo_map}" if repo_map else "",
-                ideas_context="",
-                project_context="",
-                compressed_context="",
-                platform_info=get_platform_info(),
-            ),
-            project_path=project_path,
-            use_tools=True,
-            _error_info=error_info,
-        )
-
-        if tool_response is not None:
-            ai_response = tool_response
-            break
-
-        # Если tool calling не сработал — пробуем prompt injection
-        if error_info.get("no_tools"):
-            await _send_log(websocket, f"🔄 {display_model}: переключаюсь на prompt injection", "warning")
-            injection_response = await stream_llm_response(
-                prompt, history, websocket,
-                model=model_to_try,
-                system_prompt=system_prompt,
-                project_path=None,  # Контекст уже в промпте
-                use_tools=False,
-                _error_info=error_info,
-            )
-
-            if injection_response is not None:
-                # Парсим ответ и выполняем действия
-                parser = ResponseParser()
-                parse_result = parser.parse(injection_response)
-
-                if parse_result.actions:
-                    await _send_log(websocket, f"📝 Найдено {len(parse_result.actions)} действий в ответе", "info")
-                    executor = ActionExecutor(project_path)
-
-                    for action in parse_result.actions:
-                        result = await executor.execute(action, websocket)
-                        level = "success" if result["success"] else "error"
-                        await _send_log(websocket, f"{'✅' if result['success'] else '❌'} {result['message']}", level)
-
-                    # Показываем чистый текст пользователю
-                    clean_text = parse_result.clean_text.strip()
-                    if clean_text:
-                        # Отправляем как итоговый ответ
-                        await safe_ws_send(websocket, {"type": "chunk", "content": clean_text})
-                    ai_response = clean_text or injection_response
-                    used_injection = True
-
-                    # Обновляем кеш файлов в injector после изменений
-                    for action in parse_result.actions:
-                        if action.action_type == "write_file" and action.path:
-                            injector.invalidate_file(action.path)
-
-                    break
-
-        if error_info.get("no_credits") and model_provider:
-            no_credits_providers.add(model_provider)
-
-    if ai_response:
-        await save_message(project_id, "ai", ai_response)
-    elif tried_count == 0:
-        await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
-    else:
-        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
 
 
 # ═══════════════════════════════════════════════════════
