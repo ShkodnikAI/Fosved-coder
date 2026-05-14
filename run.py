@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 
-from core.memory import init_db, clear_history, get_project, get_repo_map, git_push_with_token, save_questionnaire
+from core.memory import init_db, clear_history, get_project, get_project_internal, get_repo_map, git_push_with_token, git_pull_with_token, save_questionnaire
 from core.keys_manager import keys_manager
 from core.agent import handle_chat_message, handle_hub_message
 from core.executor import CommandExecutor
@@ -572,24 +572,24 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         except Exception:
             pass
         project_path = None
+        project_token = None
         if project_id:
-            project = await get_project(project_id)
+            project = await get_project_internal(project_id)
             if project:
                 project_path = project["path"]
-        result = await executor.execute("git pull", cwd=project_path)
-        exit_code = result.get("exit_code", -1)
-        if exit_code == 0:
-            stdout = result.get("stdout", "").strip()
-            # Извлечь полезную инфу: "Already up to date" или "Updating X..Y"
-            lines = [l.strip() for l in stdout.split("\n") if l.strip() and not l.startswith("From ")]
-            summary = lines[0] if lines else "Already up to date"
-            await safe_ws_send(websocket, {"type": "auto_log", "content": f"📥 Pull OK: {summary}", "level": "info"})
-        else:
-            await safe_ws_send(websocket, {"type": "error", "content": f"📥 Pull failed: {result.get('stderr', 'unknown error')[:200]}"})
+                project_token = project.get("github_token") or None
+        pull_out = await git_pull_with_token(executor, project_path, project_token)
+        pull_stripped = pull_out.strip()
+        if "error" in pull_stripped.lower() or "fatal" in pull_stripped.lower() or "denied" in pull_stripped.lower():
+            await safe_ws_send(websocket, {"type": "error", "content": f"📥 Pull failed: {pull_stripped[:200]}"})
             try:
-                logger.log("git_pull_failed", level="error", source="ws", project_id=project_id, error=result.get('stderr', '')[:200])
+                logger.log("git_pull_failed", level="error", source="ws", project_id=project_id, error=pull_stripped[:200])
             except Exception:
                 pass
+        else:
+            lines = [l.strip() for l in pull_stripped.split("\n") if l.strip() and not l.startswith("From ")]
+            summary = lines[0] if lines else "Already up to date"
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"📥 Pull OK: {summary}", "level": "info"})
         await safe_ws_send(websocket, {"type": "done"})
 
     elif command == "/git_push":
@@ -600,7 +600,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         project_path = None
         project_token = None
         if project_id:
-            project = await get_project(project_id)
+            project = await get_project_internal(project_id)
             if project:
                 project_path = project["path"]
                 project_token = project.get("github_token") or None
@@ -629,7 +629,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         project_path = None
         project_token = None
         if project_id:
-            project = await get_project(project_id)
+            project = await get_project_internal(project_id)
             if project:
                 project_path = project["path"]
                 project_token = project.get("github_token") or None

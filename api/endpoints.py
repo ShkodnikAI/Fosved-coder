@@ -1158,7 +1158,9 @@ async def clear_main_chat():
 async def git_operation(project_id: int, req: GitOperationRequest):
     """Git операции: commit, push, pull, log, status, diff."""
     _log(f"GIT_{req.operation.upper()}", source="api", project_id=project_id, details={"operation": req.operation})
-    project = await get_project(project_id)
+    # Use internal (unmasked) project data for git operations
+    from core.memory import get_project_internal as _get_proj_internal
+    project = await _get_proj_internal(project_id)
     if not project:
         raise HTTPException(404, "Проект не найден")
     cwd = project["path"]
@@ -1201,12 +1203,24 @@ async def git_operation(project_id: int, req: GitOperationRequest):
             return {"operation": "commit", "output": result.stdout.strip() or result.stderr.strip(), "success": result.returncode == 0}
 
         elif req.operation == "push":
-            result = subprocess.run(["git", "push"], capture_output=True, text=True, cwd=cwd, timeout=30)
-            return {"operation": "push", "output": result.stdout.strip() or result.stderr.strip(), "success": result.returncode == 0}
+            # Use token-authenticated push (like WS /git_push)
+            from core.executor import CommandExecutor
+            from core.memory import git_push_with_token
+            exec_ = CommandExecutor()
+            token = project.get("github_token")
+            push_out = await git_push_with_token(exec_, cwd, token)
+            success = not any(w in push_out.lower() for w in ["error", "fatal", "denied"])
+            return {"operation": "push", "output": push_out.strip(), "success": success}
 
         elif req.operation == "pull":
-            result = subprocess.run(["git", "pull"], capture_output=True, text=True, cwd=cwd, timeout=30)
-            return {"operation": "pull", "output": result.stdout.strip() or result.stderr.strip(), "success": result.returncode == 0}
+            # Use token-authenticated pull
+            from core.executor import CommandExecutor
+            from core.memory import git_pull_with_token
+            exec_ = CommandExecutor()
+            token = project.get("github_token")
+            pull_out = await git_pull_with_token(exec_, cwd, token)
+            success = not any(w in pull_out.lower() for w in ["error", "fatal", "denied"])
+            return {"operation": "pull", "output": pull_out.strip(), "success": success}
 
         else:
             raise HTTPException(400, f"Неизвестная операция: {req.operation}")

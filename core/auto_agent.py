@@ -20,7 +20,7 @@ import shlex
 import asyncio
 from datetime import datetime, timezone
 from core.agent import stream_llm_response, get_platform_info, _safe_join
-from core.memory import get_project, get_history
+from core.memory import get_project, get_project_internal, get_history, git_push_with_token, get_project_token_by_path
 from core.executor import CommandExecutor
 from core.action_logger import get_logger
 
@@ -319,29 +319,31 @@ async def execute_step(step: dict, project_path: str | None, websocket, step_num
         return False
 
 
-async def auto_git_push(project_path: str, websocket, step_num: int = None, total_steps: int = None):
-    """Silent git push in automatic mode."""
+async def auto_git_push(project_path: str, websocket, step_num: int = None, total_steps: int = None, project_id: int = None):
+    """Silent git push in automatic mode (with PAT token)."""
     if not project_path or not os.path.isdir(os.path.join(project_path, ".git")):
         await send_auto_log(websocket, "Git push пропущен (нет .git каталога)", "info", step_num, total_steps)
         return
     try:
         await send_auto_log(websocket, "Git push...", "command", step_num, total_steps)
-        result = await executor.execute("git push", cwd=project_path, timeout=30)
-        exit_code = result.get("exit_code", -1)
-        if exit_code == 0:
-            stdout = result.get("stdout", "").strip()
-            if "Everything up-to-date" not in stdout:
-                lines = [l for l in stdout.split("\n") if l.strip()]
-                summary = lines[-1] if lines else "OK"
-                await websocket.send_json({"type": "auto_step", "content": f"  Pushed: {summary}"})
-                await send_auto_log(websocket, f"Push OK: {summary}", "success", step_num, total_steps)
-            else:
-                await send_auto_log(websocket, "Push: всё актуально (up-to-date)", "info", step_num, total_steps)
+        # Get project token for authenticated push
+        project_token = None
+        if project_id:
+            project_token = await get_project_token_by_id(project_id)
+        if not project_token:
+            project_token = await get_project_token_by_path(project_path)
+        push_out = await git_push_with_token(executor, project_path, project_token)
+        push_stripped = push_out.strip()
+        if "error" in push_stripped.lower() or "fatal" in push_stripped.lower() or "denied" in push_stripped.lower():
+            await websocket.send_json({"type": "auto_step", "content": f"  Push failed: {push_stripped[:100]}"})
+            await send_auto_log(websocket, f"Push failed: {push_stripped[:100]}", "error", step_num, total_steps)
+        elif "Everything up-to-date" in push_stripped:
+            await send_auto_log(websocket, "Push: всё актуально (up-to-date)", "info", step_num, total_steps)
         else:
-            stderr = result.get("stderr", "")
-            if stderr:
-                await websocket.send_json({"type": "auto_step", "content": f"  Push failed: {stderr.strip()[:100]}"})
-                await send_auto_log(websocket, f"Push failed: {stderr.strip()[:100]}", "error", step_num, total_steps)
+            lines = [l for l in push_stripped.split("\n") if l.strip()]
+            summary = lines[-1] if lines else "OK"
+            await websocket.send_json({"type": "auto_step", "content": f"  Pushed: {summary}"})
+            await send_auto_log(websocket, f"Push OK: {summary}", "success", step_num, total_steps)
     except Exception as e:
         await send_auto_log(websocket, f"Push exception: {str(e)}", "error", step_num, total_steps)
 
@@ -415,7 +417,7 @@ async def run_auto_mode(prompt: str, project_id, repo_map: str | None, websocket
     # Step 3: Final git push
     if project_path and completed > 0:
         await websocket.send_json({"type": "system", "content": f"[АВТО] Пушу изменения..."})
-        await auto_git_push(project_path, websocket, None, total)
+        await auto_git_push(project_path, websocket, None, total, project_id=project_id)
 
     # Step 4: Quick code check (syntax only, no tests in auto mode)
     if project_path and completed > 0:

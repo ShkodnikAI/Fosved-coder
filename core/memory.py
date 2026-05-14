@@ -443,12 +443,18 @@ async def get_all_projects() -> list[dict]:
             select(Project).order_by(Project.created_at.desc())
         )
         return [
-            {"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "template": p.template, "apk_config": p.apk_config, "logo": p.logo, "design": p.design, "created_at": str(p.created_at)}
+            _mask_project_for_api({"id": p.id, "name": p.name, "path": p.path, "description": p.description, "base_prompt": p.base_prompt, "ideas": p.ideas, "selected_models": p.selected_models, "github_repo": p.github_repo, "github_token": p.github_token, "local_path": p.local_path, "uuid_key": p.uuid_key, "progress": p.progress, "template": p.template, "apk_config": p.apk_config, "logo": p.logo, "design": p.design, "created_at": str(p.created_at)})
             for p in result.scalars().all()
         ]
 
 async def get_project(project_id: int) -> dict | None:
-    """Get single project by ID."""
+    """Get single project by ID (token masked for API responses)."""
+    p = await get_project_internal(project_id)
+    return _mask_project_for_api(p) if p else None
+
+
+async def get_project_internal(project_id: int) -> dict | None:
+    """Get single project by ID (with REAL token — for internal use only)."""
     async with async_session() as session:
         result = await session.execute(
             select(Project).where(Project.id == project_id)
@@ -473,64 +479,95 @@ async def get_project_token_by_path(project_path: str) -> str | None:
         return None
 
 
+async def get_project_token_by_id(project_id: int) -> str | None:
+    """Get github_token for a project by its ID."""
+    if not project_id:
+        return None
+    async with async_session() as session:
+        result = await session.execute(
+            select(Project).where(Project.id == project_id)
+        )
+        p = result.scalar_one_or_none()
+        if p and p.github_token:
+            return p.github_token
+        return None
+
+
+async def _inject_git_token(executor, project_path: str, project_token: str) -> tuple[str | None, str | None]:
+    """Inject PAT token into git remote URL. Returns (auth_url, original_url) or (None, None).
+    
+    If token injection fails or no GitHub remote found, returns (None, None).
+    """
+    if not project_token or not project_path:
+        return None, None
+    try:
+        r_remote = await executor.execute(
+            "git remote get-url origin", cwd=project_path,
+            need_approval=False, timeout=10,
+        )
+        remote_url = (r_remote.get("stdout", "") or "").strip()
+
+        if not remote_url or "github.com" not in remote_url:
+            return None, None
+
+        # Build authenticated URL: replace https://...@github.com or https://github.com
+        auth_url = re.sub(
+            r'https://[^@]+@github\.com',
+            f'https://{project_token}@github.com',
+            remote_url,
+        )
+        if "@github.com" not in auth_url:
+            auth_url = remote_url.replace(
+                "https://github.com",
+                f"https://{project_token}@github.com",
+            )
+
+        await executor.execute(
+            f"git remote set-url origin {auth_url}",
+            cwd=project_path, need_approval=False, timeout=10,
+        )
+        return auth_url, remote_url
+    except Exception as e:
+        logger.log(f"git_token_inject_error: {str(e)[:150]}", level="warning", source="memory")
+        return None, None
+
+
+async def _restore_git_remote(executor, project_path: str, original_url: str):
+    """Restore original git remote URL after token injection."""
+    try:
+        await executor.execute(
+            f"git remote set-url origin {original_url}",
+            cwd=project_path, need_approval=False, timeout=10,
+        )
+    except Exception:
+        pass
+
+
 async def git_push_with_token(executor, project_path: str, project_token: str | None) -> str:
     """
     Perform git push, using project-specific PAT token if available.
     Temporarily sets the remote URL with embedded token, then restores
     the original URL for security. Falls back to normal push if no token.
-
-    Args:
-        executor: CommandExecutor instance with .execute() method
-        project_path: Absolute path to the git repository
-        project_token: GitHub PAT token string, or None
-
-    Returns:
-        Combined stdout + stderr from the git push command.
     """
     push_out = ""
     url_restored = False
 
     if project_token and project_path:
         try:
-            # Get current remote URL
-            r_remote = await executor.execute(
-                "git remote get-url origin", cwd=project_path,
-                need_approval=False, timeout=10,
+            auth_url, original_url = await _inject_git_token(executor, project_path, project_token)
+            if not auth_url:
+                raise Exception("No GitHub remote found")
+
+            # Push with token
+            r3 = await executor.execute(
+                "git push", cwd=project_path,
+                need_approval=False, timeout=30,
             )
-            remote_url = (r_remote.get("stdout", "") or "").strip()
+            push_out = (r3.get("stdout", "") or "") + (r3.get("stderr", "") or "")
 
-            if remote_url and "github.com" in remote_url:
-                # Build authenticated URL: replace https://...@github.com or https://github.com
-                auth_url = re.sub(
-                    r'https://[^@]+@github\.com',
-                    f'https://{project_token}@github.com',
-                    remote_url,
-                )
-                if "@github.com" not in auth_url:
-                    auth_url = remote_url.replace(
-                        "https://github.com",
-                        f"https://{project_token}@github.com",
-                    )
-
-                # Set authenticated URL
-                await executor.execute(
-                    f"git remote set-url origin {auth_url}",
-                    cwd=project_path, need_approval=False, timeout=10,
-                )
-
-                # Push with token
-                r3 = await executor.execute(
-                    "git push", cwd=project_path,
-                    need_approval=False, timeout=30,
-                )
-                push_out = (r3.get("stdout", "") or "") + (r3.get("stderr", "") or "")
-
-                # Restore original URL (security!)
-                await executor.execute(
-                    f"git remote set-url origin {remote_url}",
-                    cwd=project_path, need_approval=False, timeout=10,
-                )
-                url_restored = True
+            # Restore original URL (security!)
+            await _restore_git_remote(executor, project_path, original_url)
+            url_restored = True
         except Exception as e:
             logger.log(
                 f"git_push_token_setup_error: {str(e)[:200]}",
@@ -546,6 +583,65 @@ async def git_push_with_token(executor, project_path: str, project_token: str | 
         push_out = (r3.get("stdout", "") or "") + (r3.get("stderr", "") or "")
 
     return push_out
+
+
+async def git_pull_with_token(executor, project_path: str, project_token: str | None) -> str:
+    """
+    Perform git pull, using project-specific PAT token if available.
+    Temporarily sets the remote URL with embedded token, then restores
+    the original URL for security. Falls back to normal pull if no token.
+    """
+    pull_out = ""
+    url_restored = False
+
+    if project_token and project_path:
+        try:
+            auth_url, original_url = await _inject_git_token(executor, project_path, project_token)
+            if not auth_url:
+                raise Exception("No GitHub remote found")
+
+            # Pull with token
+            r = await executor.execute(
+                "git pull", cwd=project_path,
+                need_approval=False, timeout=30,
+            )
+            pull_out = (r.get("stdout", "") or "") + (r.get("stderr", "") or "")
+
+            # Restore original URL (security!)
+            await _restore_git_remote(executor, project_path, original_url)
+            url_restored = True
+        except Exception as e:
+            pull_out = str(e)
+            logger.log(
+                f"git_pull_token_error: {str(e)[:200]}",
+                level="warning", source="memory",
+            )
+
+    # Fallback: normal pull (no token, or token setup failed)
+    if not url_restored:
+        r = await executor.execute(
+            "git pull", cwd=project_path,
+            need_approval=False, timeout=30,
+        )
+        pull_out = (r.get("stdout", "") or "") + (r.get("stderr", "") or "")
+
+    return pull_out
+
+
+def _mask_token(token: str | None) -> str:
+    """Mask a GitHub token for safe display: ghp_xxxx...xxxx."""
+    if not token or len(token) < 12:
+        return "" if not token else "****"
+    return token[:7] + "..." + token[-4:]
+
+
+def _mask_project_for_api(p) -> dict:
+    """Return a project dict with github_token masked."""
+    d = dict(p)
+    if d.get("github_token"):
+        d["github_token"] = _mask_token(d["github_token"])
+    d["has_github_token"] = bool(p.get("github_token"))
+    return d
 
 
 async def migrate_db():
