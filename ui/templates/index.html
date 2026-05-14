@@ -253,14 +253,15 @@
     }
     .model-card-with-priority .model-card-info { flex: 1; min-width: 0; }
     .msg-copy-btn {
-        position: absolute; bottom: -12px; right: 8px;
-        background: var(--bg-secondary); border: 1px solid var(--border);
-        border-radius: 6px; padding: 2px 8px; cursor: pointer;
-        font-size: 12px; opacity: 0; transition: opacity 0.2s;
-        z-index: 2; line-height: 1;
+        position: absolute; bottom: -14px; right: 8px;
+        background: var(--bg-tertiary); border: 1px solid var(--border);
+        border-radius: 6px; padding: 2px 10px; cursor: pointer;
+        font-size: 11px; opacity: 0.6; transition: opacity 0.2s;
+        z-index: 2; line-height: 1; color: var(--text-secondary);
+        font-family: var(--font-ui);
     }
     .msg:hover .msg-copy-btn, .msg.ai:hover .msg-copy-btn { opacity: 1; }
-    .msg-copy-btn:hover { background: var(--accent); color: var(--bg-primary); }
+    .msg-copy-btn:hover { background: var(--accent); color: var(--bg-primary); border-color: var(--accent); }
     .msg.ai { position: relative; margin-bottom: 16px; }
     .probe-btn {
         background: var(--bg-secondary); border: 1px solid var(--border);
@@ -502,8 +503,6 @@
                 <div class="hub-section-list" id="proj-models-list">
                     <div class="panel-list-empty">Загрузка...</div>
                 </div>
-                <button class="add-btn" onclick="showAddLocalModelModal()">+ Локальная</button>
-                <button class="add-btn" onclick="showAddCustomModelModal()">+ Кастомная</button>
             </div>
             <!-- Кнопка управления ключами -->
             <button class="add-btn" onclick="showKeysModal()" style="margin-top:6px;">🔑 Ключи</button>
@@ -868,6 +867,9 @@ let currentFileViewPath = null;
 let activeSkills = new Set();
 let currentScreen = "main";        // "main" или "project"
 let tokenCount = 0;                // Счётчик токенов
+// Маршрутизация streaming-ответов: "hub" или "project"
+// Определяется при отправке сообщения, используется при получении chunk/done
+let pendingResponseTarget = null;
 
 // Ссылки на DOM-элементы чатов
 const hubChatBox = document.getElementById("hub-chat-box");
@@ -923,17 +925,19 @@ function getActiveChatBox() {
 
 
 
-/** Получить активный AI-див и текст */
+/** Получить AI-див и текст для текущего pending-ответа (или по экрану как fallback) */
 function getActiveAiContext() {
-    if (currentScreen === "main") {
+    const target = pendingResponseTarget || (currentScreen === "main" ? "hub" : "project");
+    if (target === "hub") {
         return { div: currentHubAiDiv, text: currentHubAiText, chatBox: hubChatBox, typingDiv: currentHubTypingDiv };
     }
     return { div: currentAiDiv, text: currentAiText, chatBox: projectChatBox, typingDiv: currentTypingDiv };
 }
 
-/** Установить активный AI-див и текст */
+/** Установить AI-див и текст для текущего pending-ответа */
 function setActiveAiContext(div, text, chatBox, typingDiv) {
-    if (currentScreen === "main") {
+    const target = pendingResponseTarget || (currentScreen === "main" ? "hub" : "project");
+    if (target === "hub") {
         currentHubAiDiv = div;
         currentHubAiText = text;
         currentHubTypingDiv = typingDiv;
@@ -1197,13 +1201,13 @@ function _addFullCopyButton(msgDiv, rawText) {
     msgDiv.style.position = 'relative';
     const btn = document.createElement('button');
     btn.className = 'msg-copy-btn';
-    btn.textContent = '📋';
-    btn.title = 'Копировать ответ';
+    btn.textContent = '📋 Копировать';
+    btn.title = 'Копировать весь ответ';
     btn.onclick = (e) => {
         e.stopPropagation();
         navigator.clipboard.writeText(rawText).then(() => {
-            btn.textContent = '✓';
-            setTimeout(() => { btn.textContent = '📋'; }, 1500);
+            btn.textContent = '✓ Скопировано';
+            setTimeout(() => { btn.textContent = '📋 Копировать'; }, 2000);
         });
     };
     msgDiv.appendChild(btn);
@@ -1392,8 +1396,9 @@ function sendMessage() {
     if (explicitlyProbedIds.size === 0 && !activeModelId) { showToast("Сначала опросите модели", "error"); return; }
     addClientLog('project_message', 'Sent project message: ' + text.substring(0, 80));
     let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
-    addMessage("user", displayText);
+    addMessageTo("user", displayText, projectChatBox);
     setWaitingAI(true);
+    pendingResponseTarget = "project";
     let payload = { type: "chat", prompt: text, model: activeModelId || null, mode: workMode, project_id: currentProjectId };
     if (priorityModels.length) payload.priority_models = priorityModels;
     payload.explicitly_probed_ids = [...explicitlyProbedIds];
@@ -1428,8 +1433,9 @@ function sendHubMessage() {
     if (explicitlyProbedIds.size === 0 && !activeModelId) { showToast("Сначала опросите модели", "error"); return; }
     addClientLog('hub_message', 'Sent hub message: ' + text.substring(0, 80));
     let displayText = hubAttachedFile ? "📎 " + hubAttachedFile.filename + "\n" + text : text;
-    addMessageTo("user", displayText);
+    addMessageTo("user", displayText, hubChatBox);
     setHubWaitingAI(true);
+    pendingResponseTarget = "hub";
     let payload = { type: "hub_chat", prompt: text, model_id: activeModelId || null };
     if (priorityModels.length) payload.priority_models = priorityModels;
     payload.explicitly_probed_ids = [...explicitlyProbedIds];
@@ -1664,21 +1670,17 @@ function wsConnect() {
 
         // ─── Стриминг чанков ───
         if (data.type === "chunk") {
-            // Определяем, куда направлять — в зависимости от текущего экрана или источника
             const ctx = getActiveAiContext();
             if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
             if (!ctx.div) {
                 const newDiv = document.createElement("div");
                 newDiv.className = "msg ai";
-                getActiveChatBox().appendChild(newDiv);
-                setActiveAiContext(newDiv, "", getActiveChatBox(), null);
-                const updatedCtx = getActiveAiContext();
-                // Переназначить
-                if (currentScreen === "main") { currentHubAiDiv = newDiv; currentHubAiText = ""; currentHubTypingDiv = null; }
-                else { currentAiDiv = newDiv; currentAiText = ""; currentTypingDiv = null; }
+                ctx.chatBox.appendChild(newDiv);
+                setActiveAiContext(newDiv, "", ctx.chatBox, null);
             }
-            const ctx2 = getActiveAiContext();
-            if (currentScreen === "main") { currentHubAiText += data.content; }
+            // Append to correct target text
+            const target = pendingResponseTarget || (currentScreen === "main" ? "hub" : "project");
+            if (target === "hub") { currentHubAiText += data.content; }
             else { currentAiText += data.content; }
             tokenCount += (data.content || '').length;
             updateTokenCount();
@@ -1691,8 +1693,12 @@ function wsConnect() {
             const ctx = getActiveAiContext();
             if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
             flushAiRender();
-            setWaitingAI(false);
-            setHubWaitingAI(false);
+            // Сбрасываем только ожидание целевого чата
+            const target = pendingResponseTarget || (currentScreen === "main" ? "hub" : "project");
+            if (target === "hub") { setHubWaitingAI(false); }
+            else { setWaitingAI(false); }
+            pendingResponseTarget = null;
+            // Сбрасываем AI-контекст
             if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
             else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
             setTimeout(() => { updateHeaderModelBadge(null); }, 3000);
@@ -1707,6 +1713,7 @@ function wsConnect() {
             flushAiRender();
             setWaitingAI(false);
             setHubWaitingAI(false);
+            pendingResponseTarget = null;
             updateHeaderModelBadge(null);
             if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
             else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
@@ -1720,6 +1727,7 @@ function wsConnect() {
             if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
             setWaitingAI(false);
             setHubWaitingAI(false);
+            pendingResponseTarget = null;
             updateHeaderModelBadge(null);
             if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
             else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
@@ -2726,7 +2734,6 @@ function renderBottomBar() {
         btns = [
             `<div class="mode-group"><button class="mode-group-btn${mm}" onclick="toggleWorkMode()">✋ Ручной</button><span class="mode-group-sep"></span><button class="mode-group-btn${ma}" onclick="toggleWorkMode()">🤖 Авто</button></div>`,
             '<span class="bottom-sep"></span>',
-            {l:'📁 Files',a:"togglePanel('files')"},
             {l:'🔍 Search',a:"togglePanel('search')"},
             {l:'🔀 Git',a:"togglePanel('git')"},
             {l:'🛠 Terminal',a:"insertCommand('/terminal ')"},
@@ -2848,19 +2855,23 @@ async function loadFileTree() {
     } catch(e) { document.getElementById('file-tree').innerHTML = '<div class="panel-placeholder">Ошибка</div>'; }
 }
 
-/** Загрузить файловое дерево в боковую панель проектного экрана */
+/** Загрузить файловое дерево в slide-панель (общая для обоих экранов) */
 async function loadProjectFileTree() {
     if (!currentProjectId) return;
     try {
         const resp = await fetch('/api/v1/projects/'+currentProjectId+'/tree');
         const data = await resp.json();
-        const el = document.getElementById('project-file-tree');
-        if (!data.tree || !data.tree.length) { el.innerHTML = '<div class="panel-placeholder" style="font-size:11px;">Нет файлов</div>'; return; }
+        const el = document.getElementById('file-tree');
+        if (!el) return;
+        if (!data.tree || !data.tree.length) { el.innerHTML = '<div class="panel-placeholder">Нет файлов</div>'; return; }
         el.innerHTML = renderTreeNodes(data.tree, 0);
-    } catch(e) { document.getElementById('project-file-tree').innerHTML = '<div class="panel-placeholder" style="font-size:11px;">Ошибка</div>'; }
+    } catch(e) { console.warn('loadProjectFileTree failed:', e); }
 }
 
 function toggleProjectFileTree() {
+    // Делегирует на общую slide-панель файлов
+    togglePanel('files');
+    return;
     const content = document.getElementById('project-file-tree-content');
     const icon = document.getElementById('file-tree-toggle-icon');
     content.classList.toggle('collapsed');
@@ -2956,6 +2967,13 @@ async function showKeysModal() {
         }
         html += `<div class="key-card"><div class="key-card-header"><span class="key-provider">GitHub</span><span class="key-status ${ghData.has_token?'valid':'none'}">${ghData.has_token?(ghData.enabled?'OK':'OFF'):'—'}</span></div>
             <div class="key-actions">${ghData.has_token?`<button class="btn btn-sm btn-ghost" onclick="toggleGitHub(${!ghData.enabled})">${ghData.enabled?'Выкл':'Вкл'}</button><button class="btn btn-sm btn-danger" onclick="showAddGithubToken()">Заменить</button>`:`<button class="btn btn-sm btn-primary" onclick="showAddGithubToken()">Добавить</button>`}</div></div>`;
+        // Локальные и кастомные модели
+        html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <div style="font-size:11px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Модели</div>
+            <div style="display:flex;gap:6px;">
+                <button class="btn btn-sm btn-ghost" onclick="closeGenericModal();showAddLocalModelModal()" style="flex:1;">+ Локальная модель</button>
+                <button class="btn btn-sm btn-ghost" onclick="closeGenericModal();showAddCustomModelModal()" style="flex:1;">+ Кастомная модель</button>
+            </div></div>`;
         openGenericModal("🔑 API Ключи", html);
     } catch(e) { showToast(e.message, "error"); }
 }

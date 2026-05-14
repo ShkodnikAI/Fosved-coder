@@ -740,8 +740,8 @@ class RenameProjectRequest(BaseModel):
 
 @router.put("/projects/rename")
 async def rename_project(req: RenameProjectRequest):
-    """Переименовать проект."""
-    from core.memory import async_session, Project, select
+    """Переименовать проект и обновить путь к директории."""
+    from core.memory import async_session, Project, select, CONFIG
     _log("RENAME_PROJECT", source="api", project_id=req.project_id, details={"new_name": req.new_name})
     new_name = req.new_name.strip()
     if not new_name:
@@ -757,8 +757,23 @@ async def rename_project(req: RenameProjectRequest):
             project = result.scalar_one_or_none()
             if not project:
                 raise HTTPException(404, "Проект не найден")
+            old_path = project.path
+            # Compute new path using same formula as create_project
+            projects_dir = CONFIG["system"]["projects_dir"]
+            new_path = f"{projects_dir}/{new_name.replace(' ', '_').lower()}"
+            # Rename filesystem directory if it exists
+            if old_path and os.path.isdir(old_path) and old_path != new_path:
+                try:
+                    os.makedirs(os.path.dirname(new_path), exist_ok=True)
+                    os.rename(old_path, new_path)
+                    _log("RENAME_PROJECT_DIR", source="api", project_id=req.project_id,
+                         details={"old_path": old_path, "new_path": new_path})
+                except OSError as e:
+                    _log("RENAME_PROJECT_DIR_ERROR", source="api", level="error",
+                         project_id=req.project_id, error=str(e))
             project.name = new_name
-            return {"success": True, "new_name": new_name}
+            project.path = new_path
+            return {"success": True, "new_name": new_name, "new_path": new_path}
 
 
 class RegenerateKeyRequest(BaseModel):
