@@ -816,6 +816,11 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                 project_context_text += f"ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ: {project['base_prompt']}\n"
             if project.get("path"):
                 project_path = project["path"]
+                # Validate path exists — warn if not
+                if not os.path.isdir(project_path):
+                    warn_msg = f"⚠️ Путь проекта не существует: {project_path}. Файловые операции будут недоступны."
+                    print(f"  [agent] {warn_msg}")
+                    await _send_log(websocket, warn_msg, "error")
                 project_context_text += f"ПУТЬ К ПРОЕКТУ: {project_path}\n"
                 if os.path.isdir(project_path):
                     try:

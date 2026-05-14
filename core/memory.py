@@ -329,6 +329,54 @@ async def init_db():
         except Exception as e:
             print(f"  [db] Предупреждение: не удалось создать директории: {e}")
 
+    # Migrate cloud project paths to local paths
+    try:
+        await migrate_cloud_paths()
+    except Exception as e:
+        print(f"  [db] Path migration warning: {e}")
+
+
+async def migrate_cloud_paths():
+    """Fix project paths that reference cloud /app/ directories when running locally.
+    Projects created on Render.com have paths like /app/projects/X but locally
+    the projects_dir is ./projects — this reconciles them."""
+    if IS_POSTGRES:
+        # Only fix paths when running locally (not on Render)
+        if os.environ.get("RENDER"):
+            return
+        local_dir = CONFIG["system"].get("projects_dir", "./projects")
+        if local_dir.startswith("/app/"):
+            return  # We ARE on cloud, don't migrate
+        from sqlalchemy import text
+        async with async_session() as session:
+            async with session.begin():
+                # Find all projects with /app/ paths
+                result = await session.execute(
+                    text("SELECT id, name, path FROM projects WHERE path LIKE '/app/%'")
+                )
+                rows = result.fetchall()
+                if not rows:
+                    return
+                print(f"  [db] Path migration: found {len(rows)} project(s) with cloud paths, fixing...")
+                for row_id, row_name, row_path in rows:
+                    # Extract the last directory component from the cloud path
+                    old_dir = os.path.basename(row_path.rstrip("/"))
+                    new_path = os.path.join(local_dir, old_dir)
+                    # Normalize
+                    new_path = os.path.normpath(new_path)
+                    # Update in DB
+                    await session.execute(
+                        text("UPDATE projects SET path = :new_path WHERE id = :id"),
+                        {"new_path": new_path, "id": row_id}
+                    )
+                    print(f"    [db] Project '{row_name}' (id={row_id}): {row_path} → {new_path}")
+                    # Create local directory if it doesn't exist
+                    try:
+                        os.makedirs(new_path, exist_ok=True)
+                    except OSError:
+                        pass
+                print(f"  [db] Path migration complete")
+
 # ═══════════════════════════════════════════════════════════════
 # PROJECTS CRUD
 # ═══════════════════════════════════════════════════════════════

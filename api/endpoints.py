@@ -810,6 +810,31 @@ async def get_project_by_key(key: str):
         return {"id": p.id, "name": p.name, "description": p.description, "progress": p.progress}
 
 
+@router.get("/projects/{project_id}/history")
+async def get_project_history(project_id: int, limit: int = Query(default=100, le=500)):
+    """Get chat history for a project (for UI restoration on screen switch)."""
+    _api("GET", f"/api/v1/projects/{project_id}/history", project_id=project_id)
+    history = await get_history(project_id, limit=limit)
+    return {"messages": history, "count": len(history)}
+
+
+@router.get("/chat/hub/history")
+async def get_hub_history(limit: int = Query(default=100, le=500)):
+    """Get main screen (hub) chat history."""
+    _api("GET", "/api/v1/chat/hub/history")
+    history = await get_history(None, limit=limit)
+    return {"messages": history, "count": len(history)}
+
+
+@router.post("/projects/fix-paths")
+async def fix_project_paths():
+    """Recalculate project paths that reference cloud /app/ directories."""
+    from core.memory import migrate_cloud_paths
+    _log("FIX_PROJECT_PATHS", source="api")
+    await migrate_cloud_paths()
+    return {"success": True, "message": "Project paths recalculated"}
+
+
 # ═══════════════════════════════════════════════════════════════
 # FILE OPERATIONS
 # ═══════════════════════════════════════════════════════════════
