@@ -113,6 +113,17 @@ class CommandExecutor:
         if is_critical and not need_approval:
             await self._git_checkpoint(cwd)
 
+        # Validate cwd — if it doesn't exist, try to create it or fall back
+        effective_cwd = cwd
+        if cwd and not os.path.isdir(cwd):
+            try:
+                os.makedirs(cwd, exist_ok=True)
+                logger.log(f"exec_cwd_created: {cwd}", level="info", source="executor")
+            except OSError:
+                # Can't create — run without cwd (use app directory)
+                effective_cwd = None
+                logger.log(f"exec_cwd_missing: {cwd}, running without cwd", level="warning", source="executor")
+
         # Execute the command
         process = None
         try:
@@ -120,7 +131,7 @@ class CommandExecutor:
                 cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
+                cwd=effective_cwd,
             )
 
             try:

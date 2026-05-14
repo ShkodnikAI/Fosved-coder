@@ -816,11 +816,37 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                 project_context_text += f"ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ: {project['base_prompt']}\n"
             if project.get("path"):
                 project_path = project["path"]
-                # Validate path exists — warn if not
+                # Validate path exists — try to self-heal if broken
                 if not os.path.isdir(project_path):
-                    warn_msg = f"⚠️ Путь проекта не существует: {project_path}. Файловые операции будут недоступны."
-                    print(f"  [agent] {warn_msg}")
-                    await _send_log(websocket, warn_msg, "error")
+                    # Try to create the directory
+                    try:
+                        os.makedirs(project_path, exist_ok=True)
+                        await _send_log(websocket, f"✅ Создан каталог проекта: {project_path}", "success")
+                    except OSError:
+                        # Try fallback path
+                        from core.memory import CONFIG
+                        fallback = os.path.join(
+                            CONFIG["system"].get("projects_dir", "./projects"),
+                            os.path.basename(project_path.rstrip("/")) or project.get("name", "project").lower()
+                        )
+                        fallback = os.path.normpath(fallback)
+                        try:
+                            os.makedirs(fallback, exist_ok=True)
+                            project_path = fallback
+                            # Update DB with new path
+                            from core.memory import async_session
+                            from sqlalchemy import text
+                            async with async_session() as session:
+                                async with session.begin():
+                                    await session.execute(
+                                        text("UPDATE projects SET path = :p WHERE id = :id"),
+                                        {"p": fallback, "id": project_id}
+                                    )
+                            await _send_log(websocket, f"🔄 Путь проекта исправлен: {project['path']} → {fallback}", "warning")
+                        except Exception:
+                            warn_msg = f"⚠️ Путь проекта не существует: {project_path}. Файловые операции будут недоступны."
+                            print(f"  [agent] {warn_msg}")
+                            await _send_log(websocket, warn_msg, "error")
                 project_context_text += f"ПУТЬ К ПРОЕКТУ: {project_path}\n"
                 if os.path.isdir(project_path):
                     try:

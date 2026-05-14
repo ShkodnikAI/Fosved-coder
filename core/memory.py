@@ -337,45 +337,80 @@ async def init_db():
 
 
 async def migrate_cloud_paths():
-    """Fix project paths that reference cloud /app/ directories when running locally.
-    Projects created on Render.com have paths like /app/projects/X but locally
-    the projects_dir is ./projects — this reconciles them."""
-    if IS_POSTGRES:
-        # Only fix paths when running locally (not on Render)
-        if os.environ.get("RENDER"):
-            return
-        local_dir = CONFIG["system"].get("projects_dir", "./projects")
-        if local_dir.startswith("/app/"):
-            return  # We ARE on cloud, don't migrate
-        from sqlalchemy import text
-        async with async_session() as session:
-            async with session.begin():
-                # Find all projects with /app/ paths
-                result = await session.execute(
-                    text("SELECT id, name, path FROM projects WHERE path LIKE '/app/%'")
-                )
-                rows = result.fetchall()
-                if not rows:
-                    return
-                print(f"  [db] Path migration: found {len(rows)} project(s) with cloud paths, fixing...")
-                for row_id, row_name, row_path in rows:
-                    # Extract the last directory component from the cloud path
-                    old_dir = os.path.basename(row_path.rstrip("/"))
-                    new_path = os.path.join(local_dir, old_dir)
-                    # Normalize
-                    new_path = os.path.normpath(new_path)
-                    # Update in DB
+    """Ensure all project paths exist on the filesystem. Fix broken paths.
+
+    This runs universally (both cloud and local) because:
+    - On Render, /app/projects/X may not exist after redeployment
+    - Locally, cloud paths (/app/...) need to be remapped
+    - Any path can break if the directory is deleted
+
+    Strategy for each project:
+    1. If path exists → OK, skip
+    2. Try to create the directory at the original path
+    3. If creation fails → migrate to projects_dir (from config)
+    4. If projects_dir fails → migrate to ./projects (relative to app)
+    """
+    from sqlalchemy import text
+    local_dir = CONFIG["system"].get("projects_dir", "./projects")
+
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(
+                text("SELECT id, name, path FROM projects WHERE path IS NOT NULL AND path != ''")
+            )
+            rows = result.fetchall()
+            if not rows:
+                return
+
+            fixed_count = 0
+            for row_id, row_name, row_path in rows:
+                if os.path.isdir(row_path):
+                    continue  # Path exists — no fix needed
+
+                # Path doesn't exist — try to create at original location
+                try:
+                    os.makedirs(row_path, exist_ok=True)
+                    print(f"  [db] Created missing dir: {row_path}")
+                    fixed_count += 1
+                    continue
+                except OSError:
+                    pass  # Can't create at original path
+
+                # Can't create at original path — determine a working target
+                old_dir = os.path.basename(row_path.rstrip("/")) or row_name.lower().replace(" ", "_")
+
+                # Try configured projects_dir
+                candidates = [
+                    os.path.normpath(os.path.join(local_dir, old_dir)),
+                ]
+                # Add fallback: ./projects relative to CWD
+                cwd_projects = os.path.normpath(os.path.join(os.getcwd(), "projects", old_dir))
+                if cwd_projects not in candidates:
+                    candidates.append(cwd_projects)
+
+                new_path = None
+                for candidate in candidates:
+                    if candidate == row_path:
+                        continue  # Already tried and failed
+                    try:
+                        os.makedirs(candidate, exist_ok=True)
+                        new_path = candidate
+                        break
+                    except OSError:
+                        continue
+
+                if new_path:
                     await session.execute(
                         text("UPDATE projects SET path = :new_path WHERE id = :id"),
                         {"new_path": new_path, "id": row_id}
                     )
-                    print(f"    [db] Project '{row_name}' (id={row_id}): {row_path} → {new_path}")
-                    # Create local directory if it doesn't exist
-                    try:
-                        os.makedirs(new_path, exist_ok=True)
-                    except OSError:
-                        pass
-                print(f"  [db] Path migration complete")
+                    print(f"  [db] Project '{row_name}' (id={row_id}): {row_path} → {new_path}")
+                    fixed_count += 1
+                else:
+                    print(f"  [db] ERROR: Cannot fix path for project '{row_name}' (id={row_id}): {row_path}")
+
+            if fixed_count:
+                print(f"  [db] Path migration: fixed {fixed_count}/{len(rows)} project(s)")
 
 # ═══════════════════════════════════════════════════════════════
 # PROJECTS CRUD
