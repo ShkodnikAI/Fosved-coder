@@ -1154,6 +1154,91 @@ async def clear_main_chat():
 # GIT OPERATIONS
 # ═══════════════════════════════════════════════════════════════
 
+class GitCloneRequest(BaseModel):
+    project_id: int
+    repo_url: str
+    token: str = ""  # Optional per-clone token (falls back to project token)
+
+
+@router.post("/projects/{project_id}/git/clone")
+async def git_clone_endpoint(project_id: int, req: GitCloneRequest):
+    """Clone a GitHub repository into the project directory.
+
+    Uses project's github_token if no explicit token provided.
+    If the project dir already has .git — skips clone.
+    After clone, updates project's github_repo field in DB.
+    """
+    from core.memory import get_project_internal as _get_proj_internal
+    from core.memory import git_clone_with_token
+    from core.executor import CommandExecutor
+
+    _log("GIT_CLONE", source="api", project_id=project_id,
+         details={"repo_url": req.repo_url[:80], "has_token": bool(req.token)})
+
+    project = await _get_proj_internal(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+
+    repo_url = req.repo_url.strip()
+    if not repo_url:
+        raise HTTPException(400, "URL репозитория обязателен")
+
+    # Validate URL format
+    if "github.com" not in repo_url:
+        raise HTTPException(400, "Поддерживаются только GitHub репозитории (github.com)")
+
+    # Token priority: explicit token > project token
+    token = req.token or project.get("github_token") or None
+    target_dir = project["path"]
+
+    exec_ = CommandExecutor()
+    result = await git_clone_with_token(exec_, target_dir, repo_url, token)
+
+    if result["success"]:
+        # Update github_repo in DB
+        try:
+            from core.memory import async_session, Project, select
+            async with async_session() as session:
+                async with session.begin():
+                    db_proj = await session.execute(select(Project).where(Project.id == project_id))
+                    p = db_proj.scalar_one_or_none()
+                    if p:
+                        clean_url = repo_url.rstrip("/").replace(".git", "")
+                        p.github_repo = clean_url
+                        # Save token if provided explicitly
+                        if req.token and not p.github_token:
+                            p.github_token = req.token
+        except Exception:
+            pass
+
+        _log("GIT_CLONE", source="api", level="success", project_id=project_id,
+             details={"repo_url": repo_url[:80]})
+    else:
+        _log("GIT_CLONE", source="api", level="error", project_id=project_id,
+             error=result.get("error", "")[:200])
+
+    return result
+
+
+@router.get("/projects/{project_id}/git/sync-status")
+async def git_sync_status_endpoint(project_id: int):
+    """Get comprehensive git sync status: ahead/behind, branch, remote, changes."""
+    from core.memory import get_project_internal as _get_proj_internal
+    from core.memory import get_git_sync_status
+    from core.executor import CommandExecutor
+
+    _api("GET", f"/api/v1/projects/{project_id}/git/sync-status", project_id=project_id)
+
+    project = await _get_proj_internal(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+
+    exec_ = CommandExecutor()
+    token = project.get("github_token") or None
+    status = await get_git_sync_status(exec_, project["path"], token)
+    return status
+
+
 @router.post("/projects/{project_id}/git")
 async def git_operation(project_id: int, req: GitOperationRequest):
     """Git операции: commit, push, pull, log, status, diff."""

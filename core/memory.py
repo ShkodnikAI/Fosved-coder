@@ -628,6 +628,209 @@ async def git_pull_with_token(executor, project_path: str, project_token: str | 
     return pull_out
 
 
+async def git_clone_with_token(executor, target_dir: str, repo_url: str, token: str | None = None) -> dict:
+    """Clone a GitHub repository into target_dir, using PAT token if available.
+
+    If target_dir already exists and contains a .git folder, skip clone.
+    After clone, sets the remote URL to the clean (no-token) version for security.
+
+    Returns: {"success": bool, "output": str, "error": str|None}
+    """
+    import os as _os
+
+    # Normalize repo_url
+    repo_url = repo_url.strip().rstrip("/")
+    if repo_url.endswith(".git"):
+        clean_url = repo_url
+    else:
+        clean_url = repo_url + ".git"
+
+    # Build auth URL if token available
+    auth_url = clean_url
+    if token:
+        auth_url = clean_url.replace(
+            "https://github.com",
+            f"https://{token}@github.com",
+        )
+
+    # Skip if already cloned
+    if _os.path.isdir(_os.path.join(target_dir, ".git")):
+        return {
+            "success": True,
+            "output": "Already a git repository — skipped clone",
+            "error": None,
+        }
+
+    # Ensure parent dir exists
+    parent = _os.path.dirname(target_dir)
+    if parent:
+        _os.makedirs(parent, exist_ok=True)
+
+    try:
+        r = await executor.execute(
+            f"git clone {shlex_quote(auth_url)} {shlex_quote(target_dir)}",
+            cwd=parent or ".",
+            need_approval=False,
+            timeout=120,  # Large repos may take time
+        )
+        output = (r.get("stdout", "") or "") + (r.get("stderr", "") or "")
+        exit_code = r.get("exit_code", -1)
+
+        if exit_code != 0:
+            return {
+                "success": False,
+                "output": output,
+                "error": f"git clone failed (exit {exit_code}): {output[:500]}",
+            }
+
+        # Security: set remote to clean URL (without token)
+        if token and _os.path.isdir(_os.path.join(target_dir, ".git")):
+            try:
+                await executor.execute(
+                    f"git remote set-url origin {shlex_quote(clean_url)}",
+                    cwd=target_dir,
+                    need_approval=False,
+                    timeout=10,
+                )
+            except Exception:
+                pass  # Non-critical
+
+        return {"success": True, "output": output.strip(), "error": None}
+    except Exception as e:
+        return {"success": False, "output": str(e), "error": str(e)}
+
+
+def shlex_quote(s: str) -> str:
+    """Safe shell quoting for git commands."""
+    import shlex
+    return shlex.quote(s)
+
+
+async def get_git_sync_status(executor, project_path: str, token: str | None = None) -> dict:
+    """Get comprehensive git sync status: branch, ahead/behind, remote, clean/dirty.
+
+    Returns: {
+        "is_git_repo": bool,
+        "branch": str,
+        "remote_url": str,
+        "remote_connected": bool,
+        "ahead": int,
+        "behind": int,
+        "has_changes": bool,
+        "is_clean": bool,
+        "changed_files": list[str],
+        "last_commit": str,
+        "last_commit_date": str,
+    }
+    """
+    import os as _os
+
+    result = {
+        "is_git_repo": False,
+        "branch": "",
+        "remote_url": "",
+        "remote_connected": False,
+        "ahead": 0,
+        "behind": 0,
+        "has_changes": False,
+        "is_clean": True,
+        "changed_files": [],
+        "last_commit": "",
+        "last_commit_date": "",
+    }
+
+    if not project_path or not _os.path.isdir(_os.path.join(project_path, ".git")):
+        return result
+
+    result["is_git_repo"] = True
+
+    # 1. Current branch
+    try:
+        r = await executor.execute(
+            "git rev-parse --abbrev-ref HEAD",
+            cwd=project_path, need_approval=False, timeout=10,
+        )
+        result["branch"] = (r.get("stdout", "") or "").strip()
+    except Exception:
+        pass
+
+    # 2. Remote URL
+    try:
+        r = await executor.execute(
+            "git remote get-url origin",
+            cwd=project_path, need_approval=False, timeout=10,
+        )
+        result["remote_url"] = (r.get("stdout", "") or "").strip()
+    except Exception:
+        pass
+
+    # 3. Last commit
+    try:
+        r = await executor.execute(
+            "git log -1 --format=%s|%ai",
+            cwd=project_path, need_approval=False, timeout=10,
+        )
+        parts = ((r.get("stdout", "") or "").strip()).split("|", 1)
+        if len(parts) == 2:
+            result["last_commit"] = parts[0].strip()
+            result["last_commit_date"] = parts[1].strip()
+    except Exception:
+        pass
+
+    # 4. Working tree status (has_changes, is_clean, changed_files)
+    try:
+        r = await executor.execute(
+            "git status --short",
+            cwd=project_path, need_approval=False, timeout=10,
+        )
+        output = (r.get("stdout", "") or "").strip()
+        lines = [l.strip() for l in output.split("\n") if l.strip()]
+        result["has_changes"] = len(lines) > 0
+        result["is_clean"] = len(lines) == 0
+        result["changed_files"] = lines[:50]  # Cap at 50 files
+    except Exception:
+        pass
+
+    # 5. Fetch from remote (with token) to get accurate ahead/behind
+    if result["remote_url"] and "github.com" in result["remote_url"]:
+        try:
+            auth_url, original_url = await _inject_git_token(executor, project_path, token)
+            try:
+                await executor.execute(
+                    "git fetch origin",
+                    cwd=project_path, need_approval=False, timeout=30,
+                )
+                result["remote_connected"] = True
+            except Exception:
+                result["remote_connected"] = False
+            finally:
+                if original_url:
+                    await _restore_git_remote(executor, project_path, original_url)
+        except Exception:
+            pass
+
+    # 6. Ahead / behind counts
+    if result["remote_connected"] and result["branch"]:
+        try:
+            r = await executor.execute(
+                f"git rev-list --count HEAD..origin/{result['branch']}",
+                cwd=project_path, need_approval=False, timeout=10,
+            )
+            result["behind"] = int((r.get("stdout", "") or "0").strip() or "0")
+        except (ValueError, Exception):
+            pass
+        try:
+            r = await executor.execute(
+                f"git rev-list --count origin/{result['branch']}..HEAD",
+                cwd=project_path, need_approval=False, timeout=10,
+            )
+            result["ahead"] = int((r.get("stdout", "") or "0").strip() or "0")
+        except (ValueError, Exception):
+            pass
+
+    return result
+
+
 def _mask_token(token: str | None) -> str:
     """Mask a GitHub token for safe display: ghp_xxxx...xxxx."""
     if not token or len(token) < 12:

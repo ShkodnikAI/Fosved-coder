@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 
-from core.memory import init_db, clear_history, get_project, get_project_internal, get_repo_map, git_push_with_token, git_pull_with_token, save_questionnaire
+from core.memory import init_db, clear_history, get_project, get_project_internal, get_repo_map, git_push_with_token, git_pull_with_token, git_clone_with_token, get_git_sync_status, save_questionnaire
 from core.keys_manager import keys_manager
 from core.agent import handle_chat_message, handle_hub_message
 from core.executor import CommandExecutor
@@ -656,6 +656,123 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
                 await safe_ws_send(websocket, {"type": "auto_log", "content": f"📤 Quick Push OK: {msg}", "level": "info"})
         await safe_ws_send(websocket, {"type": "done"})
 
+    elif command == "/git_clone":
+        # Usage: /git_clone <repo_url> [token]
+        # Clone a GitHub repo into current project directory
+        try:
+            logger.log("git_clone_start", level="info", source="ws", project_id=project_id)
+        except Exception:
+            pass
+        parts = args.strip().split(maxsplit=1)
+        repo_url = parts[0] if parts else ""
+        clone_token = parts[1] if len(parts) > 1 else None
+
+        if not repo_url:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Использование: /git_clone <repo_url> [token]", "level": "info"})
+            await safe_ws_send(websocket, {"type": "done"})
+            return
+
+        if "github.com" not in repo_url:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Поддерживаются только GitHub репозитории", "level": "info"})
+            await safe_ws_send(websocket, {"type": "done"})
+            return
+
+        project_path = None
+        project_token = None
+        if project_id:
+            project = await get_project_internal(project_id)
+            if project:
+                project_path = project["path"]
+                project_token = project.get("github_token") or None
+
+        if not project_path:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Выберите проект для clone", "level": "info"})
+            await safe_ws_send(websocket, {"type": "done"})
+            return
+
+        token = clone_token or project_token or None
+        await safe_ws_send(websocket, {"type": "auto_log", "content": f"Клонирую {repo_url}...", "level": "info"})
+
+        result = await git_clone_with_token(executor, project_path, repo_url, token)
+
+        if result["success"]:
+            # Update github_repo in DB
+            try:
+                from core.memory import async_session, Project, select
+                async with async_session() as session:
+                    async with session.begin():
+                        db_proj = await session.execute(select(Project).where(Project.id == project_id))
+                        p = db_proj.scalar_one_or_none()
+                        if p:
+                            p.github_repo = repo_url.rstrip("/").replace(".git", "")
+                            if clone_token and not p.github_token:
+                                p.github_token = clone_token
+            except Exception:
+                pass
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Клонирование выполнено: {repo_url}", "level": "success"})
+        else:
+            err = result.get("error", "Unknown error")[:200]
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Clone failed: {err}", "level": "error"})
+            try:
+                logger.log("git_clone_failed", level="error", source="ws", project_id=project_id, error=err)
+            except Exception:
+                pass
+        await safe_ws_send(websocket, {"type": "done"})
+
+    elif command == "/git_sync":
+        # Show git sync status (ahead/behind/changes)
+        project_path = None
+        project_token = None
+        if project_id:
+            project = await get_project_internal(project_id)
+            if project:
+                project_path = project["path"]
+                project_token = project.get("github_token") or None
+
+        if not project_path:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Выберите проект", "level": "info"})
+            await safe_ws_send(websocket, {"type": "done"})
+            return
+
+        status = await get_git_sync_status(executor, project_path, project_token)
+
+        if not status["is_git_repo"]:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": "Проект не является Git репозиторием", "level": "warning"})
+            await safe_ws_send(websocket, {"type": "done"})
+            return
+
+        # Build status summary
+        parts = []
+        parts.append(f"Branch: {status['branch'] or 'detached'}")
+        if status["remote_url"]:
+            parts.append(f"Remote: {status['remote_url'].split('github.com')[-1] if 'github.com' in status['remote_url'] else status['remote_url']}")
+        parts.append(f"Connected: {'Yes' if status['remote_connected'] else 'No'}")
+
+        if status["ahead"] or status["behind"]:
+            indicators = []
+            if status["ahead"]:
+                indicators.append(f"ahead {status['ahead']}")
+            if status["behind"]:
+                indicators.append(f"behind {status['behind']}")
+            parts.append(f"Sync: {', '.join(indicators)}")
+        else:
+            parts.append("Sync: up-to-date")
+
+        if status["has_changes"]:
+            parts.append(f"Changes: {len(status['changed_files'])} files")
+        else:
+            parts.append("Working tree: clean")
+
+        if status["last_commit"]:
+            parts.append(f"Last: {status['last_commit'][:60]}")
+            if status["last_commit_date"]:
+                parts.append(f"Date: {status['last_commit_date']}")
+
+        level = "success" if status["is_clean"] and status["ahead"] == 0 and status["behind"] == 0 else "warning"
+        for line in parts:
+            await safe_ws_send(websocket, {"type": "auto_log", "content": line, "level": level})
+        await safe_ws_send(websocket, {"type": "done"})
+
     elif command == "/clear":
         await clear_history(project_id)
         await safe_ws_send(websocket, {"type": "auto_log", "content": "История чата очищена.", "level": "info"})
@@ -773,6 +890,8 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
             "/git_pull — git pull (тихий)\n"
             "/git_push — git push (тихий)\n"
             "/quick_push [msg] — commit + push одним действием\n"
+            "/git_clone <url> [token] — клонировать GitHub репозиторий в проект\n"
+            "/git_sync — статус синхронизации с GitHub (ahead/behind)\n"
             "/test [--no-tests] — проверить код проекта (синтаксис, линт, тесты)\n"
             "/ideas <github_url> — проанализировать репозиторий\n"
             "/repo_map — показать структуру проекта\n"

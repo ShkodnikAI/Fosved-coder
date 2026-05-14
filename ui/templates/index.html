@@ -663,6 +663,53 @@
     </div>
 </div>
 
+<!-- GIT -->
+<div class="slide-panel slide-right" id="panel-git">
+    <div class="slide-panel-header">
+        <span class="slide-panel-title">🔀 Git</span>
+        <div style="display:flex;gap:4px;">
+            <button class="btn btn-sm btn-ghost" onclick="loadGitSyncStatus()">↻</button>
+            <button class="modal-close" onclick="closePanel('git')">✕</button>
+        </div>
+    </div>
+    <div class="slide-panel-body" style="display:flex;flex-direction:column;gap:8px;">
+        <!-- Sync Status -->
+        <div id="git-sync-status" style="padding:6px 10px;background:var(--bg-secondary);border-radius:6px;font-size:12px;color:var(--text-dim);">
+            Загрузка...
+        </div>
+        <!-- Actions -->
+        <div class="git-actions" style="display:flex;gap:4px;flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="wsSend('/git_pull')">📥 Pull</button>
+            <button class="btn btn-sm" onclick="wsSend('/git_push')">📤 Push</button>
+            <button class="btn btn-sm" onclick="wsSend('/quick_push sync')">🚀 Sync</button>
+        </div>
+        <!-- Clone -->
+        <div style="padding:8px 0;border-top:1px solid var(--border);">
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Клонировать репозиторий</div>
+            <div style="display:flex;gap:4px;">
+                <input type="text" id="git-clone-url" class="panel-input" style="flex:1" placeholder="https://github.com/user/repo">
+                <button class="btn btn-sm btn-primary" onclick="doGitClone()">📥 Clone</button>
+            </div>
+            <div id="git-clone-result" style="margin-top:4px;font-size:11px;color:var(--text-dim);display:none;"></div>
+        </div>
+        <!-- Commit -->
+        <div style="padding:8px 0;border-top:1px solid var(--border);">
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Коммит</div>
+            <div style="display:flex;gap:4px;align-items:center;">
+                <input type="checkbox" id="proj-git-auto-add" checked style="margin:0;">
+                <label for="proj-git-auto-add" style="font-size:11px;white-space:nowrap;">git add -A</label>
+                <input type="text" id="proj-git-commit-msg" class="panel-input" style="flex:1" placeholder="Сообщение коммита..." onkeypress="if(event.key==='Enter')doGitCommit()">
+                <button class="btn btn-sm btn-primary" onclick="doGitCommit()">✓</button>
+            </div>
+        </div>
+        <!-- Output -->
+        <div style="border-top:1px solid var(--border);padding-top:8px;">
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Вывод</div>
+            <div id="proj-git-output" style="font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto;color:var(--text-dim);font-family:monospace;"></div>
+        </div>
+    </div>
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════════
      МОДАЛЬНЫЕ ОКНА
      ═══════════════════════════════════════════════════════ -->
@@ -2763,6 +2810,7 @@ function renderBottomBar() {
             btns.push({l:'📥 Pull',a:"wsSend('/git_pull')"});
             btns.push({l:'📤 Push',a:"wsSend('/git_push')"});
             btns.push({l:'🚀 Sync',a:"wsSend('/quick_push sync')"});
+            btns.push({l:'🔄 Status',a:"wsSend('/git_sync')"});
             btns.push({l:'🧪 Test',a:"wsSend('/test')"});
             btns.push({l:'🗺 Map',a:"wsSend('/repo_map')"});
         }
@@ -2806,7 +2854,12 @@ function togglePanel(name) {
     if (!panel) return;
     const isOpen = panel.classList.contains('open');
     document.querySelectorAll('.slide-panel').forEach(p => p.classList.remove('open'));
-    if (!isOpen) panel.classList.add('open');
+    if (!isOpen) {
+        panel.classList.add('open');
+        // Auto-load data when opening specific panels
+        if (name === 'git') loadGitSyncStatus();
+        if (name === 'files') loadFileTree();
+    }
 }
 function closePanel(name) {
     const panel = document.getElementById('panel-' + name);
@@ -2832,6 +2885,85 @@ async function searchFiles() {
 // ═══════════════════════════════════════════════════════
 // GIT
 // ═══════════════════════════════════════════════════════
+async function loadGitSyncStatus() {
+    const el = document.getElementById('git-sync-status');
+    if (!currentProjectId || !el) { if (el) el.textContent = 'Выберите проект'; return; }
+    try {
+        const resp = await fetch('/api/v1/projects/' + currentProjectId + '/git/sync-status');
+        const s = await resp.json();
+        if (!s.is_git_repo) {
+            el.innerHTML = '<span style="color:var(--warning)">Нет .git — не репозиторий</span>';
+            return;
+        }
+        let html = '';
+        // Branch
+        html += `<span style="color:var(--text-secondary)">Branch:</span> ${escapeHtml(s.branch || 'detached')}`;
+        // Remote
+        if (s.remote_url) {
+            const short = s.remote_url.replace('https://github.com/', '').replace('.git', '');
+            html += ` &middot; <span style="color:var(--text-secondary)">Remote:</span> ${escapeHtml(short)}`;
+        }
+        // Sync indicator
+        if (!s.remote_connected) {
+            html += ' &middot; <span style="color:var(--error)">offline</span>';
+        } else if (s.ahead > 0 || s.behind > 0) {
+            const parts = [];
+            if (s.ahead > 0) parts.push(`<span style="color:var(--warning)">${s.ahead} ahead</span>`);
+            if (s.behind > 0) parts.push(`<span style="color:var(--error)">${s.behind} behind</span>`);
+            html += ' &middot; ' + parts.join(' / ');
+        } else {
+            html += ' &middot; <span style="color:var(--success)">synced</span>';
+        }
+        // Changes
+        if (s.has_changes) {
+            html += ` &middot; <span style="color:var(--warning)">${s.changed_files.length} changed</span>`;
+        }
+        // Last commit
+        if (s.last_commit) {
+            html += `<br><span style="color:var(--text-dim);font-size:11px">${escapeHtml(s.last_commit.substring(0, 50))}</span>`;
+        }
+        el.innerHTML = html;
+    } catch(e) {
+        el.textContent = 'Ошибка загрузки статуса';
+    }
+}
+
+async function doGitClone() {
+    if (!currentProjectId) { showToast("Выберите проект", "error"); return; }
+    const urlInput = document.getElementById('git-clone-url');
+    const resultEl = document.getElementById('git-clone-result');
+    const outputEl = document.getElementById('proj-git-output');
+    const repoUrl = urlInput.value.trim();
+    if (!repoUrl) { showToast("Введите URL репозитория", "error"); return; }
+    if (!repoUrl.includes('github.com')) { showToast("Поддерживаются только GitHub репозитории", "error"); return; }
+
+    resultEl.style.display = 'block';
+    resultEl.textContent = 'Клонирование...';
+    outputEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/v1/projects/' + currentProjectId + '/git/clone', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project_id: currentProjectId, repo_url: repoUrl})
+        });
+        const data = await resp.json();
+        if (data.success) {
+            resultEl.innerHTML = '<span style="color:var(--success)">Клонировано!</span>';
+            outputEl.textContent = data.output || 'OK';
+            showToast('Репозиторий клонирован', 'success');
+            // Refresh file tree and sync status
+            loadFileTree();
+            loadGitSyncStatus();
+        } else {
+            resultEl.innerHTML = '<span style="color:var(--error)">Ошибка: ' + escapeHtml((data.error || 'Unknown').substring(0, 100)) + '</span>';
+            outputEl.textContent = data.output || data.error || 'Error';
+        }
+    } catch(e) {
+        resultEl.innerHTML = '<span style="color:var(--error)">Ошибка: ' + escapeHtml(e.message) + '</span>';
+    }
+}
+
 async function gitAction(action) {
     if (!currentProjectId) { showToast("Выберите проект", "error"); return; }
     if (action==='commit') {
@@ -2843,6 +2975,8 @@ async function gitAction(action) {
         const resp = await fetch('/api/v1/projects/'+currentProjectId+'/git', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:currentProjectId,operation:action}) });
         const data = await resp.json();
         document.getElementById('proj-git-output').textContent = data.output || data.result || JSON.stringify(data, null, 2);
+        // Refresh sync status after action
+        loadGitSyncStatus();
     } catch(e) { document.getElementById('proj-git-output').textContent = 'Ошибка: '+e.message; }
 }
 async function doGitCommit() {
@@ -2854,6 +2988,8 @@ async function doGitCommit() {
         const data = await resp.json();
         document.getElementById('proj-git-output').textContent = data.output || data.result || 'OK';
         document.getElementById('proj-git-commit-form').classList.add('hidden');
+        // Refresh sync status after commit
+        loadGitSyncStatus();
     } catch(e) { document.getElementById('proj-git-output').textContent = 'Ошибка: '+e.message; }
 }
 
@@ -3092,7 +3228,9 @@ function showHelp() {
         <h3 style="color:var(--accent);margin:16px 0 8px;">Команды</h3>
         <ul style="padding-left:20px;color:var(--text-secondary);line-height:2;">
             <li><code>/terminal &lt;cmd&gt;</code> — выполнить команду</li>
-            <li><code>/git_push</code> / <code>/git_pull</code></li>
+            <li><code>/git_push</code> / <code>/git_pull</code> / <code>/quick_push</code></li>
+            <li><code>/git_clone &lt;url&gt;</code> — клонировать GitHub репозиторий</li>
+            <li><code>/git_sync</code> — статус синхронизации с GitHub</li>
             <li><code>/quick_push sync</code> — commit + push</li>
             <li><code>/test</code> — проверить код</li>
             <li><code>/repo_map</code> — структура проекта</li>
