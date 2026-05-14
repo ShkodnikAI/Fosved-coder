@@ -831,6 +831,233 @@ async def get_git_sync_status(executor, project_path: str, token: str | None = N
     return result
 
 
+async def git_stash_with_token(executor, project_path: str, project_token: str | None, message: str = "auto-stash") -> dict:
+    """Stash current changes before pull. Returns {"success": bool, "output": str, "had_changes": bool}.
+
+    If there are no changes to stash, returns success with had_changes=False.
+    Uses token injection for private repos (not needed for stash, but keeps consistency).
+    """
+    import os as _os
+    if not project_path or not _os.path.isdir(_os.path.join(project_path, ".git")):
+        return {"success": False, "output": "Not a git repo", "had_changes": False}
+
+    # Check if there are changes to stash
+    try:
+        r_status = await executor.execute(
+            "git status --short", cwd=project_path,
+            need_approval=False, timeout=10,
+        )
+        status_out = (r_status.get("stdout", "") or "").strip()
+        has_changes = len([l for l in status_out.split("\n") if l.strip()]) > 0
+    except Exception:
+        has_changes = True  # Assume changes if status fails
+
+    if not has_changes:
+        return {"success": True, "output": "No changes to stash", "had_changes": False}
+
+    try:
+        r = await executor.execute(
+            f"git stash push -m {shlex_quote(message)}",
+            cwd=project_path, need_approval=False, timeout=15,
+        )
+        out = (r.get("stdout", "") or "") + (r.get("stderr", "") or "")
+        success = "Saved working directory" in out or r.get("exit_code", -1) == 0
+        return {"success": success, "output": out.strip(), "had_changes": True}
+    except Exception as e:
+        return {"success": False, "output": str(e), "had_changes": True}
+
+
+async def git_stash_pop_with_token(executor, project_path: str) -> dict:
+    """Pop stashed changes after pull. Returns {"success": bool, "output": str, "conflicts": list[str]}.
+
+    If there are conflicts, lists the conflicted files but does NOT abort —
+    the conflicts remain in the working tree for the user to resolve.
+    """
+    import os as _os
+    if not project_path or not _os.path.isdir(_os.path.join(project_path, ".git")):
+        return {"success": False, "output": "Not a git repo", "conflicts": []}
+
+    # Check if there's anything to pop
+    try:
+        r_list = await executor.execute(
+            "git stash list", cwd=project_path,
+            need_approval=False, timeout=10,
+        )
+        stash_list = (r_list.get("stdout", "") or "").strip()
+        if not stash_list:
+            return {"success": True, "output": "Nothing to pop (no stash)", "conflicts": []}
+    except Exception:
+        return {"success": True, "output": "Nothing to pop", "conflicts": []}
+
+    try:
+        r = await executor.execute(
+            "git stash pop", cwd=project_path,
+            need_approval=False, timeout=15,
+        )
+        out = (r.get("stdout", "") or "") + (r.get("stderr", "") or "")
+        exit_code = r.get("exit_code", -1)
+
+        # Check for conflicts
+        conflicted_files = []
+        if "CONFLICT" in out or exit_code != 0:
+            # Get list of unmerged files
+            try:
+                r_conflict = await executor.execute(
+                    "git diff --name-only --diff-filter=U",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                conflicted_files = [
+                    f.strip() for f in (r_conflict.get("stdout", "") or "").split("\n") if f.strip()
+                ]
+            except Exception:
+                pass
+
+        return {
+            "success": exit_code == 0,
+            "output": out.strip(),
+            "conflicts": conflicted_files,
+        }
+    except Exception as e:
+        return {"success": False, "output": str(e), "conflicts": []}
+
+
+async def git_has_conflicts(executor, project_path: str) -> dict:
+    """Check if the working tree has merge conflicts. Returns {"has_conflicts": bool, "files": list[str]}."""
+    import os as _os
+    if not project_path or not _os.path.isdir(_os.path.join(project_path, ".git")):
+        return {"has_conflicts": False, "files": []}
+
+    try:
+        # Check for unmerged files (U = both modified, conflict markers)
+        r = await executor.execute(
+            "git diff --name-only --diff-filter=U",
+            cwd=project_path, need_approval=False, timeout=10,
+        )
+        files = [f.strip() for f in (r.get("stdout", "") or "").split("\n") if f.strip()]
+
+        # Also check ls-files --unmerged for a more thorough check
+        if not files:
+            r2 = await executor.execute(
+                "git ls-files --unmerged",
+                cwd=project_path, need_approval=False, timeout=10,
+            )
+            unmerged_out = (r2.get("stdout", "") or "").strip()
+            if unmerged_out:
+                # Extract unique file names from ls-files --unmerged output
+                seen = set()
+                for line in unmerged_out.split("\n"):
+                    parts = line.split("\t")
+                    if len(parts) >= 2 and parts[1] not in seen:
+                        seen.add(parts[1])
+                        files.append(parts[1])
+
+        return {"has_conflicts": len(files) > 0, "files": files}
+    except Exception:
+        return {"has_conflicts": False, "files": []}
+
+
+async def git_resolve_conflict(executor, project_path: str, strategy: str, files: list[str] | None = None) -> dict:
+    """Resolve merge conflicts using the specified strategy.
+
+    Strategies:
+    - "ours": accept local version (git checkout --ours)
+    - "theirs": accept remote version (git checkout --theirs)
+    - "discard_local": discard all local changes and reset to remote (git reset --hard origin/branch)
+    - "discard_theirs": keep only local changes, drop remote (git reset --hard HEAD)
+
+    Returns: {"success": bool, "output": str, "resolved_files": list[str]}
+    """
+    import os as _os
+    if not project_path or not _os.path.isdir(_os.path.join(project_path, ".git")):
+        return {"success": False, "output": "Not a git repo", "resolved_files": []}
+
+    try:
+        if strategy == "ours":
+            # Accept local version for conflicted files
+            target_files = files or []
+            if not target_files:
+                r = await executor.execute(
+                    "git diff --name-only --diff-filter=U",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                target_files = [f.strip() for f in (r.get("stdout", "") or "").split("\n") if f.strip()]
+
+            resolved = []
+            for f in target_files:
+                await executor.execute(
+                    f"git checkout --ours {shlex_quote(f)}",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                await executor.execute(
+                    f"git add {shlex_quote(f)}",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                resolved.append(f)
+
+            return {"success": True, "output": f"Resolved {len(resolved)} file(s) using 'ours' (local)", "resolved_files": resolved}
+
+        elif strategy == "theirs":
+            # Accept remote version for conflicted files
+            target_files = files or []
+            if not target_files:
+                r = await executor.execute(
+                    "git diff --name-only --diff-filter=U",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                target_files = [f.strip() for f in (r.get("stdout", "") or "").split("\n") if f.strip()]
+
+            resolved = []
+            for f in target_files:
+                await executor.execute(
+                    f"git checkout --theirs {shlex_quote(f)}",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                await executor.execute(
+                    f"git add {shlex_quote(f)}",
+                    cwd=project_path, need_approval=False, timeout=10,
+                )
+                resolved.append(f)
+
+            return {"success": True, "output": f"Resolved {len(resolved)} file(s) using 'theirs' (remote)", "resolved_files": resolved}
+
+        elif strategy == "discard_local":
+            # Hard reset to remote — loses ALL local changes
+            # First get current branch
+            r_branch = await executor.execute(
+                "git rev-parse --abbrev-ref HEAD",
+                cwd=project_path, need_approval=False, timeout=10,
+            )
+            branch = (r_branch.get("stdout", "") or "").strip()
+            if not branch:
+                return {"success": False, "output": "Cannot determine current branch", "resolved_files": []}
+
+            r_fetch = await executor.execute(
+                "git fetch origin",
+                cwd=project_path, need_approval=False, timeout=30,
+            )
+            r_reset = await executor.execute(
+                f"git reset --hard origin/{shlex_quote(branch)}",
+                cwd=project_path, need_approval=False, timeout=15,
+            )
+            out = (r_reset.get("stdout", "") or "") + (r_reset.get("stderr", "") or "")
+            return {"success": True, "output": f"Reset to origin/{branch}. Local changes discarded.", "resolved_files": []}
+
+        elif strategy == "discard_theirs":
+            # Reset to HEAD — drops the merge, keeps only local
+            r_reset = await executor.execute(
+                "git merge --abort",
+                cwd=project_path, need_approval=False, timeout=10,
+            )
+            out = (r_reset.get("stdout", "") or "") + (r_reset.get("stderr", "") or "")
+            return {"success": True, "output": "Merge aborted. Local changes preserved.", "resolved_files": []}
+
+        else:
+            return {"success": False, "output": f"Unknown strategy: {strategy}", "resolved_files": []}
+
+    except Exception as e:
+        return {"success": False, "output": str(e), "resolved_files": []}
+
+
 def _mask_token(token: str | None) -> str:
     """Mask a GitHub token for safe display: ghp_xxxx...xxxx."""
     if not token or len(token) < 12:

@@ -3,7 +3,7 @@ Fosved Coder v2.0 — REST API Endpoints
 Включает управление ключами, моделями, проектами, локальные модели, кастомные модели.
 Поиск файлов, гит, шаблоны, пакеты, архив.
 """
-from fastapi import APIRouter, HTTPException, Body, Query, Request
+from fastapi import APIRouter, HTTPException, Body, Query, Request, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -1383,6 +1383,237 @@ async def git_operation(project_id: int, req: GitOperationRequest):
     except Exception as e:
         _log(f"GIT_{req.operation.upper()}", source="api", level="error", error=str(e), project_id=req.project_id)
         raise HTTPException(500, str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE 4: CONFLICT RESOLUTION & STASH
+# ═══════════════════════════════════════════════════════════════
+
+class ConflictResolveRequest(BaseModel):
+    strategy: str  # ours, theirs, discard_local, discard_theirs
+    files: list[str] = []  # Optional: specific files to resolve
+
+
+@router.get("/projects/{project_id}/git/conflicts")
+async def git_conflicts_endpoint(project_id: int):
+    """Check for merge conflicts in the project."""
+    from core.memory import get_project_internal as _get_proj_internal
+    from core.memory import git_has_conflicts
+    from core.executor import CommandExecutor
+
+    _api("GET", f"/api/v1/projects/{project_id}/git/conflicts", project_id=project_id)
+    project = await _get_proj_internal(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+
+    exec_ = CommandExecutor()
+    result = await git_has_conflicts(exec_, project["path"])
+    return result
+
+
+@router.post("/projects/{project_id}/git/resolve-conflict")
+async def git_resolve_conflict_endpoint(project_id: int, req: ConflictResolveRequest):
+    """Resolve merge conflicts using the specified strategy."""
+    from core.memory import get_project_internal as _get_proj_internal
+    from core.memory import git_resolve_conflict
+    from core.executor import CommandExecutor
+
+    _log("RESOLVE_CONFLICT", source="api", project_id=project_id,
+         details={"strategy": req.strategy, "files_count": len(req.files)})
+
+    project = await _get_proj_internal(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+
+    valid_strategies = ("ours", "theirs", "discard_local", "discard_theirs")
+    if req.strategy not in valid_strategies:
+        raise HTTPException(400, f"Неизвестная стратегия: {req.strategy}. Допустимо: {', '.join(valid_strategies)}")
+
+    exec_ = CommandExecutor()
+    result = await git_resolve_conflict(exec_, project["path"], req.strategy, req.files or None)
+
+    if result["success"]:
+        _log("RESOLVE_CONFLICT", source="api", level="success", project_id=project_id,
+             details={"strategy": req.strategy, "resolved": result.get("resolved_files", [])})
+    else:
+        _log("RESOLVE_CONFLICT", source="api", level="error", project_id=project_id,
+             error=result.get("output", "")[:200])
+
+    return result
+
+
+@router.post("/projects/{project_id}/git/stash")
+async def git_stash_endpoint(project_id: int):
+    """Stash current changes (auto-stash before pull)."""
+    from core.memory import get_project_internal as _get_proj_internal
+    from core.memory import git_stash_with_token
+    from core.executor import CommandExecutor
+
+    _log("GIT_STASH", source="api", project_id=project_id)
+    project = await _get_proj_internal(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+
+    exec_ = CommandExecutor()
+    token = project.get("github_token") or None
+    result = await git_stash_with_token(exec_, project["path"], token)
+    return result
+
+
+@router.post("/projects/{project_id}/git/stash-pop")
+async def git_stash_pop_endpoint(project_id: int):
+    """Pop stashed changes after pull."""
+    from core.memory import get_project_internal as _get_proj_internal
+    from core.memory import git_stash_pop_with_token
+    from core.executor import CommandExecutor
+
+    _log("GIT_STASH_POP", source="api", project_id=project_id)
+    project = await _get_proj_internal(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+
+    exec_ = CommandExecutor()
+    result = await git_stash_pop_with_token(exec_, project["path"])
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE 5: LOCAL ZIP EXPORT / IMPORT
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/projects/{project_id}/export-zip")
+async def export_project_zip(project_id: int):
+    """Export project files as a ZIP download (no .git, no node_modules, no __pycache__)."""
+    _log("EXPORT_ZIP", source="api", project_id=project_id)
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    project_path = project["path"]
+    if not os.path.isdir(project_path):
+        raise HTTPException(400, "Папка проекта не найдена")
+
+    # Create ZIP in memory (tempfile)
+    import io
+    project_real = os.path.realpath(project_path)
+    skip_dirs = {'.git', '__pycache__', 'node_modules', '.next', 'venv', '.venv', '.idea', '.vscode', 'dist', 'build', '.cache'}
+    buf = io.BytesIO()
+    file_count = 0
+
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(project_path, followlinks=False):
+            dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
+            for f in files:
+                full = os.path.join(root, f)
+                if os.path.islink(full):
+                    continue
+                real = os.path.realpath(full)
+                if os.path.commonpath([real, project_real]) != project_real:
+                    continue
+                # Skip binary files common in projects
+                ext = os.path.splitext(f)[1].lower()
+                if ext in ('.pyc', '.pyo', '.so', '.dll', '.exe', '.bin'):
+                    continue
+                arcname = os.path.relpath(full, project_path)
+                try:
+                    zf.write(full, arcname)
+                    file_count += 1
+                except (OSError, ValueError):
+                    continue
+
+    buf.seek(0)
+    zip_name = f"{project['name'].replace(' ', '_')}.zip"
+    _log("EXPORT_ZIP", source="api", level="success", project_id=project_id,
+         details={"files": file_count, "size_kb": round(len(buf.getvalue()) / 1024, 1)})
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=\"{zip_name}\""},
+    )
+
+
+@router.post("/projects/{project_id}/import-zip")
+async def import_project_zip(project_id: int, file: UploadFile = File(...)):
+    """Import a ZIP file into the project directory.
+
+    Extracts ZIP contents into the project path, overwriting existing files.
+    Skips .git directories inside the ZIP for safety.
+    """
+    _log("IMPORT_ZIP", source="api", project_id=project_id)
+    project = await get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Проект не найден")
+    project_path = project["path"]
+    os.makedirs(project_path, exist_ok=True)
+
+    # Stream-read ZIP into temp file (size limit: 50 MB)
+    MAX_IMPORT_BYTES = 50 * 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_IMPORT_BYTES:
+            raise HTTPException(413, f"ZIP превышает лимит {MAX_IMPORT_BYTES // (1024 * 1024)} MB")
+        chunks.append(chunk)
+    zip_bytes = b"".join(chunks)
+
+    if len(zip_bytes) < 4 or zip_bytes[:4] != b'PK\x03\x04':
+        raise HTTPException(400, "Файл не является ZIP архивом")
+
+    project_real = os.path.realpath(project_path)
+    imported_files = 0
+    skipped = 0
+
+    import io as _io
+    try:
+        with zipfile.ZipFile(_io.BytesIO(zip_bytes), 'r') as zf:
+            for info in zf.infolist():
+                # Security: skip absolute paths and path traversal
+                name = info.filename
+                if name.startswith('/') or '..' in name:
+                    skipped += 1
+                    continue
+                # Skip .git inside ZIP
+                parts = name.replace('\\', '/').split('/')
+                if '.git' in parts:
+                    skipped += 1
+                    continue
+                # Skip directories
+                if name.endswith('/'):
+                    target = os.path.join(project_path, name)
+                    os.makedirs(target, exist_ok=True)
+                    continue
+
+                target = os.path.join(project_path, name)
+                # Verify target is within project path
+                target_real = os.path.realpath(target)
+                if os.path.commonpath([target_real, project_real]) != project_real:
+                    skipped += 1
+                    continue
+
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                # Extract file
+                try:
+                    with zf.open(info) as src, open(target, 'wb') as dst:
+                        shutil.copyfileobj(src, dst, 64 * 1024)
+                    imported_files += 1
+                except Exception:
+                    skipped += 1
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Повреждённый ZIP архив")
+
+    _log("IMPORT_ZIP", source="api", level="success", project_id=project_id,
+         details={"imported": imported_files, "skipped": skipped})
+
+    return {
+        "success": True,
+        "imported_files": imported_files,
+        "skipped": skipped,
+        "project_path": project_path,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -3185,7 +3416,8 @@ async def github_webhook(request: Request):
              details={"repo": repo_full_name, "projects_scanned": len(all_projects)})
         return {"status": "ignored", "reason": f"no project matches repo {repo_full_name}"}
 
-    # 4. Pull each matched project
+    # 4. Pull each matched project (with stash/pop conflict avoidance)
+    from core.memory import git_stash_with_token, git_stash_pop_with_token
     executor = CommandExecutor()
     results = []
     for p in matched:
@@ -3194,19 +3426,35 @@ async def github_webhook(request: Request):
             continue
         try:
             token = p.github_token or None
+
+            # Phase 4: Stash local changes before pull to avoid conflicts
+            stash_result = await git_stash_with_token(executor, p.path, token, "webhook-auto-stash")
+            was_stashed = stash_result.get("had_changes", False)
+
             pull_out = await git_pull_with_token(executor, p.path, token)
             pull_stripped = pull_out.strip()
             success = not any(kw in pull_stripped.lower() for kw in ("error", "fatal", "denied"))
+
+            # Pop stashed changes after pull
+            if was_stashed:
+                pop_result = await git_stash_pop_with_token(executor, p.path)
+                pop_conflicts = pop_result.get("conflicts", [])
+                if pop_conflicts:
+                    # If stash pop created conflicts, note them
+                    pull_stripped += f"\n[!] Stash pop conflicts in: {', '.join(pop_conflicts)}"
+                    success = True  # Pull itself succeeded, conflicts are informational
+
             results.append({
                 "project": p.name,
                 "status": "success" if success else "error",
-                "output": pull_stripped[:200],
+                "output": pull_stripped[:300],
             })
             _log("GITHUB_WEBHOOK_PULL", source="api",
                  level="success" if success else "warning",
                  project_id=p.id,
                  details={"repo": repo_full_name, "pusher": pusher,
-                          "output": pull_stripped[:150]})
+                          "output": pull_stripped[:150],
+                          "stashed": was_stashed})
         except Exception as e:
             results.append({"project": p.name, "status": "error", "output": str(e)[:200]})
             _log("GITHUB_WEBHOOK_PULL_ERROR", source="api", level="error",
