@@ -3,7 +3,7 @@ Fosved Coder v2.0 — REST API Endpoints
 Включает управление ключами, моделями, проектами, локальные модели, кастомные модели.
 Поиск файлов, гит, шаблоны, пакеты, архив.
 """
-from fastapi import APIRouter, HTTPException, Body, Query
+from fastapi import APIRouter, HTTPException, Body, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -3087,3 +3087,294 @@ async def memory_context(
     from core.observation_manager import assemble_context
     context = await assemble_context(project_id=project_id, max_tokens=max_tokens)
     return {"context": context, "tokens_estimate": len(context) // 3}
+
+
+# ═══════════════════════════════════════════════════════════════
+# GITHUB WEBHOOK — auto-pull when changes are pushed to repo
+# ═══════════════════════════════════════════════════════════════
+
+import hashlib
+import hmac
+import httpx
+
+
+@router.post("/webhook/github")
+async def github_webhook(request: Request):
+    """Receive GitHub push webhook events and auto-pull matching projects.
+
+    Flow:
+    1. Read raw body for HMAC verification
+    2. Verify HMAC-SHA256 signature (if webhook secret is set)
+    3. Extract repo full_name from payload
+    4. Find project(s) with matching github_repo
+    5. Run git pull on matching project(s)
+    6. Return status
+    """
+    # Read raw body for HMAC, then parse JSON
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body)
+    except Exception:
+        return {"status": "error", "reason": "invalid JSON body"}
+
+    x_hub_signature_256 = request.headers.get("x-hub-signature-256")
+    x_github_event = request.headers.get("x-github-event")
+
+    if not x_github_event or x_github_event != "push":
+        return {"status": "ignored", "reason": f"event={x_github_event}, only 'push' handled"}
+
+    _log("GITHUB_WEBHOOK_RECEIVED", source="api",
+         details={"event": x_github_event, "repo": payload.get("repository", {}).get("full_name", "?")})
+
+    # 1. Verify signature if secret is configured
+    from core.memory import get_system_setting
+    webhook_secret = await get_system_setting("webhook_secret")
+    if webhook_secret:
+        if not x_hub_signature_256:
+            _log("GITHUB_WEBHOOK_NO_SIG", source="api", level="warning")
+            raise HTTPException(403, "Missing signature")
+        expected = "sha256=" + hmac.new(
+            webhook_secret.encode("utf-8"), raw_body, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected, x_hub_signature_256):
+            _log("GITHUB_WEBHOOK_BAD_SIG", source="api", level="warning")
+            raise HTTPException(403, "Invalid signature")
+
+    # 2. Extract repo info
+    repo_info = payload.get("repository", {})
+    repo_full_name = repo_info.get("full_name", "")  # e.g. "owner/repo"
+    repo_clone_url = repo_info.get("clone_url", "")   # e.g. "https://github.com/owner/repo.git"
+    pusher = payload.get("pusher", {}).get("name", "?")
+    ref = payload.get("ref", "")
+    # Only handle pushes to default branch (refs/heads/main or refs/heads/master)
+    if not (ref.endswith("/main") or ref.endswith("/master")):
+        return {"status": "ignored", "reason": f"not default branch: {ref}"}
+
+    if not repo_full_name:
+        return {"status": "ignored", "reason": "no repo in payload"}
+
+    # 3. Find matching project(s)
+    from core.memory import async_session, Project, select, get_project_internal
+    from core.memory import git_pull_with_token
+    from core.executor import CommandExecutor
+
+    # Build search patterns: try both "owner/repo" and full URL formats
+    search_patterns = [
+        f"github.com/{repo_full_name}",
+        f"github.com/{repo_full_name}.git",
+        repo_clone_url.rstrip(".git"),
+        repo_clone_url,
+    ]
+
+    async with async_session() as session:
+        result = await session.execute(select(Project))
+        all_projects = result.scalars().all()
+
+    matched = []
+    for p in all_projects:
+        gh_repo = (p.github_repo or "").strip().lower()
+        if not gh_repo:
+            continue
+        for pattern in search_patterns:
+            if pattern.lower() in gh_repo or gh_repo in pattern.lower():
+                matched.append(p)
+                break
+
+    if not matched:
+        _log("GITHUB_WEBHOOK_NO_MATCH", source="api",
+             details={"repo": repo_full_name, "projects_scanned": len(all_projects)})
+        return {"status": "ignored", "reason": f"no project matches repo {repo_full_name}"}
+
+    # 4. Pull each matched project
+    executor = CommandExecutor()
+    results = []
+    for p in matched:
+        if not p.path or not os.path.isdir(os.path.join(p.path, ".git")):
+            results.append({"project": p.name, "status": "skipped", "reason": "no .git"})
+            continue
+        try:
+            token = p.github_token or None
+            pull_out = await git_pull_with_token(executor, p.path, token)
+            pull_stripped = pull_out.strip()
+            success = not any(kw in pull_stripped.lower() for kw in ("error", "fatal", "denied"))
+            results.append({
+                "project": p.name,
+                "status": "success" if success else "error",
+                "output": pull_stripped[:200],
+            })
+            _log("GITHUB_WEBHOOK_PULL", source="api",
+                 level="success" if success else "warning",
+                 project_id=p.id,
+                 details={"repo": repo_full_name, "pusher": pusher,
+                          "output": pull_stripped[:150]})
+        except Exception as e:
+            results.append({"project": p.name, "status": "error", "output": str(e)[:200]})
+            _log("GITHUB_WEBHOOK_PULL_ERROR", source="api", level="error",
+                 project_id=p.id, error=str(e)[:200])
+
+    # 5. Save last webhook event info
+    from core.memory import set_system_setting
+    await set_system_setting("webhook_last_event", json.dumps({
+        "repo": repo_full_name,
+        "pusher": pusher,
+        "ref": ref,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "projects_pulled": len([r for r in results if r["status"] == "success"]),
+    }))
+
+    return {"status": "ok", "repo": repo_full_name, "pusher": pusher, "results": results}
+
+
+class WebhookConfigRequest(BaseModel):
+    secret: str = ""  # New secret (empty = auto-generate)
+    enabled: bool = True
+
+
+@router.get("/webhook/status")
+async def webhook_status():
+    """Get webhook configuration status: secret exists, last event, etc."""
+    from core.memory import get_system_setting
+    secret = await get_system_setting("webhook_secret")
+    last_event_json = await get_system_setting("webhook_last_event")
+
+    last_event = None
+    if last_event_json:
+        try:
+            last_event = json.loads(last_event_json)
+        except Exception:
+            pass
+
+    # Determine base URL for webhook registration
+    base_url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+    if not base_url:
+        # Try to infer from request (will be set when called from browser)
+        base_url = ""
+
+    return {
+        "has_secret": bool(secret),
+        "secret_set": bool(secret),
+        "last_event": last_event,
+        "base_url": base_url,
+        "webhook_url": f"{base_url}/api/v1/webhook/github" if base_url else "",
+    }
+
+
+@router.post("/webhook/configure")
+async def webhook_configure(req: WebhookConfigRequest):
+    """Generate or set the webhook secret.
+
+    If secret is empty, auto-generates a random 40-char hex string.
+    Returns the secret (shown only once — save it!).
+    """
+    import secrets
+    from core.memory import set_system_setting, get_system_setting
+
+    if not req.enabled:
+        await set_system_setting("webhook_secret", "")
+        _log("WEBHOOK_DISABLED", source="api")
+        return {"success": True, "enabled": False, "message": "Webhook disabled"}
+
+    secret = req.secret.strip() if req.secret else secrets.token_hex(20)
+    if len(secret) < 16:
+        raise HTTPException(400, "Secret must be at least 16 characters")
+
+    await set_system_setting("webhook_secret", secret)
+    _log("WEBHOOK_CONFIGURED", source="api", level="success")
+    return {"success": True, "enabled": True, "secret": secret, "message": "Secret saved. Use it in GitHub webhook settings."}
+
+
+@router.post("/webhook/register")
+async def webhook_register_github(repo_url: str = Body(..., embed=True)):
+    """Register a webhook on the GitHub repository via GitHub API.
+
+    Requires the project to have a github_token (PAT with repo scope).
+    Uses the stored webhook_secret for signing.
+    """
+    from core.memory import get_system_setting, async_session, Project, select
+
+    webhook_secret = await get_system_setting("webhook_secret")
+    if not webhook_secret:
+        raise HTTPException(400, "Webhook secret not configured. Use POST /webhook/configure first.")
+
+    base_url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+    if not base_url:
+        raise HTTPException(400, "RENDER_EXTERNAL_URL not set. Cannot determine webhook URL.")
+
+    webhook_url = f"{base_url}/api/v1/webhook/github"
+
+    # Find project by repo_url
+    repo_clean = repo_url.strip().rstrip("/").replace(".git", "").lower()
+    async with async_session() as session:
+        result = await session.execute(select(Project))
+        projects = result.scalars().all()
+
+    token = None
+    matched_name = None
+    for p in projects:
+        if repo_clean in (p.github_repo or "").lower():
+            token = p.github_token
+            matched_name = p.name
+            break
+
+    if not token:
+        raise HTTPException(400, f"No PAT token found for repo {repo_url}. Set github_token in project settings.")
+
+    # Extract owner/repo from URL
+    m = re.search(r"github\.com/([^/]+)/([^/\s]+)", repo_url)
+    if not m:
+        raise HTTPException(400, "Cannot parse owner/repo from URL")
+
+    owner, repo = m.group(1), m.group(2).rstrip(".git")
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/hooks"
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Check existing hooks
+            resp = await client.get(
+                api_url,
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(502, f"GitHub API error: {resp.status_code} {resp.text[:200]}")
+
+            existing_hooks = resp.json()
+            # Update existing or create new
+            for hook in existing_hooks:
+                if webhook_url in hook.get("config", {}).get("url", ""):
+                    # Update existing hook
+                    patch_url = f"{api_url}/{hook['id']}"
+                    resp = await client.patch(
+                        patch_url,
+                        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"},
+                        json={
+                            "config": {"url": webhook_url, "content_type": "json", "secret": webhook_secret},
+                            "events": ["push"],
+                            "active": True,
+                        },
+                    )
+                    _log("WEBHOOK_UPDATED_GITHUB", source="api", level="success",
+                         details={"repo": f"{owner}/{repo}", "hook_id": hook["id"]})
+                    return {"success": True, "action": "updated", "repo": f"{owner}/{repo}", "url": webhook_url}
+
+            # Create new hook
+            resp = await client.post(
+                api_url,
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"},
+                json={
+                    "name": "web",
+                    "config": {"url": webhook_url, "content_type": "json", "secret": webhook_secret},
+                    "events": ["push"],
+                    "active": True,
+                },
+            )
+            if resp.status_code in (200, 201):
+                _log("WEBHOOK_REGISTERED_GITHUB", source="api", level="success",
+                     details={"repo": f"{owner}/{repo}"})
+                return {"success": True, "action": "created", "repo": f"{owner}/{repo}", "url": webhook_url}
+            else:
+                raise HTTPException(502, f"GitHub API error: {resp.status_code} {resp.text[:300]}")
+
+    except httpx.TimeoutException:
+        raise HTTPException(504, "GitHub API timeout")
+    except HTTPException:
+        raise

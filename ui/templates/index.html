@@ -702,6 +702,18 @@
                 <button class="btn btn-sm btn-primary" onclick="doGitCommit()">✓</button>
             </div>
         </div>
+        <!-- Webhook Auto-Sync -->
+        <div style="padding:8px 0;border-top:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <div style="font-size:12px;font-weight:600;color:var(--text-secondary);">Webhook Auto-Sync</div>
+                <span id="webhook-status-dot" style="font-size:10px;padding:2px 6px;border-radius:10px;background:var(--bg-tertiary);color:var(--text-dim);">—</span>
+            </div>
+            <div id="webhook-info" style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">Загрузка...</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                <button class="btn btn-sm" onclick="doWebhookSetup()" title="Сгенерировать secret и показать URL">⚙️ Настроить</button>
+                <button class="btn btn-sm" onclick="doWebhookRegister()" title="Зарегистрировать webhook на GitHub">🔗 Зарегистрировать</button>
+            </div>
+        </div>
         <!-- Output -->
         <div style="border-top:1px solid var(--border);padding-top:8px;">
             <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Вывод</div>
@@ -2857,7 +2869,7 @@ function togglePanel(name) {
     if (!isOpen) {
         panel.classList.add('open');
         // Auto-load data when opening specific panels
-        if (name === 'git') loadGitSyncStatus();
+        if (name === 'git') { loadGitSyncStatus(); loadWebhookStatus(); }
         if (name === 'files') loadFileTree();
     }
 }
@@ -3006,6 +3018,86 @@ async function doGitConnect() {
         }
     } catch(e) {
         resultEl.innerHTML = '<span style="color:var(--error)">Ошибка: ' + escapeHtml(e.message) + '</span>';
+    }
+}
+
+async function loadWebhookStatus() {
+    const dot = document.getElementById('webhook-status-dot');
+    const info = document.getElementById('webhook-info');
+    if (!dot || !info) return;
+    try {
+        const resp = await fetch('/api/v1/webhook/status');
+        const s = await resp.json();
+        if (s.secret_set) {
+            dot.textContent = 'ON';
+            dot.style.background = 'var(--success)';
+            dot.style.color = '#fff';
+            let html = '';
+            if (s.webhook_url) html += '<b>URL:</b> ' + escapeHtml(s.webhook_url);
+            else html += '<span style="color:var(--warning)">RENDER_EXTERNAL_URL не задан</span>';
+            if (s.last_event) {
+                const le = s.last_event;
+                html += '<br><b>Последнее:</b> ' + escapeHtml(le.repo) + ' (' + escapeHtml(le.pusher) + ')';
+                html += ' — ' + (le.projects_pulled || 0) + ' проектов обновлено';
+            }
+            info.innerHTML = html;
+        } else {
+            dot.textContent = 'OFF';
+            dot.style.background = 'var(--bg-tertiary)';
+            dot.style.color = 'var(--text-dim)';
+            info.textContent = 'Webhook не настроен. Нажмите "Настроить" для генерации secret.';
+        }
+    } catch(e) {
+        info.textContent = 'Ошибка загрузки';
+    }
+}
+
+async function doWebhookSetup() {
+    const secret = prompt('Введите secret (пустое = автогенерация):');
+    if (secret === null) return; // Cancelled
+    try {
+        const resp = await fetch('/api/v1/webhook/configure', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({secret: secret, enabled: true})
+        });
+        const data = await resp.json();
+        if (data.success) {
+            if (data.secret) {
+                alert('Webhook secret: ' + data.secret + '\n\nСкопируйте и сохраните! Он будет использован при регистрации webhook на GitHub.');
+            }
+            showToast('Webhook configured', 'success');
+            loadWebhookStatus();
+        } else {
+            showToast(data.message || 'Error', 'error');
+        }
+    } catch(e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function doWebhookRegister() {
+    if (!currentProjectId) { showToast("Выберите проект", "error"); return; }
+    const project = projectsData.find(p => p.id === currentProjectId);
+    const repoUrl = project && project.github_repo;
+    if (!repoUrl) { showToast("У проекта не задан GitHub репозиторий", "error"); return; }
+    try {
+        showToast('Регистрирую webhook на GitHub...', 'info');
+        const resp = await fetch('/api/v1/webhook/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({repo_url: repoUrl})
+        });
+        const data = await resp.json();
+        if (data.success) {
+            const action = data.action === 'updated' ? 'обновлён' : 'создан';
+            showToast('Webhook ' + action + ' на ' + data.repo, 'success');
+            loadWebhookStatus();
+        } else {
+            showToast(data.detail || 'Error registering webhook', 'error');
+        }
+    } catch(e) {
+        showToast('Error: ' + e.message, 'error');
     }
 }
 
