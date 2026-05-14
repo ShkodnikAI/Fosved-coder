@@ -252,16 +252,6 @@
         background: rgba(200,169,126,0.08);
     }
     .model-card-with-priority .model-card-info { flex: 1; min-width: 0; }
-    .msg-copy-btn {
-        position: absolute; bottom: -14px; right: 8px;
-        background: var(--bg-tertiary); border: 1px solid var(--border);
-        border-radius: 6px; padding: 2px 10px; cursor: pointer;
-        font-size: 11px; opacity: 0.6; transition: opacity 0.2s;
-        z-index: 2; line-height: 1; color: var(--text-secondary);
-        font-family: var(--font-ui);
-    }
-    .msg:hover .msg-copy-btn, .msg.ai:hover .msg-copy-btn { opacity: 1; }
-    .msg-copy-btn:hover { background: var(--accent); color: var(--bg-primary); border-color: var(--accent); }
     .msg.ai { position: relative; margin-bottom: 16px; }
     .probe-btn {
         background: var(--bg-secondary); border: 1px solid var(--border);
@@ -271,6 +261,11 @@
     }
     .probe-btn:hover { background: var(--accent); color: var(--bg-primary); border-color: var(--accent); }
     .probe-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .probe-btn-primary {
+        background: var(--accent); color: #000; border-color: var(--accent);
+        font-weight: 700; font-size: 14px;
+    }
+    .probe-btn-primary:hover { filter: brightness(1.1); background: var(--accent); color: #000; }
     </style>
 </head>
 <body>
@@ -411,42 +406,16 @@
         <!-- Ручка изменения размера (правая) -->
         <div class="resize-handle" id="hub-right-resize-handle"></div>
 
-        <!-- ПРАВАЯ ПАНЕЛЬ: Скиллы | Модели | Логи -->
+        <!-- ПРАВАЯ ПАНЕЛЬ: Логи | Модели | Скиллы -->
         <div class="right-panel" id="hub-right-panel">
             <div class="right-panel-tabs">
-                <div class="right-panel-tab active" data-rptab="hub-skills" onclick="switchHubRightTab('hub-skills')">⚡ Скиллы</div>
+                <div class="right-panel-tab active" data-rptab="hub-logs" onclick="switchHubRightTab('hub-logs')">📋 Логи</div>
                 <div class="right-panel-tab" data-rptab="hub-models-tab" onclick="switchHubRightTab('hub-models-tab')">🤖 Модели</div>
-                <div class="right-panel-tab" data-rptab="hub-logs" onclick="switchHubRightTab('hub-logs')">📋 Логи</div>
+                <div class="right-panel-tab" data-rptab="hub-skills" onclick="switchHubRightTab('hub-skills')">⚡ Скиллы</div>
             </div>
             <div class="right-panel-content">
-                <!-- Вкладка: Скиллы -->
-                <div class="right-panel-pane active" id="rp-hub-skills">
-                    <div class="skills-panel-list" id="hub-skills-list">
-                        <div class="panel-list-empty">Загрузка...</div>
-                    </div>
-                </div>
-                <!-- Вкладка: Модели (выбор и опрос) -->
-                <div class="right-panel-pane" id="rp-hub-models-tab">
-                    <div style="padding:8px;border-bottom:1px solid var(--border);flex-shrink:0;">
-                        <div style="display:flex;gap:4px;margin-bottom:6px;">
-                            <input type="text" id="model-selector-search" placeholder="Поиск моделей..." oninput="filterModelSelector(this.value)" style="flex:1;padding:5px 8px;font-size:11px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-md);font-family:var(--font-ui);">
-                        </div>
-                        <div style="display:flex;gap:4px;margin-bottom:6px;">
-                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="modelSelectorSelectAll(true)">✓ Все</button>
-                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="modelSelectorSelectAll(false)">✕ Сброс</button>
-                        </div>
-                        <button class="probe-btn" id="probe-selected-btn" onclick="startProbeSelected()" style="width:100%;margin:0;padding:6px;font-size:12px;text-align:center;">🔍 Опросить выбранные</button>
-                        <div id="probe-progress-bar" style="display:none;margin-top:6px;">
-                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;" id="probe-progress-text">0/0</div>
-                            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="probe-progress-fill" style="height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%"></div></div>
-                        </div>
-                    </div>
-                    <div id="model-selector-list" style="flex:1;overflow-y:auto;padding:6px;">
-                        <div class="panel-list-empty">Загрузка моделей...</div>
-                    </div>
-                </div>
                 <!-- Вкладка: Логи -->
-                <div class="right-panel-pane" id="rp-hub-logs">
+                <div class="right-panel-pane active" id="rp-hub-logs">
                     <div class="right-panel-header" style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
                         <div class="right-panel-title">
                             Логи <span class="log-badge" id="hub-log-badge" style="display:none">0</span>
@@ -468,6 +437,32 @@
                     <div class="log-footer">
                         <span id="hub-log-count">0 записей</span>
                         <span></span>
+                    </div>
+                </div>
+                <!-- Вкладка: Модели (выбор и опрос) -->
+                <div class="right-panel-pane" id="rp-hub-models-tab">
+                    <div style="padding:8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <input type="text" id="model-selector-search" placeholder="Поиск моделей..." oninput="filterModelSelector(this.value)" style="flex:1;padding:5px 8px;font-size:11px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-md);font-family:var(--font-ui);">
+                        </div>
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="modelSelectorSelectAll(true)">✓ Все</button>
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="modelSelectorSelectAll(false)">✕ Сброс</button>
+                        </div>
+                        <button class="probe-btn probe-btn-primary" id="probe-selected-btn" onclick="startProbeSelected()" style="width:100%;margin:0;padding:10px;text-align:center;">🔍 Опросить выбранные</button>
+                        <div id="probe-progress-bar" style="display:none;margin-top:6px;">
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;" id="probe-progress-text">0/0</div>
+                            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="probe-progress-fill" style="height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%"></div></div>
+                        </div>
+                    </div>
+                    <div id="model-selector-list" style="flex:1;overflow-y:auto;padding:6px;">
+                        <div class="panel-list-empty">Загрузка моделей...</div>
+                    </div>
+                </div>
+                <!-- Вкладка: Скиллы -->
+                <div class="right-panel-pane" id="rp-hub-skills">
+                    <div class="skills-panel-list" id="hub-skills-list">
+                        <div class="panel-list-empty">Загрузка...</div>
                     </div>
                 </div>
             </div>
@@ -504,8 +499,6 @@
                     <div class="panel-list-empty">Загрузка...</div>
                 </div>
             </div>
-            <!-- Кнопка управления ключами -->
-            <button class="add-btn" onclick="showKeysModal()" style="margin-top:6px;">🔑 Ключи</button>
         </div>
 
         <!-- Ручка изменения размера (левая) -->
@@ -546,43 +539,16 @@
         <!-- Ручка изменения размера (правая) -->
         <div class="resize-handle" id="proj-right-resize-handle"></div>
 
-        <!-- ПРАВАЯ ПАНЕЛЬ: Скиллы | Модели | Логи | Git -->
+        <!-- ПРАВАЯ ПАНЕЛЬ: Логи | Модели | Скиллы -->
         <div class="right-panel" id="project-right-panel">
             <div class="right-panel-tabs">
-                <div class="right-panel-tab active" data-rptab="proj-skills" onclick="switchProjRightTab('proj-skills')">⚡ Скиллы</div>
+                <div class="right-panel-tab active" data-rptab="proj-logs" onclick="switchProjRightTab('proj-logs')">📋 Логи</div>
                 <div class="right-panel-tab" data-rptab="proj-models-tab" onclick="switchProjRightTab('proj-models-tab')">🤖 Модели</div>
-                <div class="right-panel-tab" data-rptab="proj-logs" onclick="switchProjRightTab('proj-logs')">📋 Логи</div>
-                <div class="right-panel-tab" data-rptab="proj-git" onclick="switchProjRightTab('proj-git')">🔀 Git</div>
+                <div class="right-panel-tab" data-rptab="proj-skills" onclick="switchProjRightTab('proj-skills')">⚡ Скиллы</div>
             </div>
             <div class="right-panel-content">
-                <!-- Вкладка: Скиллы -->
-                <div class="right-panel-pane active" id="rp-proj-skills">
-                    <div class="skills-panel-list" id="proj-skills-list">
-                        <div class="panel-list-empty">Загрузка...</div>
-                    </div>
-                </div>
-                <!-- Вкладка: Модели (выбор и опрос) -->
-                <div class="right-panel-pane" id="rp-proj-models-tab">
-                    <div style="padding:8px;border-bottom:1px solid var(--border);flex-shrink:0;">
-                        <div style="display:flex;gap:4px;margin-bottom:6px;">
-                            <input type="text" id="proj-model-selector-search" placeholder="Поиск моделей..." oninput="filterProjModelSelector(this.value)" style="flex:1;padding:5px 8px;font-size:11px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-md);font-family:var(--font-ui);">
-                        </div>
-                        <div style="display:flex;gap:4px;margin-bottom:6px;">
-                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="projModelSelectorSelectAll(true)">✓ Все</button>
-                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="projModelSelectorSelectAll(false)">✕ Сброс</button>
-                        </div>
-                        <button class="probe-btn" id="proj-probe-selected-btn" onclick="startProbeSelected()" style="width:100%;margin:0;padding:6px;font-size:12px;text-align:center;">🔍 Опросить выбранные</button>
-                        <div id="proj-probe-progress-bar" style="display:none;margin-top:6px;">
-                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;" id="proj-probe-progress-text">0/0</div>
-                            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="proj-probe-progress-fill" style="height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%"></div></div>
-                        </div>
-                    </div>
-                    <div id="proj-model-selector-list" style="flex:1;overflow-y:auto;padding:6px;">
-                        <div class="panel-list-empty">Загрузка моделей...</div>
-                    </div>
-                </div>
                 <!-- Вкладка: Логи проекта -->
-                <div class="right-panel-pane" id="rp-proj-logs">
+                <div class="right-panel-pane active" id="rp-proj-logs">
                     <div class="right-panel-header" style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
                         <div class="right-panel-title">
                             Логи <span class="log-badge" id="proj-log-badge" style="display:none">0</span>
@@ -606,25 +572,30 @@
                         <span id="log-session-time"></span>
                     </div>
                 </div>
-                <!-- Вкладка: Git -->
-                <div class="right-panel-pane" id="rp-proj-git">
-                    <div class="git-mini-panel">
-                        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">🔀 Git</div>
-                        <div class="git-controls">
-                            <button class="btn btn-sm btn-ghost" onclick="gitAction('status')">Status</button>
-                            <button class="btn btn-sm btn-ghost" onclick="gitAction('log')">Log</button>
-                            <button class="btn btn-sm btn-ghost" onclick="gitAction('diff')">Diff</button>
-                            <button class="btn btn-sm btn-ghost" onclick="gitAction('push')">Push</button>
-                            <button class="btn btn-sm btn-ghost" onclick="gitAction('pull')">Pull</button>
+                <!-- Вкладка: Модели (выбор и опрос) -->
+                <div class="right-panel-pane" id="rp-proj-models-tab">
+                    <div style="padding:8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <input type="text" id="proj-model-selector-search" placeholder="Поиск моделей..." oninput="filterProjModelSelector(this.value)" style="flex:1;padding:5px 8px;font-size:11px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-md);font-family:var(--font-ui);">
                         </div>
-                        <div id="proj-git-commit-form" class="hidden" style="margin:8px 0;padding:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-md);">
-                            <input type="text" id="proj-git-commit-msg" class="panel-input" style="width:100%;margin-bottom:8px;" placeholder="Сообщение коммита...">
-                            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;">
-                                <input type="checkbox" id="proj-git-auto-add" checked> git add -A
-                            </label>
-                            <button class="btn btn-primary btn-sm" onclick="doGitCommit()" style="margin-top:8px;">Коммит</button>
+                        <div style="display:flex;gap:4px;margin-bottom:6px;">
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="projModelSelectorSelectAll(true)">✓ Все</button>
+                            <button class="probe-btn" style="margin:0;font-size:10px;padding:2px 8px;" onclick="projModelSelectorSelectAll(false)">✕ Сброс</button>
                         </div>
-                        <div id="proj-git-output" class="panel-output"><div class="panel-placeholder">Выберите проект</div></div>
+                        <button class="probe-btn probe-btn-primary" id="proj-probe-selected-btn" onclick="startProbeSelected()" style="width:100%;margin:0;padding:10px;text-align:center;">🔍 Опросить выбранные</button>
+                        <div id="proj-probe-progress-bar" style="display:none;margin-top:6px;">
+                            <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px;" id="proj-probe-progress-text">0/0</div>
+                            <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="proj-probe-progress-fill" style="height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%"></div></div>
+                        </div>
+                    </div>
+                    <div id="proj-model-selector-list" style="flex:1;overflow-y:auto;padding:6px;">
+                        <div class="panel-list-empty">Загрузка моделей...</div>
+                    </div>
+                </div>
+                <!-- Вкладка: Скиллы -->
+                <div class="right-panel-pane" id="rp-proj-skills">
+                    <div class="skills-panel-list" id="proj-skills-list">
+                        <div class="panel-list-empty">Загрузка...</div>
                     </div>
                 </div>
             </div>
