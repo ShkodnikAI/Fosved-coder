@@ -20,7 +20,7 @@ import shlex
 import asyncio
 from datetime import datetime, timezone
 from core.agent import stream_llm_response, get_platform_info, _safe_join
-from core.memory import get_project, get_project_internal, get_history, git_push_with_token, get_project_token_by_path
+from core.memory import get_project, get_project_internal, get_history, git_push_with_token, git_pull_with_token, get_project_token_by_path
 from core.executor import CommandExecutor
 from core.action_logger import get_logger
 
@@ -348,6 +348,34 @@ async def auto_git_push(project_path: str, websocket, step_num: int = None, tota
         await send_auto_log(websocket, f"Push exception: {str(e)}", "error", step_num, total_steps)
 
 
+async def auto_git_pull(project_path: str, websocket, project_id: int = None):
+    """Silent git pull in automatic mode before starting work (with PAT token).
+
+    Pulls latest changes from remote to avoid conflicts with agent's work.
+    Non-fatal: if pull fails, logs a warning and continues.
+    """
+    if not project_path or not os.path.isdir(os.path.join(project_path, ".git")):
+        return  # Not a git repo — skip silently
+    try:
+        project_token = None
+        if project_id:
+            project_token = await get_project_token_by_id(project_id)
+        if not project_token:
+            project_token = await get_project_token_by_path(project_path)
+        pull_out = await git_pull_with_token(executor, project_path, project_token)
+        pull_stripped = pull_out.strip()
+        if "error" in pull_stripped.lower() or "fatal" in pull_stripped.lower() or "denied" in pull_stripped.lower():
+            await send_auto_log(websocket, f"Pull warning: {pull_stripped[:100]}", "warning")
+        elif "Already up to date" in pull_stripped or "already up to date" in pull_stripped.lower():
+            await send_auto_log(websocket, "Pull: уже актуально", "info")
+        else:
+            lines = [l.strip() for l in pull_stripped.split("\n") if l.strip() and not l.startswith("From ")]
+            summary = lines[0] if lines else "OK"
+            await send_auto_log(websocket, f"Pull OK: {summary}", "success")
+    except Exception as e:
+        await send_auto_log(websocket, f"Pull skipped: {str(e)[:80]}", "warning")
+
+
 async def run_auto_mode(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None):
     """Main entry point for automatic mode."""
     # Get project path
@@ -369,6 +397,10 @@ async def run_auto_mode(prompt: str, project_id, repo_map: str | None, websocket
         await send_auto_log(websocket, f"Проект: {project_path}", "info")
     if model_id:
         await send_auto_log(websocket, f"Модель: {model_id}", "info")
+
+    # Step 0: Pull latest from remote (avoid conflicts with agent's work)
+    if project_path:
+        await auto_git_pull(project_path, websocket, project_id=project_id)
 
     # Step 1: Generate plan
     plan = await generate_plan(prompt, project_id, repo_map, websocket, model_id)

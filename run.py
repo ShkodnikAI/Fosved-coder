@@ -173,6 +173,63 @@ async def upload_file(file: UploadFile = File(...)):
     return {"filename": safe_name, "content": text_content, "size": len(content_bytes)}
 
 
+async def _auto_clone_if_needed(project_id: int, websocket):
+    """Background task: clone the project's GitHub repo if github_repo is set but no .git exists.
+
+    Runs silently — only sends a brief notification to the client if clone succeeds.
+    No-op if the project directory already has a .git folder or no github_repo is configured.
+    """
+    try:
+        project = await get_project_internal(project_id)
+        if not project:
+            return
+        github_repo = project.get("github_repo", "").strip()
+        project_path = project.get("path", "").strip()
+        if not github_repo or "github.com" not in github_repo:
+            return
+        if not project_path or not os.path.isdir(project_path):
+            return
+        if os.path.isdir(os.path.join(project_path, ".git")):
+            return  # Already cloned
+
+        token = project.get("github_token") or None
+        await safe_ws_send(websocket, {
+            "type": "auto_log",
+            "content": f"Авто-клон: {github_repo.split('github.com/')[-1].rstrip('/')}",
+            "level": "info",
+        })
+        result = await git_clone_with_token(executor, project_path, github_repo, token)
+        if result["success"]:
+            await safe_ws_send(websocket, {
+                "type": "auto_log",
+                "content": f"Авто-клон завершён",
+                "level": "success",
+            })
+            try:
+                logger.log("auto_clone_success", level="success", source="ws",
+                           project_id=project_id, details={"repo": github_repo[:80]})
+            except Exception:
+                pass
+        else:
+            err = (result.get("error") or "unknown")[:150]
+            await safe_ws_send(websocket, {
+                "type": "auto_log",
+                "content": f"Авто-клон не удался: {err}",
+                "level": "warning",
+            })
+            try:
+                logger.log("auto_clone_failed", level="warning", source="ws",
+                           project_id=project_id, error=err)
+            except Exception:
+                pass
+    except Exception as e:
+        try:
+            logger.log("auto_clone_error", level="warning", source="ws",
+                       project_id=project_id, error=str(e)[:150])
+        except Exception:
+            pass
+
+
 @app.websocket("/ws")
 async def websocket_chat(websocket: WebSocket):
     """Main chat WebSocket — streaming AI responses + command execution"""
@@ -192,6 +249,8 @@ async def websocket_chat(websocket: WebSocket):
     ws_cancelled = False
     # ── Drop counter: after stop, drop N queued messages (no timers!) ──
     _messages_to_drop = 0
+    # ── Auto-clone dedup: only attempt clone once per project per session ──
+    last_auto_clone_pid = None
 
     # ── Server-side keepalive: ping every 4 sec to prevent proxy idle kill ──
     async def _ws_keepalive():
@@ -264,6 +323,12 @@ async def websocket_chat(websocket: WebSocket):
                     client_project_id = payload.get("project_id")
                     if client_project_id is not None:
                         current_project_id = client_project_id
+                        # ── Auto-clone: if project has github_repo but no .git, clone it ──
+                        if current_project_id and current_project_id != last_auto_clone_pid:
+                            last_auto_clone_pid = current_project_id
+                            asyncio.create_task(
+                                _auto_clone_if_needed(current_project_id, websocket)
+                            )
                 except (json.JSONDecodeError, TypeError):
                     prompt = data
                     model_id = None

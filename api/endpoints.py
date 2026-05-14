@@ -1220,6 +1220,73 @@ async def git_clone_endpoint(project_id: int, req: GitCloneRequest):
     return result
 
 
+class GitConnectRequest(BaseModel):
+    repo_url: str
+    token: str = ""
+
+
+@router.post("/projects/{project_id}/git/connect")
+async def git_connect_endpoint(project_id: int, req: GitConnectRequest):
+    """Connect a GitHub repo to an existing project: save URL+token, then clone.
+
+    One-click flow:
+    1. Save github_repo and github_token to the project in DB
+    2. Clone the repo into the project directory (if not already cloned)
+    Returns the updated project and clone result.
+    """
+    from core.memory import async_session, Project, select
+    from core.memory import get_project_internal as _get_proj_internal
+    from core.memory import git_clone_with_token
+    from core.executor import CommandExecutor
+
+    repo_url = req.repo_url.strip()
+    if not repo_url:
+        raise HTTPException(400, "URL репозитория обязателен")
+    if "github.com" not in repo_url:
+        raise HTTPException(400, "Поддерживаются только GitHub репозитории (github.com)")
+
+    _log("GIT_CONNECT", source="api", project_id=project_id,
+         details={"repo_url": repo_url[:80], "has_token": bool(req.token)})
+
+    clean_url = repo_url.rstrip("/").replace(".git", "")
+
+    # 1. Save github_repo and github_token to DB
+    async with async_session() as session:
+        async with session.begin():
+            db_proj = await session.execute(select(Project).where(Project.id == project_id))
+            p = db_proj.scalar_one_or_none()
+            if not p:
+                raise HTTPException(404, "Проект не найден")
+            p.github_repo = clean_url
+            if req.token:
+                p.github_token = req.token
+
+    # 2. Clone if needed
+    project = await _get_proj_internal(project_id)
+    project_path = project["path"]
+    token = req.token or project.get("github_token") or None
+
+    clone_result = None
+    already_cloned = os.path.isdir(os.path.join(project_path, ".git"))
+
+    if already_cloned:
+        clone_result = {"success": True, "output": "Already cloned", "skipped": True}
+    else:
+        exec_ = CommandExecutor()
+        clone_result = await git_clone_with_token(exec_, project_path, repo_url, token)
+
+    _log("GIT_CONNECT", source="api",
+         level="success" if clone_result.get("success") else "error",
+         project_id=project_id,
+         error=clone_result.get("error", "")[:200] if not clone_result.get("success") else None)
+
+    return {
+        "success": clone_result.get("success", False),
+        "github_repo": clean_url,
+        "clone_result": clone_result,
+    }
+
+
 @router.get("/projects/{project_id}/git/sync-status")
 async def git_sync_status_endpoint(project_id: int):
     """Get comprehensive git sync status: ahead/behind, branch, remote, changes."""

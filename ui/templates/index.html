@@ -685,10 +685,10 @@
         </div>
         <!-- Clone -->
         <div style="padding:8px 0;border-top:1px solid var(--border);">
-            <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Клонировать репозиторий</div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Клонировать / Подключить репозиторий</div>
             <div style="display:flex;gap:4px;">
                 <input type="text" id="git-clone-url" class="panel-input" style="flex:1" placeholder="https://github.com/user/repo">
-                <button class="btn btn-sm btn-primary" onclick="doGitClone()">📥 Clone</button>
+                <button class="btn btn-sm btn-primary" onclick="doGitConnect()" title="Сохранить URL в проект и клонировать">🔗 Подключить</button>
             </div>
             <div id="git-clone-result" style="margin-top:4px;font-size:11px;color:var(--text-dim);display:none;"></div>
         </div>
@@ -2958,6 +2958,51 @@ async function doGitClone() {
         } else {
             resultEl.innerHTML = '<span style="color:var(--error)">Ошибка: ' + escapeHtml((data.error || 'Unknown').substring(0, 100)) + '</span>';
             outputEl.textContent = data.output || data.error || 'Error';
+        }
+    } catch(e) {
+        resultEl.innerHTML = '<span style="color:var(--error)">Ошибка: ' + escapeHtml(e.message) + '</span>';
+    }
+}
+
+async function doGitConnect() {
+    if (!currentProjectId) { showToast("Выберите проект", "error"); return; }
+    const urlInput = document.getElementById('git-clone-url');
+    const resultEl = document.getElementById('git-clone-result');
+    const outputEl = document.getElementById('proj-git-output');
+    const repoUrl = urlInput.value.trim();
+    if (!repoUrl) { showToast("Введите URL репозитория", "error"); return; }
+    if (!repoUrl.includes('github.com')) { showToast("Поддерживаются только GitHub репозитории", "error"); return; }
+
+    // Use token from project settings if available
+    const tokenInput = document.getElementById('proj-github-token');
+    const token = tokenInput ? tokenInput.value.trim() : '';
+
+    resultEl.style.display = 'block';
+    resultEl.textContent = 'Подключение...';
+    outputEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/v1/projects/' + currentProjectId + '/git/connect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({repo_url: repoUrl, token: token})
+        });
+        const data = await resp.json();
+        if (data.success) {
+            const cr = data.clone_result || {};
+            const msg = cr.skipped ? 'Репозиторий привязан (уже клонирован)' : 'Подключено и клонировано!';
+            resultEl.innerHTML = '<span style="color:var(--success)">' + msg + '</span>';
+            outputEl.textContent = cr.output || msg;
+            showToast(msg, 'success');
+            // Update settings fields
+            const repoField = document.getElementById('proj-github-repo');
+            if (repoField) repoField.value = data.github_repo || repoUrl;
+            loadFileTree();
+            loadGitSyncStatus();
+        } else {
+            const err = (data.clone_result && data.clone_result.error) || 'Unknown error';
+            resultEl.innerHTML = '<span style="color:var(--error)">Ошибка: ' + escapeHtml(err.substring(0, 120)) + '</span>';
+            outputEl.textContent = err;
         }
     } catch(e) {
         resultEl.innerHTML = '<span style="color:var(--error)">Ошибка: ' + escapeHtml(e.message) + '</span>';
