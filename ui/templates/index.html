@@ -1571,6 +1571,7 @@ function sendMessage() {
     let payload = { type: "chat", prompt: text, model: activeModelId || null, mode: workMode, project_id: currentProjectId, task_id: taskId };
     if (priorityModels.length) payload.priority_models = priorityModels;
     payload.explicitly_probed_ids = [...explicitlyProbedIds];
+    if (activeSkills.size > 0) payload.skills = [...activeSkills];
     if (attachedFile) payload.file_content = attachedFile.content;
     wsSend(payload);
     // Track parallel task
@@ -1616,6 +1617,7 @@ function sendHubMessage() {
     let payload = { type: "hub_chat", prompt: text, model_id: activeModelId || null, task_id: taskId };
     if (priorityModels.length) payload.priority_models = priorityModels;
     payload.explicitly_probed_ids = [...explicitlyProbedIds];
+    if (activeSkills.size > 0) payload.skills = [...activeSkills];
     if (hubAttachedFile) payload.file_content = hubAttachedFile.content;
     wsSend(payload);
     // Track parallel task
@@ -1841,7 +1843,7 @@ function wsConnect() {
         if (isFirstConnect) {
             loadModels();
             loadProjects();
-            loadServerLogs({limit: 50});
+            loadServerLogs({limit: 50, level: 'error'});  // Только ошибки из истории — не спамим системными логами
         }
         while (wsMessageQueue.length > 0) { ws.send(wsMessageQueue.shift()); }
         persistQ();
@@ -2960,6 +2962,23 @@ const SKILL_GROUPS = [
         {id:'finance',name:'Finance',icon:'💰',desc:'Финансовые данные и аналитика'},
         {id:'skill-creator',name:'Skill Creator',icon:'🛠',desc:'Создание новых навыков'},
     ]},
+    { name: 'UI/UX Design', icon: '🎨', desc: 'Дизайн интерфейсов и пользовательский опыт', skills: [
+        {id:'form-design',name:'Form Design',icon:'📋',desc:'Формы: валидация, мульти-шаг, accessibility'},
+        {id:'error-handling-ux',name:'Error Handling',icon:'🛡',desc:'Профилактика и обработка ошибок в UI'},
+        {id:'loading-states',name:'Loading States',icon:'⏳',desc:'Skeleton screens, optimistic UI, прогресс'},
+        {id:'state-machine',name:'State Machine',icon:'🔀',desc:'Конечные автоматы для сложных UI'},
+        {id:'micro-interaction-spec',name:'Micro Interactions',icon:'✨',desc:'Триггеры, правила, фидбэк, анимации'},
+        {id:'animation-principles',name:'Animation',icon:'🎬',desc:'Принципы UI-анимации: easing, duration'},
+        {id:'responsive-design',name:'Responsive',icon:'📱',desc:'Адаптивные layout и breakpoint стратегии'},
+        {id:'navigation-patterns',name:'Navigation',icon:'🧭',desc:'Типы навигации и выбор паттерна'},
+        {id:'onboarding-design',name:'Onboarding',icon:'👋',desc:'First-run опыт и time-to-value'},
+        {id:'feedback-patterns',name:'Feedback',icon:'🔔',desc:'Системный фидбэк для действий юзера'},
+        {id:'accessibility-audit',name:'Accessibility',icon:'♿',desc:'WCAG аудит и инклюзивный дизайн'},
+        {id:'dark-mode-design',name:'Dark Mode',icon:'🌙',desc:'Стратегия тёмной темы и контраст'},
+        {id:'search-ux',name:'Search UX',icon:'🔍',desc:'Поиск: автокомплит, zero-results, фильтры'},
+        {id:'gesture-patterns',name:'Gestures',icon:'👆',desc:'Жесты и touch-взаимодействие'},
+        {id:'data-visualization-design',name:'Data Viz',icon:'📈',desc:'Принципы визуализации данных'},
+    ]},
 ];
 
 function renderSkills() {
@@ -3015,8 +3034,10 @@ function addLogEntryToPanel(entry) {
 function handleAutoLog(data) {
     const entry = {level:data.level||'info',source:data.source||'',action:data.content||data.message||data.action||'',time:data.time||new Date().toLocaleTimeString()};
     addLogEntryToPanel(entry);
-    // Auto-switch to Logs tab when first log arrives
-    if (autoLogCount === 1) {
+    // Авто-переключение на вкладку логов — ТОЛЬКО для реальных пользовательских событий,
+    // не для background/system логов
+    const _skip_sources = ['db', 'keys_manager', 'ws', 'system', 'agent', 'debug'];
+    if (autoLogCount === 1 && !_skip_sources.includes(entry.source) && entry.level !== 'debug') {
         if (currentScreen === 'main') switchHubRightTab('hub-logs');
         else switchProjRightTab('proj-logs');
     }

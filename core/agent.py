@@ -92,6 +92,44 @@ async def _send_log(websocket, content: str, level: str = "info"):
         pass
 
 # ═══════════════════════════════════════════════════════
+# SKILL CONTEXT LOADER
+# ═══════════════════════════════════════════════════════
+
+def _load_skill_context(active_skills: list[str] | None) -> str:
+    """
+    Загружает SKILL.md контент для активных скиллов.
+    Ищет файлы в skills/{skill_id}/SKILL.md относительно корня проекта.
+    Возвращает строку для инжекции в system prompt.
+    """
+    if not active_skills:
+        return ""
+
+    parts = []
+    skills_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills")
+
+    for skill_id in active_skills:
+        skill_id = skill_id.strip()
+        if not skill_id:
+            continue
+        skill_path = os.path.join(skills_dir, skill_id, "SKILL.md")
+        if os.path.isfile(skill_path):
+            try:
+                with open(skill_path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                if content:
+                    parts.append(f"\n## Активный навык: {skill_id}\n{content}\n")
+                    print(f"  [agent] skill loaded: {skill_id} ({len(content)} chars)")
+            except Exception as e:
+                print(f"  [agent] skill read error {skill_id}: {e}")
+        else:
+            print(f"  [agent] skill NOT found: {skill_id} (looked: {skill_path})")
+
+    if not parts:
+        return ""
+    return "\n# АКТИВНЫЕ НАВЫКИ (применяй эти знания при генерации кода):\n" + "\n".join(parts)
+
+
+# ═══════════════════════════════════════════════════════
 # TOOL DEFINITIONS для litellm function calling
 # ═══════════════════════════════════════════════════════
 
@@ -875,9 +913,9 @@ def _build_models_to_try(
 _checkpoints: list[dict] = []
 
 
-async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None, _silent=False):
+async def handle_chat_message(prompt: str, project_id, repo_map: str | None, websocket, model_id: str = None, _cancel_check=None, _silent=False, active_skills: list[str] | None = None):
     """Main entry point: get history, build context, stream response with tool calling and fallback."""
-    print(f"  [agent] handle_chat_message: prompt='{prompt[:80]}', project_id={project_id}, model_id={model_id}")
+    print(f"  [agent] handle_chat_message: prompt='{prompt[:80]}', project_id={project_id}, model_id={model_id}, skills={active_skills}")
     history = await get_history(project_id)
 
     # Project context
@@ -987,6 +1025,11 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     )
     if compressed_context_text:
         system_prompt = compressor.build_compressed_system_prompt(system_prompt, compressed_context_text)
+
+    # Инжектируем контекст активных навыков
+    skill_context = _load_skill_context(active_skills)
+    if skill_context:
+        system_prompt += skill_context
 
     await save_message(project_id, "user", prompt)
 
@@ -1184,19 +1227,24 @@ QUESTIONNAIRE_SYSTEM_PROMPT = """Ты Fosved Coder — аналитик треб
 """
 
 
-async def handle_hub_message(prompt: str, websocket, model_id: str = None, _cancel_check=None):
+async def handle_hub_message(prompt: str, websocket, model_id: str = None, _cancel_check=None, active_skills: list[str] | None = None):
     """
     Обработчик сообщений ГЛАВНОГО ЭКРАНА.
     Нет контекста проекта, нет инструментов (read/write/execute).
     Только чат с ИИ + опросный лист + скиллы.
     """
-    print(f"  [agent] handle_hub_message: prompt='{prompt[:80]}', model_id={model_id}")
+    print(f"  [agent] handle_hub_message: prompt='{prompt[:80]}', model_id={model_id}, skills={active_skills}")
     from core.memory import get_history as get_hub_history
 
     # История с project_id=None — чат главного экрана
     history = await get_hub_history(None, limit=50)
 
     system_prompt = HUB_SYSTEM_PROMPT.format(platform_info=get_platform_info())
+
+    # Инжектируем контекст активных навыков
+    skill_context = _load_skill_context(active_skills)
+    if skill_context:
+        system_prompt += skill_context
 
     await save_message(None, "user", prompt)
 

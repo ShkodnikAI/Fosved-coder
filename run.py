@@ -273,7 +273,7 @@ async def websocket_chat(websocket: WebSocket):
             pass
     keepalive_task = asyncio.create_task(_ws_keepalive())
 
-    async def _run_chat_task(task_id: str, prompt: str, project_id, repo_map_val, mode_val, model_id_val, priority_models_val, probed_ids_val):
+    async def _run_chat_task(task_id: str, prompt: str, project_id, repo_map_val, mode_val, model_id_val, priority_models_val, probed_ids_val, skills_val=None):
         """Run a chat task in parallel — each task has its own cancel flag and ContextVar."""
         from core.agent import _current_task_id, handle_chat_message, handle_hub_message
         from core.intelligent_router import intelligent_router
@@ -319,7 +319,8 @@ async def websocket_chat(websocket: WebSocket):
                 if project_id:
                     await handle_chat_message(
                         prompt, project_id, repo_map_val, websocket,
-                        model_id=resolved_model, _cancel_check=_cancelled
+                        model_id=resolved_model, _cancel_check=_cancelled,
+                        active_skills=skills_val or None
                     )
                 else:
                     await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет выбранного проекта", "level": "warning"})
@@ -389,6 +390,8 @@ async def websocket_chat(websocket: WebSocket):
                     mode = payload.get("mode", current_mode)
                     # Список явно проверенных моделей с клиента (из localStorage)
                     explicitly_probed_ids = set(payload.get("explicitly_probed_ids", []))
+                    # Активные навыки (skills) — передаются с клиента
+                    active_skill_ids = payload.get("skills", [])
                     # Sync project_id from client (critical: keeps project context)
                     client_project_id = payload.get("project_id")
                     if client_project_id is not None:
@@ -470,13 +473,14 @@ async def websocket_chat(websocket: WebSocket):
                     hub_prompt = payload.get("prompt", "")
                     hub_model = payload.get("model_id")
                     task_id = payload.get("task_id") or str(uuid.uuid4())
+                    hub_skills = payload.get("skills", [])
                     
-                    async def _run_hub_task(tid, hp, hm):
+                    async def _run_hub_task(tid, hp, hm, hs):
                         from core.agent import _current_task_id, handle_hub_message
                         _current_task_id.set(tid)
                         active_tasks[tid] = {"cancel": False, "project_id": None, "task": None}
                         try:
-                            await handle_hub_message(hp, websocket, model_id=hm, _cancel_check=lambda: active_tasks.get(tid, {}).get("cancel", False))
+                            await handle_hub_message(hp, websocket, model_id=hm, _cancel_check=lambda: active_tasks.get(tid, {}).get("cancel", False), active_skills=hs or None)
                         except Exception as hub_err:
                             print(f"  [ws] hub task {tid[:8]} error: {hub_err}")
                             try:
@@ -489,7 +493,7 @@ async def websocket_chat(websocket: WebSocket):
                     
                     if hub_prompt:
                         logger.user_action("hub_chat", details={"model": hub_model})
-                        asyncio.create_task(_run_hub_task(task_id, hub_prompt, hub_model))
+                        asyncio.create_task(_run_hub_task(task_id, hub_prompt, hub_model, hub_skills))
                     continue
 
                 # Handle start_questionnaire (создание анкеты из UI)
@@ -580,6 +584,7 @@ async def websocket_chat(websocket: WebSocket):
                     model_id_val=model_id,
                     priority_models_val=priority,
                     probed_ids_val=explicitly_probed_ids,
+                    skills_val=active_skill_ids or None,
                 ))
                 print(f"  [ws] task started: {task_id[:8]} project={current_project_id} mode={mode} model={model_id}")
 
