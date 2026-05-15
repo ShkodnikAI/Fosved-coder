@@ -771,7 +771,7 @@ def _build_models_to_try(
     """Единая функция построения списка моделей для попытки (DRY).
 
     Логика:
-    1. Если model_id задан — ТОЛЬКО эта модель (без fallback)
+    1. Если model_id задан — эта модель ПЕРВАЯ, затем проверенные как fallback
     2. Если не задан — приоритетные модели проекта + ТОЛЬКО проверенные (probed)
     3. Фильтры: status valid/available/rate_limited, skip free+no_key/local без base_url,
        skip failed_probe_ids
@@ -780,29 +780,36 @@ def _build_models_to_try(
     """
     models_to_try: list[str] = []
 
+    def _add_probed_models(existing: list[str]) -> list[str]:
+        """Добавить проверенные модели к списку (без дублей)."""
+        result = list(existing)
+        for m in all_models:
+            mid = m["id"]
+            if mid in result:
+                continue
+            if mid not in keys_manager._probed_model_ids:
+                continue
+            if m.get("status") not in ("valid", "available", "rate_limited"):
+                continue
+            if mid in keys_manager._failed_probe_ids:
+                continue
+            if m.get("type") == "free" and m.get("status") == "no_key":
+                continue
+            if m.get("type") == "local" and not m.get("base_url"):
+                continue
+            result.append(mid)
+        return result
+
     if model_id:
-        return [model_id]
+        # Указанная модель — первая, но с fallback на проверенные
+        return _add_probed_models([model_id])
 
     # Приоритетные модели проекта
     for pm in _get_priority_models(project):
         models_to_try.append(pm)
 
-    # ТОЛЬКО проверенные (probed) модели
-    for m in all_models:
-        mid = m["id"]
-        if mid in models_to_try:
-            continue
-        if mid not in keys_manager._probed_model_ids:
-            continue
-        if m.get("status") not in ("valid", "available", "rate_limited"):
-            continue
-        if mid in keys_manager._failed_probe_ids:
-            continue
-        if m.get("type") == "free" and m.get("status") == "no_key":
-            continue
-        if m.get("type") == "local" and not m.get("base_url"):
-            continue
-        models_to_try.append(mid)
+    # Проверенные (probed) модели
+    models_to_try = _add_probed_models(models_to_try)
 
     return models_to_try
 
@@ -994,6 +1001,9 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if error_info.get("no_credits") and model_provider:
             no_credits_providers.add(model_provider)
             await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
+        # Если модель упала и есть ещё модели в списке — продолжаем с fallback
+        if ai_response is None and i == 0 and len(models_to_try) > 1:
+            await _send_log(websocket, f"⚠️ {display_model} не ответила, пробую следующую модель...", "warning")
         if ai_response is not None:
             # Prompt injection fallback: model doesn't support tools but we have a project
             if error_info.get("no_tools") and project_path:
@@ -1013,14 +1023,16 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     if ai_response:
         await save_message(project_id, "ai", ai_response)
     elif tried_count == 0:
-        await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом."})
+        await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом. Проверьте настройки API."})
         await _send_log(websocket, "❌ Нет модели с API ключом", "error")
-    elif tried_count == 1:
-        await safe_ws_send(websocket, {"type": "error", "content": "Выбранная модель не ответила. Попробуйте другую."})
-        await _send_log(websocket, "❌ Модель не ответила", "error")
     else:
-        await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили."})
-        await _send_log(websocket, f"❌ Все {tried_count} моделей не ответили", "error")
+        total_available = len(models_to_try)
+        if tried_count < total_available:
+            skipped = total_available - tried_count
+            await safe_ws_send(websocket, {"type": "error", "content": f"{tried_count} из {total_available} моделей не ответили ({skipped} пропущено). Попробуйте позже или выберите другую."})
+        else:
+            await safe_ws_send(websocket, {"type": "error", "content": f"Все {tried_count} моделей не ответили. Проверьте API ключи."})
+        await _send_log(websocket, f"❌ Модели не ответили: {tried_count}/{total_available}", "error")
 
 
 # ═══════════════════════════════════════════════════════
