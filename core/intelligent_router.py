@@ -295,8 +295,8 @@ class IntelligentRouter:
                 free_models.append(m)
 
         # Выбор модели (с fallback на любые валидные)
-        if complexity == "simple":
-            # Простая задача → сначала бесплатная, fallback на лидера
+        if complexity == "simple" and not in_project_context:
+            # Простая задача вне проекта → сначала бесплатная, fallback на лидера
             if free_models:
                 chosen = free_models[0]
                 reason = f"Простая задача → бесплатная модель: {chosen['name']}"

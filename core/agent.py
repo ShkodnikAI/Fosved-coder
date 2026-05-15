@@ -10,7 +10,7 @@ import json
 from contextvars import ContextVar
 from pathlib import Path
 from datetime import datetime, timezone
-from core.memory import CONFIG, save_message, get_history, get_project, get_project_token_by_path, git_push_with_token, save_probed_models, save_tool_usage, save_model_usage
+from core.memory import CONFIG, save_message, get_history, get_project, get_project_token_by_path, git_push_with_token, git_clone_with_token, save_probed_models, save_tool_usage, save_model_usage
 from core.keys_manager import keys_manager
 from core.context_compressor import ContextCompressor
 from core.action_logger import get_logger
@@ -246,6 +246,23 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_clone",
+            "description": "Склонировать GitHub репозиторий в текущий проект. Использует PAT-токен автоматически для приватных репо. НЕ используй execute_command('git clone ...') — всегда используй этот инструмент.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_url": {
+                        "type": "string",
+                        "description": "URL GitHub репозитория (напр. 'https://github.com/user/repo')"
+                    }
+                },
+                "required": ["repo_url"]
+            }
+        }
+    },
 ]
 
 
@@ -267,6 +284,7 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 - search_files(pattern) — поиск текста в файлах
 - execute_command(command) — выполнить shell-команду (git, npm, pip, python и т.д.)
 - git_commit_push(message) — закоммитить и запушить на GitHub
+- git_clone(repo_url) — склонировать GitHub репозиторий (использует PAT-токен автоматически)
 
 {platform_info}
 
@@ -528,6 +546,28 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"message": message}, "status": "done"})
             await _send_log(websocket, f"🚀 Push: {push_out.strip()[:100]}", "success")
             return f"Commit: {commit_out.strip()}\nPush: {push_out.strip()}"
+
+        elif name == "git_clone":
+            repo_url = arguments.get("repo_url", "")
+            if not repo_url:
+                return "Ошибка: не указан URL репозитория"
+            if not project_path:
+                return "Ошибка: нет пути к проекту"
+            logger.log(f"tool: git_clone '{repo_url}'", level="info", source="agent")
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"repo_url": repo_url}, "status": "running"})
+            await _send_log(websocket, f"📦 Git clone: {repo_url}", "command")
+            try: asyncio.create_task(save_tool_usage(None, "", "", "git_clone", json.dumps({"repo_url": repo_url}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
+            except Exception: pass
+            project_token = await get_project_token_by_path(project_path)
+            result = await git_clone_with_token(executor, project_path, repo_url, token=project_token)
+            await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"repo_url": repo_url}, "status": "done"})
+            if result.get("success"):
+                await _send_log(websocket, f"✅ Clone OK: {result.get('output', '')[:100]}", "success")
+                return f"Репозиторий склонирован: {result.get('output', '')}"
+            else:
+                err = result.get("error", "Unknown error")
+                await _send_log(websocket, f"❌ Clone fail: {err[:150]}", "error")
+                return f"Ошибка клонирования: {err}"
 
         else:
             return f"Неизвестный инструмент: {name}"
@@ -1624,6 +1664,7 @@ async def probe_selected_models(websocket, selected_model_ids: list[str]) -> lis
         litellm_model, api_key, api_base, _ = _resolve_model(model_id)
         if not api_key:
             print(f"  [probe] SKIP {model_id}: no API key")
+            await _send_log(websocket, f"⏭️ {model_name}: нет API-ключа — пропуск", "warning")
             return None
 
         probe_messages = [{"role": "user", "content": "Hi"}]
@@ -1639,15 +1680,17 @@ async def probe_selected_models(websocket, selected_model_ids: list[str]) -> lis
                         api_key=api_key,
                         **({"api_base": api_base} if api_base else {}),
                     ),
-                    timeout=15,
+                    timeout=30,
                 )
                 print(f"  [probe] OK {model_id} ({litellm_model})")
                 return {"id": model_id, "name": model_name, "status": "valid"}
             except asyncio.TimeoutError:
                 print(f"  [probe] TIMEOUT {model_id} ({litellm_model})")
+                await _send_log(websocket, f"⏱️ {model_name}: таймаут (30с)", "warning")
                 return None
             except Exception as e:
                 print(f"  [probe] FAIL {model_id} ({litellm_model}): {str(e)[:200]}")
+                await _send_log(websocket, f"❌ {model_name}: {str(e)[:80]}", "error")
                 return None
 
     # Запускаем параллельно, с прогрессивной отправкой

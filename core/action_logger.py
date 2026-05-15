@@ -317,8 +317,11 @@ class ActionLogger:
                 break
             if level and entry.get("level") != level:
                 continue
-            if source and entry.get("source") != source:
-                continue
+            if source:
+                entry_source = entry.get("source", "")
+                allowed = [s.strip() for s in source.split(",") if s.strip()]
+                if allowed and entry_source not in allowed:
+                    continue
             if action and action.lower() not in entry.get("action", "").lower():
                 continue
             if project_id and entry.get("project_id") != project_id:

@@ -911,7 +911,7 @@ let currentHubTypingDiv = null;
 let currentProjectId = null;
 let allModels = [];
 let allProjects = [];
-let activeModelId = null;
+let activeModelId = localStorage.getItem('fosved_active_model') || null;
 let attachedFile = null;           // Прикреплённый файл (проектный чат)
 let hubAttachedFile = null;        // Прикреплённый файл (hub-чат)
 let openPanels = new Set();
@@ -1843,7 +1843,7 @@ function wsConnect() {
         if (isFirstConnect) {
             loadModels();
             loadProjects();
-            loadServerLogs({limit: 50, level: 'error'});  // Только ошибки из истории — не спамим системными логами
+            loadServerLogs({limit: 50, level: 'error', source: 'agent,executor,intelligent_router'});  // Только ошибки из агентных операций — без системных логов
         }
         while (wsMessageQueue.length > 0) { ws.send(wsMessageQueue.shift()); }
         persistQ();
@@ -2227,11 +2227,17 @@ function _showProbedOnlyModels() {
         return;
     }
     renderModels();
-    // НЕ авто-выбираем модель — пользователь выбирает вручную из левой панели
-    // Если activeModelId не в explicitlyProbedIds — сбрасываем
+    // Авто-выбираем: если activeModelId валиден — оставляем, иначе берём первую проверенную
     if (activeModelId && !explicitlyProbedIds.has(activeModelId)) {
         activeModelId = null;
+        localStorage.removeItem('fosved_active_model');
         updateInputPlaceholders();
+    }
+    if (!activeModelId && probed.length > 0) {
+        activeModelId = probed[0].id;
+        localStorage.setItem('fosved_active_model', activeModelId);
+        updateInputPlaceholders();
+        updateStatusBar();
     }
     document.getElementById('setup-banner').style.display = 'none';
 }
@@ -2451,6 +2457,7 @@ async function loadModels() {
 
 function selectModel(id) {
     activeModelId = id;
+    localStorage.setItem('fosved_active_model', id);
     renderModels();
     updateStatusBar();
     updateInputPlaceholders();
