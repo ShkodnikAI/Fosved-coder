@@ -350,7 +350,8 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             return f"Файл {path} сохранён ({len(content)} символов)"
 
         elif name == "list_files":
-            rel_path = arguments.get("path", ".") or "."  # Пустая строка → "." (корень проекта)
+            rel_path = arguments.get("path") or "."  # None, "", False → "." (корень проекта)
+            rel_path = rel_path.strip() or "."  # whitespace-only → "."
             if not project_path:
                 return "Ошибка: нет пути к проекту"
             full_path = _safe_join(project_path, rel_path)
@@ -790,13 +791,36 @@ def _build_models_to_try(
 
     Логика:
     1. Если model_id задан — эта модель ПЕРВАЯ, затем проверенные как fallback
-    2. Если не задан — приоритетные модели проекта + ТОЛЬКО проверенные (probed)
-    3. Фильтры: status valid/available/rate_limited, skip free+no_key/local без base_url,
+    2. Если не задан — приоритетные модели проекта + проверенные (probed)
+    3. Если НЕТ проверенных — fallback на любые валидные модели с API-ключом
+    4. Фильтры: status valid/available/rate_limited, skip free+no_key/local без base_url,
        skip failed_probe_ids
 
     Returns: list[model_id, ...]
     """
     models_to_try: list[str] = []
+    seen: set[str] = set()
+
+    def _is_usable(m: dict) -> bool:
+        """Проверяет, что модель пригодна для использования."""
+        mid = m["id"]
+        if mid in seen:
+            return False
+        status = m.get("status", "")
+        if status not in ("valid", "available", "rate_limited"):
+            return False
+        if mid in keys_manager._failed_probe_ids:
+            return False
+        if m.get("type") == "free" and not m.get("api_key"):
+            return False
+        if m.get("type") == "local" and not m.get("base_url"):
+            return False
+        # Модель должна иметь API-ключ (кроме local с base_url)
+        mc = keys_manager.get_model_config(mid)
+        if not mc or not mc.get("api_key"):
+            if m.get("type") != "local":
+                return False
+        return True
 
     def _add_probed_models(existing: list[str]) -> list[str]:
         """Добавить проверенные модели к списку (без дублей)."""
@@ -807,15 +831,21 @@ def _build_models_to_try(
                 continue
             if mid not in keys_manager._probed_model_ids:
                 continue
-            if m.get("status") not in ("valid", "available", "rate_limited"):
+            if _is_usable(m):
+                result.append(mid)
+                seen.add(mid)
+        return result
+
+    def _add_any_valid_models(existing: list[str]) -> list[str]:
+        """Fallback: добавить ЛЮБЫЕ валидные модели (когда нет probed)."""
+        result = list(existing)
+        for m in all_models:
+            mid = m["id"]
+            if mid in result or mid in seen:
                 continue
-            if mid in keys_manager._failed_probe_ids:
-                continue
-            if m.get("type") == "free" and m.get("status") == "no_key":
-                continue
-            if m.get("type") == "local" and not m.get("base_url"):
-                continue
-            result.append(mid)
+            if _is_usable(m):
+                result.append(mid)
+                seen.add(mid)
         return result
 
     if model_id:
@@ -825,9 +855,14 @@ def _build_models_to_try(
     # Приоритетные модели проекта
     for pm in _get_priority_models(project):
         models_to_try.append(pm)
+        seen.add(pm)
 
     # Проверенные (probed) модели
     models_to_try = _add_probed_models(models_to_try)
+
+    # FALLBACK: если нет проверенных моделей — пробуем любые валидные с API-ключом
+    if not models_to_try:
+        models_to_try = _add_any_valid_models(models_to_try)
 
     return models_to_try
 
@@ -858,6 +893,15 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                 project_context_text += f"ШАБЛОН/ТЕХНОЛОГИЯ: {project['template']}\n"
             if project.get("base_prompt"):
                 project_context_text += f"ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ: {project['base_prompt']}\n"
+            # GitHub-инфо для git операций (клонирование с токеном)
+            if project.get("github_repo"):
+                project_context_text += f"GITHUB_REPO: {project['github_repo']}\n"
+                gh_token = project.get("github_token", "")
+                if gh_token:
+                    # Показываем токен модели для git clone/push — токен уже из БД
+                    project_context_text += f"GITHUB_TOKEN: {gh_token}\n"
+                    project_context_text += "ПРИМЕЧАНИЕ: Для git clone используй URL с токеном: https://{GITHUB_TOKEN}@github.com/{owner}/{repo}.git\n"
+                    project_context_text += "НЕ пытайся клонировать без токена — сначала попробуй с токеном.\n"
             if project.get("path"):
                 project_path = project["path"]
                 # Validate path exists — try to self-heal if broken
@@ -1495,12 +1539,24 @@ async def probe_selected_models(websocket, selected_model_ids: list[str]) -> lis
     candidates = [
         m for m in all_models
         if m.get("id") in selected_set
-        and m.get("status") in ("valid", "rate_limited", "available")
     ]
+    # Дополнительно фильтруем: модель должна иметь API-ключ или быть local
+    usable_candidates = []
+    for m in candidates:
+        mid = m["id"]
+        mc = keys_manager.get_model_config(mid)
+        has_key = mc and mc.get("api_key")
+        is_local = m.get("type") == "local" and m.get("base_url")
+        if has_key or is_local:
+            usable_candidates.append(m)
 
-    if not candidates:
-        await _send_log(websocket, "⚠️ Нет подходящих моделей для опроса", "warning")
+    if not usable_candidates:
+        await _send_log(websocket, "⚠️ Нет подходящих моделей для опроса (нет API-ключей)", "warning")
+        # Покажем сколько было отфильтровано
+        await _send_log(websocket, f"   Выбрано: {len(candidates)}, с ключом: 0", "info")
         return []
+
+    candidates = usable_candidates
 
     total = len(candidates)
     await _send_log(websocket, f"🔍 Опрос {total} выбранных моделей...", "info")
@@ -1519,6 +1575,7 @@ async def probe_selected_models(websocket, selected_model_ids: list[str]) -> lis
         model_name = model_info.get("name", model_id)
         litellm_model, api_key, api_base, _ = _resolve_model(model_id)
         if not api_key:
+            print(f"  [probe] SKIP {model_id}: no API key")
             return None
 
         probe_messages = [{"role": "user", "content": "Hi"}]
@@ -1534,12 +1591,15 @@ async def probe_selected_models(websocket, selected_model_ids: list[str]) -> lis
                         api_key=api_key,
                         **({"api_base": api_base} if api_base else {}),
                     ),
-                    timeout=12,
+                    timeout=15,
                 )
+                print(f"  [probe] OK {model_id} ({litellm_model})")
                 return {"id": model_id, "name": model_name, "status": "valid"}
             except asyncio.TimeoutError:
+                print(f"  [probe] TIMEOUT {model_id} ({litellm_model})")
                 return None
-            except Exception:
+            except Exception as e:
+                print(f"  [probe] FAIL {model_id} ({litellm_model}): {str(e)[:200]}")
                 return None
 
     # Запускаем параллельно, с прогрессивной отправкой

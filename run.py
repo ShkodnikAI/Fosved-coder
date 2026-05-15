@@ -27,6 +27,12 @@ logger = get_logger()
 async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False):
     """Send JSON to websocket, silently ignoring any errors (closed conn, etc.)."""
     try:
+        # Inject task_id from ContextVar if available (parallel task support)
+        if not _skip_task_id:
+            from core.agent import _current_task_id
+            tid = _current_task_id.get('')
+            if tid:
+                data = {**data, "task_id": tid}
         await websocket.send_json(data)
     except Exception:
         pass

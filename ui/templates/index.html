@@ -2143,8 +2143,14 @@ function wsConnect() {
             return;
         }
 
-        // ─── Прочие типы сообщений ───
-        addMessage(data.type || "system", data.content || "");
+        // ─── Прочие типы сообщений — ТОЛЬКО разрешённые для чата ───
+        // Фильтруем системные/служебные типы, которые НЕ должны появляться в чате
+        const _chat_allowed_types = ["system", "user", "ai", "error", "info", "typing", "idea", "terminal"];
+        if (_chat_allowed_types.includes(data.type) && data.content) {
+            addMessage(data.type, data.content);
+        }
+        // Остальные типы (auto_log, tool_call, probe_*, etc.) уже обработаны выше
+        // или являются служебными — не показываем в чате
     };
 
     ws.onclose = (event) => {
