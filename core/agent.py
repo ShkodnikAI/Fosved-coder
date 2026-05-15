@@ -359,10 +359,14 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             if not os.path.isdir(full_path):
                 return f"Ошибка: директория не найдена: {rel_path}"
             entries = []
-            skip_dirs = {"venv", "__pycache__", "node_modules", ".git", ".cache", ".venv", "env", ".idea", ".vscode", "dist", "build", "__pypackages__", ".next", ".nuxt", ".gradle", "target"}
+            skip_dirs = {"venv", "__pycache__", "node_modules", ".cache", ".venv", "env", ".idea", ".vscode", "dist", "build", "__pypackages__", ".next", ".nuxt", ".gradle", "target"}
             try:
                 for item in sorted(os.listdir(full_path)):
-                    if item.startswith(".") and item not in {".env", ".gitignore"}:
+                    # Пропускаем скрытые файлы/папки, КРОМЕ известных конфигурационных
+                    if item.startswith(".") and item not in {".env", ".gitignore", ".gitattributes", ".editorconfig", ".eslintrc", ".prettierrc", ".dockerignore"}:
+                        # Но .git показываем как индикатор репозитория
+                        if item == ".git" and os.path.isdir(os.path.join(full_path, ".git")):
+                            entries.append(f"📂 .git/")
                         continue
                     item_path = os.path.join(full_path, item)
                     if os.path.isdir(item_path) and item not in skip_dirs:
@@ -375,6 +379,9 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                             entries.append(f"📄 {item} ({size}B)")
             except PermissionError:
                 return "Ошибка: нет доступа к директории"
+            # Если только .git — указываем что это git-репозиторий
+            if not entries and os.path.isdir(os.path.join(full_path, ".git")):
+                entries.append("📂 .git/ (пустой рабочий каталог — возможно нужна checkout)")
             result = "\n".join(entries) if entries else "(пустая директория)"
             logger.log(f"tool: list_files {rel_path} ({len(entries)} entries)", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": rel_path}, "status": "done"})
@@ -753,10 +760,12 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                 _error_info["no_credits"] = True
             return None
 
-    # Max iterations reached
-    await safe_ws_send(websocket, {"type": "done"})
+    # Max iterations reached — return accumulated response even if empty
+    await safe_ws_send(websocket, {"type": "done", "tools_used": max_tool_iterations, "duration_ms": int((time.time()-start_time)*1000), "tokens": len(full_response)//4})
     await _send_log(websocket, f"⚠️ Достигнут лимит {max_tool_iterations} итераций tool calling", "warning")
-    return full_response
+    try: asyncio.create_task(save_model_usage(None, "", model, "", "", total_tokens=len(full_response)//4, duration_ms=int((time.time()-start_time)*1000), tool_calls_count=max_tool_iterations, success=True))
+    except Exception: pass
+    return full_response or "⚠️ Лимит итераций tool calling достигнут. Задача слишком сложная для одного запроса — попробуйте разбить на шаги."
 
 
 def _get_priority_models(project: dict) -> list[str]:
@@ -1029,7 +1038,8 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                 # If injection failed, keep the raw response as fallback
             break
 
-    if ai_response:
+    if ai_response is not None:
+        # ai_response может быть пустой строкой "" (при лимите tool calls) — это не ошибка
         await save_message(project_id, "ai", ai_response)
     elif tried_count == 0:
         await safe_ws_send(websocket, {"type": "error", "content": "Нет модели с API ключом. Проверьте настройки API."})

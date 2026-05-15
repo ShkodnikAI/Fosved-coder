@@ -1798,6 +1798,8 @@ function wsSend(data) {
 function wsConnect() {
     if (wsConnecting) return; // Prevent concurrent connection attempts
     wsConnecting = true;
+    // При реконнекте очищаем очередь — сервер пришлёт clear_queue, а старые сообщения неактуальны
+    if (wsEverConnected) { wsMessageQueue = []; persistQ(); }
     updateLoadingBar(20, 'Подключение...');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(protocol + "//" + window.location.host + "/ws");
@@ -1835,10 +1837,12 @@ function wsConnect() {
                 }
             });
         }
-        // Only reload data if we don't have it yet
-        if (allModels.length === 0) loadModels();
-        if (allProjects.length === 0) loadProjects();
-        loadServerLogs({limit: 200});
+        // Only reload data if we don't have it yet (NOT on every reconnect)
+        if (isFirstConnect) {
+            loadModels();
+            loadProjects();
+            loadServerLogs({limit: 50});
+        }
         while (wsMessageQueue.length > 0) { ws.send(wsMessageQueue.shift()); }
         persistQ();
     };
