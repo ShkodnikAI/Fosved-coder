@@ -2211,6 +2211,13 @@ async def get_stats():
         "routing_decisions": len(await get_routing_stats()),
     }
 
+@router.get("/stats/full")
+async def get_full_stats_endpoint():
+    """Полная агрегированная статистика для дашборда — модели, инструменты, токены, время, пути."""
+    from core.memory import get_full_stats
+    _api("GET", "/api/v1/stats/full")
+    return await get_full_stats()
+
 @router.get("/config")
 async def get_config():
     _api("GET", "/api/v1/config")

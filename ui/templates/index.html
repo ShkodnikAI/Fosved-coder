@@ -625,6 +625,10 @@
         <span class="status-content" id="status-screen">Главная</span>
     </div>
     <div class="status-section">
+        <span class="status-label">Скиллы:</span>
+        <span class="status-content" id="status-tools">—</span>
+    </div>
+    <div class="status-section">
         <span class="status-label">Токены:</span>
         <span class="status-content" id="status-tokens">—</span>
     </div>
@@ -929,6 +933,7 @@ let currentLogFilter = "all";
 let autoLogCount = 0;
 let autoLogPanelVisible = true;
 let activeToolDivs = {};
+let sessionToolCount = 0;
 let isWaitingAI = false;
 let isHubWaitingAI = false;
 let waitTimer = null;
@@ -1327,13 +1332,14 @@ function handleToolCall(data) {
     else if (tool==='write_file'&&args.path) detail=args.path+(args.size?` (${args.size})`:'');
     else if (tool==='execute_command'&&args.command) detail=args.command;
     else if (args.path) detail=args.path;
+    else if (args.pattern) detail=args.pattern;
+    else if (args.message) detail=args.message;
 
-    // Логировать в активный контейнер логов
+    // ─── Логировать в панель логов ───
     const containers = [
         document.getElementById('log-entries'),
         document.getElementById('hub-log-entries')
     ].filter(Boolean);
-
     const time = new Date().toLocaleTimeString();
 
     if (status === 'running') {
@@ -1348,9 +1354,24 @@ function handleToolCall(data) {
                 container.appendChild(entry);
                 container.scrollTop = container.scrollHeight;
             });
+            // ─── Встроенный индикатор в чат ───
+            const chatBox = getActiveChatBox();
+            if (chatBox && !document.getElementById('chat-tool-'+CSS.escape(key))) {
+                const toolDiv = document.createElement('div');
+                toolDiv.className = 'inline-tool-call';
+                toolDiv.id = 'chat-tool-'+CSS.escape(key);
+                toolDiv.innerHTML = `<span class="itc-icon">${icon}</span><span class="itc-label">${escapeHtml(label)}</span>${detail?'<span class="itc-detail">'+escapeHtml(detail)+'</span>':''}<span class="itc-spinner">⏳</span>`;
+                const aiDiv = chatBox.querySelector('.msg.ai:last-of-type') || chatBox.querySelector('.typing-indicator');
+                if (aiDiv) chatBox.insertBefore(toolDiv, aiDiv);
+                else chatBox.appendChild(toolDiv);
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
             activeToolDivs[key] = true;
             autoLogCount++;
             updateLogBadge();
+            // Обновляем счётчик инструментов в статус-баре
+            sessionToolCount = (sessionToolCount || 0) + 1;
+            updateStatusBar();
         }
     } else if (status === 'done') {
         if (activeToolDivs[key]) {
@@ -1366,6 +1387,14 @@ function handleToolCall(data) {
                     if (currentLogFilter!=='all') entry.style.display = entry.dataset.level===currentLogFilter?'':'none';
                 }
             });
+            // Обновить встроенный индикатор в чате
+            const chatTool = document.getElementById('chat-tool-'+CSS.escape(key));
+            if (chatTool) {
+                const spinner = chatTool.querySelector('.itc-spinner');
+                if (spinner) spinner.textContent = si;
+                chatTool.classList.add('itc-done');
+                setTimeout(() => chatTool.remove(), 4000);
+            }
             activeToolDivs[key] = null;
             autoLogCount++;
         }
@@ -1380,6 +1409,13 @@ function handleToolCall(data) {
                     if (currentLogFilter!=='all'&&'error'!==currentLogFilter) entry.style.display='none';
                 }
             });
+            const chatTool = document.getElementById('chat-tool-'+CSS.escape(key));
+            if (chatTool) {
+                const spinner = chatTool.querySelector('.itc-spinner');
+                if (spinner) spinner.textContent = '❌';
+                chatTool.classList.add('itc-error');
+                setTimeout(() => chatTool.remove(), 4000);
+            }
             activeToolDivs[key] = null;
         }
     }
@@ -1779,6 +1815,8 @@ function wsConnect() {
             else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
             setTimeout(() => { updateHeaderModelBadge(null); }, 3000);
             if (currentProjectId) autoIncrementProgress();
+            sessionToolCount = 0;
+            updateStatusBar();
             return;
         }
 
@@ -2892,6 +2930,12 @@ function updateStatusBar() {
     const modelEl = document.getElementById('status-model');
     const m = allModels.find(x=>x.id===activeModelId);
     modelEl.innerHTML = m ? `<span class="status-dot green"></span>${escapeHtml(m.name)}` : '—';
+    // Счётчик инструментов текущей сессии
+    const toolsEl = document.getElementById('status-tools');
+    if (toolsEl) {
+        const tc = sessionToolCount || 0;
+        toolsEl.innerHTML = tc > 0 ? `<span class="status-dot green"></span>${tc}` : '—';
+    }
     // Модели: показываем сколько прошли опрос из скольких всего
     const mcEl = document.getElementById('status-models-count');
     const probedCount = allModels.filter(m => explicitlyProbedIds.has(m.id)).length;
@@ -3535,18 +3579,136 @@ async function toggleGitHub(enabled) {
 // ═══════════════════════════════════════════════════════
 async function showStats() {
     try {
-        const [statusResp, healthResp] = await Promise.all([fetch('/api/v1/status'), fetch('/api/v1/health')]);
-        const status = await statusResp.json();
-        const health = await healthResp.json();
-        const body = `<div class="stats-grid">
-            <div class="stat-card"><div class="stat-value">${allProjects.length}</div><div class="stat-label">Проектов</div></div>
-            <div class="stat-card"><div class="stat-value">${allModels.length}</div><div class="stat-label">Моделей</div></div>
-            <div class="stat-card"><div class="stat-value">${status.models?.free||0}</div><div class="stat-label">Бесплатных</div></div>
-            <div class="stat-card"><div class="stat-value">${status.models?.paid||0}</div><div class="stat-label">Платных</div></div>
+        const resp = await fetch('/api/v1/stats/full');
+        const s = await resp.json();
+        const m = s.models || {};
+        const t = s.tools || {};
+        const p = s.projects || {};
+        const st = s.storage || {};
+
+        // Модели — таблица
+        let modelRows = '';
+        const byModel = m.by_model || {};
+        const modelEntries = Object.entries(byModel).sort((a,b) => b[1].calls - a[1].calls);
+        for (const [mid, info] of modelEntries) {
+            const bar = info.percentage ? `<div class="stats-bar"><div class="stats-bar-fill" style="width:${Math.min(info.percentage,100)}%"></div></div>` : '';
+            modelRows += `<div class="stats-row">
+                <div class="stats-row-label" title="${escapeHtml(mid)}">${escapeHtml(mid.length>30?mid.slice(0,30)+'...':mid)}</div>
+                <div class="stats-row-num">${info.calls}</div>
+                <div class="stats-row-pct">${info.percentage}%</div>
+                <div class="stats-row-bar">${bar}</div>
+                <div class="stats-row-num">${info.tokens||0}</div>
+                <div class="stats-row-num">${info.tool_calls||0}</div>
+                <div class="stats-row-num">${info.success_rate}%</div>
+                <div class="stats-row-num">${info.avg_duration_ms}ms</div>
+            </div>`;
+        }
+        if (!modelEntries.length) modelRows = '<div style="color:var(--text-dim);text-align:center;padding:16px;">Нет данных</div>';
+
+        // Инструменты — таблица
+        let toolRows = '';
+        const byTool = t.by_tool || {};
+        const toolIcons = {read_file:'📖',write_file:'💾',list_files:'📁',search_files:'🔍',execute_command:'⚡',git_commit_push:'🚀'};
+        const toolLabels = {read_file:'Чтение файлов',write_file:'Запись файлов',list_files:'Список файлов',search_files:'Поиск',execute_command:'Команды',git_commit_push:'Git push'};
+        const toolEntries = Object.entries(byTool).sort((a,b) => b[1].calls - a[1].calls);
+        for (const [tn, info] of toolEntries) {
+            const icon = toolIcons[tn] || '🔧';
+            const label = toolLabels[tn] || tn;
+            const bar = info.percentage ? `<div class="stats-bar"><div class="stats-bar-fill" style="width:${Math.min(info.percentage,100)}%"></div></div>` : '';
+            toolRows += `<div class="stats-row">
+                <div class="stats-row-label">${icon} ${escapeHtml(label)}</div>
+                <div class="stats-row-num">${info.calls}</div>
+                <div class="stats-row-pct">${info.percentage}%</div>
+                <div class="stats-row-bar">${bar}</div>
+                <div class="stats-row-num">${info.errors||0}</div>
+                <div class="stats-row-num">${info.avg_duration_ms}ms</div>
+            </div>`;
+        }
+        if (!toolEntries.length) toolRows = '<div style="color:var(--text-dim);text-align:center;padding:16px;">Нет данных</div>';
+
+        // Провайдеры
+        let providerHtml = '';
+        const byProvider = m.by_provider || {};
+        const provEntries = Object.entries(byProvider).sort((a,b) => b[1] - a[1].calls);
+        for (const [prov, count] of Object.entries(byProvider).sort((a,b) => b[1]-a[1])) {
+            providerHtml += `<span class="stats-tag">${escapeHtml(prov)}: ${count}</span>`;
+        }
+
+        // Проекты
+        let projHtml = '';
+        for (const proj of (p.list || [])) {
+            const prog = proj.progress || 0;
+            projHtml += `<div class="stats-proj-row">
+                <span class="stats-proj-name">${escapeHtml(proj.name)}</span>
+                <span class="stats-proj-tmpl">${escapeHtml(proj.template||'—')}</span>
+                <span class="stats-proj-prog">${prog}%</span>
+            </div>`;
+        }
+        if (!p.list || !p.list.length) projHtml = '<div style="color:var(--text-dim);text-align:center;padding:12px;">Нет проектов</div>';
+
+        const totalDur = m.total_duration_ms || 0;
+        const avgDur = m.total_calls ? Math.round(totalDur / m.total_calls) : 0;
+
+        const body = `
+        <!-- Карточки сводки -->
+        <div class="stats-summary-grid">
+            <div class="stat-card"><div class="stat-value">${m.total_calls||0}</div><div class="stat-label">Вызовов моделей</div></div>
+            <div class="stat-card"><div class="stat-value">${t.total_calls||0}</div><div class="stat-label">Вызовов инструментов</div></div>
+            <div class="stat-card"><div class="stat-value">${m.total_tokens||0}</div><div class="stat-label">Токенов</div></div>
+            <div class="stat-card"><div class="stat-value">${(totalDur/1000).toFixed(1)}с</div><div class="stat-label">Общее время LLM</div></div>
+            <div class="stat-card"><div class="stat-value">${p.count||0}</div><div class="stat-label">Проектов</div></div>
+            <div class="stat-card"><div class="stat-value">${s.messages_count||0}</div><div class="stat-label">Сообщений</div></div>
         </div>
-        <div style="font-size:12px;color:var(--text-secondary);"><b>БД:</b> ${health.database?.type||'—'} | <b>Провайдеры:</b> ${health.providers?.active||0}/${health.providers?.total||0}</div>`;
-        openGenericModal("📊 Статистика", body);
-    } catch(e) { showToast(e.message, "error"); }
+
+        <!-- Токены детально -->
+        <div class="stats-tokens-row">
+            <span>Промпт: <b>${m.total_prompt_tokens||0}</b></span>
+            <span>Генерация: <b>${m.total_completion_tokens||0}</b></span>
+            <span>Средний вызов: <b>${avgDur}ms</b></span>
+            <span>БД: <b>${st.database_size_mb||0} MB</b></span>
+        </div>
+
+        ${providerHtml ? `<div class="stats-providers">${providerHtml}</div>` : ''}
+
+        <!-- Модели -->
+        <div class="stats-section">
+            <div class="stats-section-title">🤖 Модели</div>
+            <div class="stats-table-head">
+                <span>Модель</span><span>Вызовы</span><span>%</span><span></span><span>Токены</span><span>Tools</span><span>Успех</span><span>Время</span>
+            </div>
+            <div class="stats-table-body">${modelRows}</div>
+        </div>
+
+        <!-- Инструменты -->
+        <div class="stats-section">
+            <div class="stats-section-title">🔧 Инструменты</div>
+            <div class="stats-table-head">
+                <span>Инструмент</span><span>Вызовы</span><span>%</span><span></span><span>Ошибки</span><span>Время</span>
+            </div>
+            <div class="stats-table-body">${toolRows}</div>
+        </div>
+
+        <!-- Проекты -->
+        <div class="stats-section">
+            <div class="stats-section-title">📁 Проекты</div>
+            <div class="stats-table-head">
+                <span>Проект</span><span>Шаблон</span><span>Прогресс</span>
+            </div>
+            <div class="stats-table-body">${projHtml}</div>
+        </div>
+
+        <!-- Пути хранения -->
+        <div class="stats-section">
+            <div class="stats-section-title">💾 Пути хранения</div>
+            <div class="stats-paths">
+                <div class="stats-path-row"><span class="stats-path-label">Проекты:</span><span class="stats-path-value" title="${escapeHtml(st.projects_dir||'')}">${escapeHtml(st.projects_dir||'—')}</span></div>
+                <div class="stats-path-row"><span class="stats-path-label">База данных:</span><span class="stats-path-value" title="${escapeHtml(st.database_path||'')}">${escapeHtml(st.database_path||'—')}</span></div>
+                <div class="stats-path-row"><span class="stats-path-label">Размер БД:</span><span class="stats-path-value">${st.database_size_mb||0} MB</span></div>
+            </div>
+        </div>`;
+
+        openGenericModal("📊 Полная статистика", body);
+    } catch(e) { showToast('Ошибка загрузки статистики: ' + e.message, 'error'); }
 }
 
 // ═══════════════════════════════════════════════════════

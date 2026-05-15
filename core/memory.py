@@ -188,6 +188,38 @@ class RoutingStat(Base):
     success: Mapped[bool] = mapped_column(default=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class ToolUsageStat(Base):
+    """Статистика использования инструментов модели."""
+    __tablename__ = "tool_usage_stats"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    project_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
+    session_id: Mapped[str] = mapped_column(default="", index=True)
+    model_id: Mapped[str] = mapped_column(default="")
+    tool_name: Mapped[str] = mapped_column(default="", index=True)
+    args_summary: Mapped[str] = mapped_column(Text, default="")  # JSON with key args
+    status: Mapped[str] = mapped_column(default="done")  # done, error, running
+    duration_ms: Mapped[int] = mapped_column(default=0)
+    tokens_used: Mapped[int] = mapped_column(default=0)
+    result_length: Mapped[int] = mapped_column(default=0)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class ModelUsageStat(Base):
+    """Статистика использования моделей — агрегированная за сессию."""
+    __tablename__ = "model_usage_stats"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    project_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
+    session_id: Mapped[str] = mapped_column(default="", index=True)
+    model_id: Mapped[str] = mapped_column(default="", index=True)
+    model_name: Mapped[str] = mapped_column(default="")
+    provider: Mapped[str] = mapped_column(default="")
+    prompt_tokens: Mapped[int] = mapped_column(default=0)
+    completion_tokens: Mapped[int] = mapped_column(default=0)
+    total_tokens: Mapped[int] = mapped_column(default=0)
+    duration_ms: Mapped[int] = mapped_column(default=0)
+    tool_calls_count: Mapped[int] = mapped_column(default=0)
+    success: Mapped[bool] = mapped_column(default=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class ProjectArchive(Base):
     __tablename__ = "project_archives"
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -1636,6 +1668,194 @@ async def get_routing_stats(limit: int = 100) -> list[dict]:
              "reason": s.reason, "success": s.success, "timestamp": str(s.timestamp)}
             for s in result.scalars().all()
         ]
+
+# ═══════════════════════════════════════════════════════════════
+# TOOL & MODEL USAGE STATS
+# ═══════════════════════════════════════════════════════════════
+
+async def save_tool_usage(
+    project_id: int | None, session_id: str, model_id: str,
+    tool_name: str, args_summary: str, status: str,
+    duration_ms: int = 0, tokens_used: int = 0, result_length: int = 0
+):
+    """Сохранить запись об использовании инструмента."""
+    async with async_session() as session:
+        async with session.begin():
+            session.add(ToolUsageStat(
+                project_id=project_id, session_id=session_id,
+                model_id=model_id, tool_name=tool_name,
+                args_summary=args_summary, status=status,
+                duration_ms=duration_ms, tokens_used=tokens_used,
+                result_length=result_length
+            ))
+
+async def save_model_usage(
+    project_id: int | None, session_id: str, model_id: str,
+    model_name: str, provider: str, prompt_tokens: int = 0,
+    completion_tokens: int = 0, total_tokens: int = 0,
+    duration_ms: int = 0, tool_calls_count: int = 0, success: bool = True
+):
+    """Сохранить запись об использовании модели."""
+    async with async_session() as session:
+        async with session.begin():
+            session.add(ModelUsageStat(
+                project_id=project_id, session_id=session_id,
+                model_id=model_id, model_name=model_name, provider=provider,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                total_tokens=total_tokens, duration_ms=duration_ms,
+                tool_calls_count=tool_calls_count, success=success
+            ))
+
+async def get_tool_usage_stats(project_id: int | None = None, limit: int = 500) -> list[dict]:
+    """Получить статистику использования инструментов."""
+    async with async_session() as session:
+        q = select(ToolUsageStat).order_by(ToolUsageStat.timestamp.desc()).limit(limit)
+        if project_id:
+            q = q.where(ToolUsageStat.project_id == project_id)
+        result = await session.execute(q)
+        return [
+            {"id": s.id, "project_id": s.project_id, "session_id": s.session_id,
+             "model_id": s.model_id, "tool_name": s.tool_name,
+             "args_summary": s.args_summary, "status": s.status,
+             "duration_ms": s.duration_ms, "tokens_used": s.tokens_used,
+             "result_length": s.result_length, "timestamp": str(s.timestamp)}
+            for s in result.scalars().all()
+        ]
+
+async def get_model_usage_stats(project_id: int | None = None, limit: int = 500) -> list[dict]:
+    """Получить статистику использования моделей."""
+    async with async_session() as session:
+        q = select(ModelUsageStat).order_by(ModelUsageStat.timestamp.desc()).limit(limit)
+        if project_id:
+            q = q.where(ModelUsageStat.project_id == project_id)
+        result = await session.execute(q)
+        return [
+            {"id": s.id, "project_id": s.project_id, "session_id": s.session_id,
+             "model_id": s.model_id, "model_name": s.model_name, "provider": s.provider,
+             "prompt_tokens": s.prompt_tokens, "completion_tokens": s.completion_tokens,
+             "total_tokens": s.total_tokens, "duration_ms": s.duration_ms,
+             "tool_calls_count": s.tool_calls_count, "success": s.success,
+             "timestamp": str(s.timestamp)}
+            for s in result.scalars().all()
+        ]
+
+async def get_full_stats() -> dict:
+    """Полная агрегированная статистика для дашборда."""
+    import os as _os
+    from collections import Counter
+    
+    async with async_session() as session:
+        # --- Модели ---
+        r = await session.execute(select(ModelUsageStat))
+        all_model_usage = r.scalars().all()
+        
+        model_counter = Counter()
+        model_tokens = Counter()
+        model_time = Counter()
+        model_tools = Counter()
+        model_success = Counter()
+        provider_counter = Counter()
+        
+        for m in all_model_usage:
+            mid = m.model_id or m.model_name or "unknown"
+            model_counter[mid] += 1
+            model_tokens[mid] += m.total_tokens or 0
+            model_time[mid] += m.duration_ms or 0
+            model_tools[mid] += m.tool_calls_count or 0
+            model_success[mid] += 1 if m.success else 0
+            if m.provider:
+                provider_counter[m.provider] += 1
+        
+        total_model_calls = len(all_model_usage)
+        total_tokens = sum(m.total_tokens or 0 for m in all_model_usage)
+        total_prompt_tokens = sum(m.prompt_tokens or 0 for m in all_model_usage)
+        total_completion_tokens = sum(m.completion_tokens or 0 for m in all_model_usage)
+        total_duration_ms = sum(m.duration_ms or 0 for m in all_model_usage)
+        total_tool_calls = sum(m.tool_calls_count or 0 for m in all_model_usage)
+        
+        model_stats = {}
+        for mid in model_counter:
+            model_stats[mid] = {
+                "calls": model_counter[mid],
+                "percentage": round(model_counter[mid] / total_model_calls * 100, 1) if total_model_calls else 0,
+                "tokens": model_tokens[mid],
+                "avg_duration_ms": round(model_time[mid] / model_counter[mid]) if model_counter[mid] else 0,
+                "tool_calls": model_tools[mid],
+                "success_rate": round(model_success[mid] / model_counter[mid] * 100, 1) if model_counter[mid] else 0,
+            }
+        
+        # --- Инструменты ---
+        r2 = await session.execute(select(ToolUsageStat))
+        all_tool_usage = r2.scalars().all()
+        
+        tool_counter = Counter()
+        tool_errors = Counter()
+        tool_avg_duration = Counter()
+        tool_result_sizes = Counter()
+        
+        for t in all_tool_usage:
+            tool_counter[t.tool_name] += 1
+            if t.status == "error":
+                tool_errors[t.tool_name] += 1
+            tool_avg_duration[t.tool_name] += t.duration_ms or 0
+            tool_result_sizes[t.tool_name] += t.result_length or 0
+        
+        total_tool_calls = len(all_tool_usage)
+        tool_stats = {}
+        for tn in tool_counter:
+            tool_stats[tn] = {
+                "calls": tool_counter[tn],
+                "percentage": round(tool_counter[tn] / total_tool_calls * 100, 1) if total_tool_calls else 0,
+                "errors": tool_errors[tn],
+                "avg_duration_ms": round(tool_avg_duration[tn] / tool_counter[tn]) if tool_counter[tn] else 0,
+                "total_result_size": tool_result_sizes[tn],
+            }
+        
+        # --- Проекты ---
+        projects = await get_all_projects()
+        
+        # --- Пути хранения ---
+        projects_dir = CONFIG.get("system", {}).get("projects_dir", "projects")
+        db_path = CONFIG.get("database", {}).get("url", "sqlite:///data/fosved.db")
+        
+        # Размер БД
+        db_size_mb = 0
+        try:
+            if "sqlite" in db_path:
+                db_file = db_path.split(":///")[-1] if ":///" in db_path else "data/fosved.db"
+                if _os.path.exists(db_file):
+                    db_size_mb = round(_os.path.getsize(db_file) / (1024 * 1024), 2)
+        except Exception:
+            pass
+        
+        return {
+            "models": {
+                "total_calls": total_model_calls,
+                "total_tokens": total_tokens,
+                "total_prompt_tokens": total_prompt_tokens,
+                "total_completion_tokens": total_completion_tokens,
+                "total_duration_ms": total_duration_ms,
+                "total_tool_calls": total_tool_calls,
+                "by_model": model_stats,
+                "by_provider": dict(provider_counter),
+            },
+            "tools": {
+                "total_calls": total_tool_calls,
+                "by_tool": tool_stats,
+            },
+            "projects": {
+                "count": len(projects),
+                "list": [{"id": p.get("id"), "name": p.get("name"), "path": p.get("path"),
+                          "progress": p.get("progress", 0), "template": p.get("template", "")}
+                         for p in projects],
+            },
+            "storage": {
+                "projects_dir": _os.path.abspath(projects_dir),
+                "database_path": db_path,
+                "database_size_mb": db_size_mb,
+            },
+            "messages_count": await get_message_count(None),
+        }
 
 # ═══════════════════════════════════════════════════════════════
 # PROJECT ARCHIVES CRUD
