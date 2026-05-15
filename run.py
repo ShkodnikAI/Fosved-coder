@@ -484,7 +484,7 @@ async def websocket_chat(websocket: WebSocket):
                         except Exception as hub_err:
                             print(f"  [ws] hub task {tid[:8]} error: {hub_err}")
                             try:
-                            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Ошибка hub-чата: {str(hub_err)[:150]}", "level": "error"})
+                                await safe_ws_send(websocket, {"type": "auto_log", "content": f"Ошибка hub-чата: {str(hub_err)[:150]}", "level": "error"})
                             except Exception:
                                 pass
                         finally:
