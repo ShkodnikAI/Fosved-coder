@@ -181,6 +181,7 @@ class IntelligentRouter:
         failed_probe_ids: set = None,
         has_been_probed: bool = False,
         priority_models: list = None,
+        in_project_context: bool = False,
     ) -> dict:
         """
         Выбрать модель на основе классификации задачи.
@@ -193,6 +194,7 @@ class IntelligentRouter:
             failed_probe_ids: множество ID моделей, НЕ прошедших probe
             has_been_probed: True если probe когда-либо запускался
             priority_models: список ID моделей в порядке приоритета (от клиента)
+            in_project_context: True если запрос в контексте проекта (кодовые задачи)
 
         Returns:
             {
@@ -215,13 +217,14 @@ class IntelligentRouter:
             }
 
         # Если пользователь выставил приоритеты — берём первую приоритетную модель
-        # из тех, что прошли probe (номера на карточках = порядок)
+        # Сначала из тех, что прошли probe, затем любую валидную
         if priority_models:
             probed_set = probed_model_ids or set()
             for pm_id in priority_models:
+                # Сначала пробуем из проверенных
                 if pm_id in probed_set:
                     m = next((x for x in available_models if x.get("id") == pm_id), None)
-                    if m:
+                    if m and m.get("status") in ("valid", "available", "rate_limited"):
                         return {
                             "model_id": m["id"],
                             "model_name": m.get("name", m["id"]),
@@ -229,9 +232,29 @@ class IntelligentRouter:
                             "reason": f"Приоритетная модель #{priority_models.index(pm_id)+1}: {m.get('name', m['id'])}",
                             "overridden": True,
                         }
+            # Если ни одна приоритетная не в проверенных — берём первую валидную
+            # (пользователь явно указал приоритет — уважаем его выбор)
+            for pm_id in priority_models:
+                m = next((x for x in available_models if x.get("id") == pm_id), None)
+                if m and m.get("status") in ("valid", "available", "rate_limited"):
+                    return {
+                        "model_id": m["id"],
+                        "model_name": m.get("name", m["id"]),
+                        "complexity": "priority",
+                        "reason": f"Приоритетная модель #{priority_models.index(pm_id)+1} (непроверенная): {m.get('name', m['id'])}",
+                        "overridden": True,
+                    }
 
         classification = self.classify(user_prompt)
         complexity = classification["complexity"]
+
+        # В контексте проекта — повышаем сложность (пользователь работает с кодом)
+        if in_project_context and complexity == "simple":
+            trivial_keywords = ["привет", "здравствуй", "хай", "спасибо", "пока", "hello", "hi"]
+            if not any(kw in user_prompt.lower() for kw in trivial_keywords):
+                if classification["confidence"] < 0.8:
+                    complexity = "complex"
+                    classification["reason"] += " (повышено: контекст проекта)"
 
         # ── ФИКС glm-5.1 cycling ──
         # Если probe БЫЛ запущен, но НЕТ проверенных моделей — возврат пустой

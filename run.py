@@ -483,6 +483,20 @@ async def websocket_chat(websocket: WebSocket):
                 # ТОЛЬКО из явно проверенных моделей (explicitly_probed_ids с клиента)
                 # Если пользователь выставил приоритеты (priority) — используем их
                 if not model_id:
+                    # Подгружаем приоритетные модели из БД если клиент не прислал
+                    db_priority = []
+                    if not priority and current_project_id:
+                        try:
+                            proj = await get_project(current_project_id)
+                            if proj and proj.get("selected_models"):
+                                import json as _json
+                                db_priority = _json.loads(proj["selected_models"])
+                                if db_priority:
+                                    priority = db_priority
+                                    print(f"  [router] Loaded {len(db_priority)} priority models from DB")
+                        except Exception:
+                            pass
+
                     if not explicitly_probed_ids:
                         if not _no_models_warned:
                             _no_models_warned = True
@@ -498,6 +512,7 @@ async def websocket_chat(websocket: WebSocket):
                             failed_probe_ids=set(),
                             has_been_probed=True,
                             priority_models=priority,
+                            in_project_context=bool(current_project_id),
                         )
                         if route_result.get("model_id"):
                             model_id = route_result["model_id"]
