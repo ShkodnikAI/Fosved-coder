@@ -24,7 +24,7 @@ from api.endpoints import router as api_router
 logger = get_logger()
 
 
-async def safe_ws_send(websocket, data: dict):
+async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False):
     """Send JSON to websocket, silently ignoring any errors (closed conn, etc.)."""
     try:
         await websocket.send_json(data)
@@ -296,29 +296,33 @@ async def websocket_chat(websocket: WebSocket):
                             proj = await get_project(project_id)
                             if proj and proj.get("selected_models"):
                                 pm = json.loads(proj["selected_models"])
-                        if probed_ids_val:
-                            route_result = intelligent_router.select_model(
-                                prompt, all_m, user_preferred_model=None,
-                                probed_model_ids=probed_ids_val, failed_probe_ids=set(),
-                                has_been_probed=True, priority_models=pm,
-                                in_project_context=bool(project_id),
-                            )
-                            resolved_model = route_result.get("model_id")
+                        # Всегда пытаемся маршрутизировать — даже без probe,
+                        # передаём пустой probed set и has_been_probed=False
+                        route_result = intelligent_router.select_model(
+                            prompt, all_m, user_preferred_model=None,
+                            probed_model_ids=probed_ids_val or set(), failed_probe_ids=set(),
+                            has_been_probed=bool(probed_ids_val), priority_models=pm,
+                            in_project_context=bool(project_id),
+                        )
+                        resolved_model = route_result.get("model_id")
                     except Exception as route_err:
                         print(f"  [ws] task {task_id[:8]} router error: {route_err}")
                 
-                if resolved_model:
+                # Всегда вызываем handle_chat_message — если resolved_model=None,
+                # внутри используется _build_models_to_try() с фоллбэком на проверенные модели
+                if project_id:
                     await handle_chat_message(
                         prompt, project_id, repo_map_val, websocket,
                         model_id=resolved_model, _cancel_check=_cancelled
                     )
                 else:
-                    await safe_ws_send(websocket, {"type": "error", "content": "Не удалось подобрать модель для задачи."})
+                    await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет выбранного проекта", "level": "warning"})
+                    await safe_ws_send(websocket, {"type": "done", "tools_used": 0, "duration_ms": 0, "tokens": 0})
             # Hub messages don't go through here (handled separately below)
         except Exception as task_err:
             print(f"  [ws] task {task_id[:8]} error: {task_err}")
             try:
-                await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка задачи: {str(task_err)[:200]}"})
+                await safe_ws_send(websocket, {"type": "auto_log", "content": f"❌ Ошибка задачи: {str(task_err)[:150]}", "level": "error"})
             except Exception:
                 pass
         finally:
@@ -353,7 +357,7 @@ async def websocket_chat(websocket: WebSocket):
                 # so NO exception can kill the WS handler loop
 
                 if len(data) > WS_MAX_MESSAGE_BYTES:
-                    await safe_ws_send(websocket, {"type": "error", "content": f"Сообщение превышает лимит {WS_MAX_MESSAGE_BYTES // (1024 * 1024)} MB"})
+                    await safe_ws_send(websocket, {"type": "auto_log", "content": f"⚠️ Сообщение превышает лимит {WS_MAX_MESSAGE_BYTES // (1024 * 1024)} MB", "level": "warning"})
                     continue
 
                 # Handle slash commands
@@ -470,7 +474,7 @@ async def websocket_chat(websocket: WebSocket):
                         except Exception as hub_err:
                             print(f"  [ws] hub task {tid[:8]} error: {hub_err}")
                             try:
-                                await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка: {str(hub_err)[:200]}"})
+                            await safe_ws_send(websocket, {"type": "auto_log", "content": f"Ошибка hub-чата: {str(hub_err)[:150]}", "level": "error"})
                             except Exception:
                                 pass
                         finally:
@@ -497,7 +501,7 @@ async def websocket_chat(websocket: WebSocket):
                         err_msg = str(q_err)[:300]
                         logger.log("questionnaire_error", level="error", source="ws", error=err_msg)
                         try:
-                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка анкетирования: {err_msg}"})
+                            await safe_ws_send(websocket, {"type": "auto_log", "content": f"❌ Ошибка анкетирования: {err_msg[:100]}", "level": "error"})
                         except Exception:
                             pass
                     continue
@@ -530,7 +534,7 @@ async def websocket_chat(websocket: WebSocket):
                         err_msg = str(ref_err)[:300]
                         logger.log("refactor_error", level="error", source="ws", project_id=current_project_id, error=err_msg)
                         try:
-                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка рефакторинга: {err_msg}"})
+                            await safe_ws_send(websocket, {"type": "auto_log", "content": f"❌ Ошибка рефакторинга: {err_msg[:100]}", "level": "error"})
                         except Exception:
                             pass
                     continue
@@ -579,7 +583,7 @@ async def websocket_chat(websocket: WebSocket):
                            error=str(iter_err)[:500],
                            stack_trace=traceback.format_exc()[-1000:])
                 try:
-                    await safe_ws_send(websocket, {"type": "error", "content": f"Внутренняя ошибка: {str(iter_err)[:200]}"})
+                    await safe_ws_send(websocket, {"type": "auto_log", "content": f"❌ Внутренняя ошибка: {str(iter_err)[:150]}", "level": "error"})
                 except Exception:
                     pass
                 ws_cancelled = False  # Reset cancel flag after error
@@ -677,7 +681,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         pull_out = await git_pull_with_token(executor, project_path, project_token)
         pull_stripped = pull_out.strip()
         if "error" in pull_stripped.lower() or "fatal" in pull_stripped.lower() or "denied" in pull_stripped.lower():
-            await safe_ws_send(websocket, {"type": "error", "content": f"📥 Pull failed: {pull_stripped[:200]}"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"📥 Pull не удался: {pull_stripped[:150]}", "level": "error"})
             try:
                 logger.log("git_pull_failed", level="error", source="ws", project_id=project_id, error=pull_stripped[:200])
             except Exception:
@@ -703,7 +707,7 @@ async def handle_command(cmd: str, project_id, websocket, model_id: str = None):
         push_out = await git_push_with_token(executor, project_path, project_token)
         push_out_stripped = push_out.strip()
         if "error" in push_out_stripped.lower() or "fatal" in push_out_stripped.lower() or "denied" in push_out_stripped.lower():
-            await safe_ws_send(websocket, {"type": "error", "content": f"📤 Push failed: {push_out_stripped[:200]}"})
+            await safe_ws_send(websocket, {"type": "auto_log", "content": f"📤 Push не удался: {push_out_stripped[:150]}", "level": "error"})
             try:
                 logger.log("git_push_failed", level="error", source="ws", project_id=project_id, error=push_out_stripped[:200])
             except Exception:

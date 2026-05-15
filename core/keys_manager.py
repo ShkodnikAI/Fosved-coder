@@ -506,7 +506,7 @@ class KeysManager:
         except Exception as e:
             error_str = str(e).lower()
             try:
-                logger.log(f"key_validation_error", level="warning", source="keys_manager",
+                logger.log(f"key_validation_error", level="debug", source="keys_manager",
                            details={"provider": provider_id, "model": test_model}, error=str(e)[:200])
             except Exception:
                 pass

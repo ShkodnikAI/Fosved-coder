@@ -1559,9 +1559,9 @@ function sendMessage() {
     const input = document.getElementById("project-user-input");
     const text = input.value.trim();
     if (!text && !attachedFile) return;
-    // Если нет явного выбора — роутер сам подберёт модель
-    // Но нужны проверенные модели!
-    if (explicitlyProbedIds.size === 0 && !activeModelId) { showToast("Сначала опросите модели", "error"); return; }
+    // Если нет ни проверенных моделей, ни явного выбора — предупреждаем, но НЕ блокируем.
+    // Бэкенд сам попробует найти модель через фоллбэк.
+    if (explicitlyProbedIds.size === 0 && !activeModelId && allModels.length === 0) { showToast("Нет доступных моделей. Добавьте API-ключ.", "error"); return; }
     addClientLog('project_message', 'Sent project message: ' + text.substring(0, 80));
     let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
     addMessageTo("user", displayText, projectChatBox);
@@ -1606,7 +1606,7 @@ function sendHubMessage() {
     const input = document.getElementById("hub-user-input");
     const text = input.value.trim();
     if (!text && !hubAttachedFile) return;
-    if (explicitlyProbedIds.size === 0 && !activeModelId) { showToast("Сначала опросите модели", "error"); return; }
+    if (explicitlyProbedIds.size === 0 && !activeModelId && allModels.length === 0) { showToast("Нет доступных моделей. Добавьте API-ключ.", "error"); return; }
     addClientLog('hub_message', 'Sent hub message: ' + text.substring(0, 80));
     let displayText = hubAttachedFile ? "📎 " + hubAttachedFile.filename + "\n" + text : text;
     addMessageTo("user", displayText, hubChatBox);
@@ -1985,7 +1985,7 @@ function wsConnect() {
             return;
         }
 
-        // ─── Ошибка — в чат И в панель логов ───
+        // ─── Ошибка — ТОЛЬКО в панель логов (не засоряем чат системными ошибками) ───
         if (data.type === "error") {
             const taskId = data.task_id;
             const task = activeTasks.get(taskId);
@@ -2018,10 +2018,8 @@ function wsConnect() {
                 if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
                 else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
             }
-            // Route error message to correct chat box
-            const errorChatBox = (task && task.chatBox) || getActiveChatBox();
-            addMessageTo("error", data.content || "Произошла ошибка", errorChatBox);
-            addLogEntryToPanel({level:'error',source:'error',action:data.content||'Произошла ошибка',time:new Date().toLocaleTimeString()});
+            // Все ошибки — ТОЛЬКО в панель логов, НЕ в чат
+            addLogEntryToPanel({level:'error',source:'system',action:data.content||'Произошла ошибка',time:new Date().toLocaleTimeString()});
             return;
         }
 

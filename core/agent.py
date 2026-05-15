@@ -350,7 +350,7 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             return f"Файл {path} сохранён ({len(content)} символов)"
 
         elif name == "list_files":
-            rel_path = arguments.get("path", ".")
+            rel_path = arguments.get("path", ".") or "."  # Пустая строка → "." (корень проекта)
             if not project_path:
                 return "Ошибка: нет пути к проекту"
             full_path = _safe_join(project_path, rel_path)
@@ -952,8 +952,8 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     models_to_try = _build_models_to_try(model_id, all_models, project)
 
     if not models_to_try:
-        await safe_ws_send(websocket, {"type": "error", "content": "Нет доступных моделей. Добавьте API ключ."})
-        await _send_log(websocket, "❌ Нет доступных моделей", "error")
+        await _send_log(websocket, "❌ Нет доступных моделей. Добавьте API-ключ или опросите модели.", "error")
+        await safe_ws_send(websocket, {"type": "done", "tools_used": 0, "duration_ms": 0, "tokens": 0})
         return
 
     # Автоперевалидация rate_limited провайдеров перед первой попыткой
