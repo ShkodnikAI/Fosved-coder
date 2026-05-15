@@ -937,6 +937,11 @@ let sessionToolCount = 0;
 let isWaitingAI = false;
 let isHubWaitingAI = false;
 let waitTimer = null;
+// ═══ Parallel task tracking ═══
+let activeTasks = new Map();  // task_id -> {projectId, target, div, text, chatBox, typingDiv, model}
+let projectWaitingMap = new Map();  // project_id -> task_id (which task is running for this project)
+let hubWaitingTaskId = null;  // task_id of the current hub generation
+function generateTaskId() { return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 6); }
 let diffViewMode = "unified";
 let currentFileViewPath = null;
 let activeSkills = new Set();
@@ -1212,8 +1217,8 @@ function addMessage(type, text) {
 let _aiRenderPending = false, _aiRenderLast = 0;
 const AI_RENDER_INTERVAL = 100;
 
-function scheduleAiRender() {
-    const ctx = getActiveAiContext();
+function scheduleAiRender(overrideCtx) {
+    const ctx = overrideCtx || getActiveAiContext();
     if (!ctx.div) return;
     ctx.chatBox.scrollTop = ctx.chatBox.scrollHeight;
     const now = Date.now();
@@ -1227,7 +1232,7 @@ function scheduleAiRender() {
     _aiRenderPending = true;
     setTimeout(() => {
         _aiRenderPending = false; _aiRenderLast = Date.now();
-        const c2 = getActiveAiContext();
+        const c2 = overrideCtx || getActiveAiContext();
         if (c2.div) {
             c2.div.innerHTML = renderMarkdown(c2.text);
             addCopyButtons(c2.div);
@@ -1236,8 +1241,8 @@ function scheduleAiRender() {
     }, AI_RENDER_INTERVAL);
 }
 
-function flushAiRender() {
-    const ctx = getActiveAiContext();
+function flushAiRender(overrideCtx) {
+    const ctx = overrideCtx || getActiveAiContext();
     if (ctx.div) {
         ctx.div.innerHTML = renderMarkdown(ctx.text);
         addCopyButtons(ctx.div);
@@ -1437,7 +1442,11 @@ function addAutoStepMessage(text, type, canRetry) {
 // УПРАВЛЕНИЕ ВВОДОМ
 // ═══════════════════════════════════════════════════════
 function setWaitingAI(state) {
-    // Для проектного чата
+    // Only actually unlock if there are no other active tasks for this project
+    if (!state && currentProjectId) {
+        const activeTaskId = projectWaitingMap.get(currentProjectId);
+        if (activeTaskId && activeTasks.has(activeTaskId)) return; // Another task still running
+    }
     isWaitingAI = state;
     const input = document.getElementById('project-user-input');
     const progress = document.getElementById('header-progress');
@@ -1464,6 +1473,9 @@ function setWaitingAI(state) {
 }
 
 function setHubWaitingAI(state) {
+    if (!state) {
+        if (hubWaitingTaskId && activeTasks.has(hubWaitingTaskId)) return;
+    }
     isHubWaitingAI = state;
     const input = document.getElementById('hub-user-input');
     const sendBtn = document.getElementById('hub-send-btn');
@@ -1482,12 +1494,62 @@ function setHubWaitingAI(state) {
 
 function stopGeneration() {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({type: "stop_generation"}));
-        addClientLog('ws', '⛔ Stop generation requested');
+        // Find the active task for the current context
+        let taskId = null;
+        if (currentScreen === "project" && currentProjectId) {
+            taskId = projectWaitingMap.get(currentProjectId) || null;
+        } else if (currentScreen === "main") {
+            taskId = hubWaitingTaskId;
+        }
+        ws.send(JSON.stringify({type: "stop_generation", task_id: taskId}));
+        addClientLog('ws', '⛔ Stop generation requested' + (taskId ? ' task=' + taskId : ''));
     }
-    // Immediately hide stop button, reset waiting state
-    setWaitingAI(false);
-    setHubWaitingAI(false);
+    // Reset current context's waiting state only
+    if (currentScreen === "project") {
+        setWaitingAI(false);
+    } else {
+        setHubWaitingAI(false);
+    }
+}
+
+// ═══════════════════════════════════════════════════════
+// PARALLEL TASK CONTEXT ROUTING
+// ═══════════════════════════════════════════════════════
+function getTaskContext(taskId) {
+    if (!taskId) return getActiveAiContext();
+    const task = activeTasks.get(taskId);
+    if (!task) return getActiveAiContext();
+    return { div: task.div, text: task.text, chatBox: task.chatBox, typingDiv: task.typingDiv };
+}
+
+function setTaskContext(taskId, div, text, chatBox, typingDiv) {
+    if (!taskId) { setActiveAiContext(div, text, chatBox, typingDiv); return; }
+    const task = activeTasks.get(taskId);
+    if (task) {
+        task.div = div; task.text = text; task.chatBox = chatBox; task.typingDiv = typingDiv;
+    }
+}
+
+function cleanupTask(taskId) {
+    const task = activeTasks.get(taskId);
+    if (task) {
+        if (task.projectId) {
+            // Only clear project waiting if this was the current task for that project
+            if (projectWaitingMap.get(task.projectId) === taskId) {
+                projectWaitingMap.delete(task.projectId);
+                // If this project is currently displayed, update UI
+                if (task.projectId === currentProjectId) {
+                    setWaitingAI(false);
+                }
+            }
+        } else if (task.target === "hub") {
+            if (hubWaitingTaskId === taskId) {
+                hubWaitingTaskId = null;
+                setHubWaitingAI(false);
+            }
+        }
+        activeTasks.delete(taskId);
+    }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1503,15 +1565,23 @@ function sendMessage() {
     addClientLog('project_message', 'Sent project message: ' + text.substring(0, 80));
     let displayText = attachedFile ? "📎 " + attachedFile.filename + "\n" + text : text;
     addMessageTo("user", displayText, projectChatBox);
+    const taskId = generateTaskId();
     setWaitingAI(true);
     pendingResponseTarget = "project";
-    let payload = { type: "chat", prompt: text, model: activeModelId || null, mode: workMode, project_id: currentProjectId };
+    let payload = { type: "chat", prompt: text, model: activeModelId || null, mode: workMode, project_id: currentProjectId, task_id: taskId };
     if (priorityModels.length) payload.priority_models = priorityModels;
     payload.explicitly_probed_ids = [...explicitlyProbedIds];
     if (attachedFile) payload.file_content = attachedFile.content;
     wsSend(payload);
+    // Track parallel task
+    activeTasks.set(taskId, {
+        projectId: currentProjectId,
+        target: "project",
+        div: null, text: "", chatBox: projectChatBox, typingDiv: null, model: activeModelId || null
+    });
+    if (currentProjectId) projectWaitingMap.set(currentProjectId, taskId);
     lastSentMessage = text;
-    lastSentPayload = { ...payload };
+    lastSentPayload = { ...payload, task_id: taskId };
     input.value = ""; attachedFile = null;
     document.getElementById("project-file-input").value = "";
     input.style.height = "auto";
@@ -1540,15 +1610,23 @@ function sendHubMessage() {
     addClientLog('hub_message', 'Sent hub message: ' + text.substring(0, 80));
     let displayText = hubAttachedFile ? "📎 " + hubAttachedFile.filename + "\n" + text : text;
     addMessageTo("user", displayText, hubChatBox);
+    const taskId = generateTaskId();
     setHubWaitingAI(true);
     pendingResponseTarget = "hub";
-    let payload = { type: "hub_chat", prompt: text, model_id: activeModelId || null };
+    let payload = { type: "hub_chat", prompt: text, model_id: activeModelId || null, task_id: taskId };
     if (priorityModels.length) payload.priority_models = priorityModels;
     payload.explicitly_probed_ids = [...explicitlyProbedIds];
     if (hubAttachedFile) payload.file_content = hubAttachedFile.content;
     wsSend(payload);
+    // Track parallel task
+    activeTasks.set(taskId, {
+        projectId: null,
+        target: "hub",
+        div: null, text: "", chatBox: hubChatBox, typingDiv: null, model: activeModelId || null
+    });
+    hubWaitingTaskId = taskId;
     lastHubSentMessage = text;
-    lastHubSentPayload = { ...payload };
+    lastHubSentPayload = { ...payload, task_id: taskId };
     input.value = ""; hubAttachedFile = null;
     document.getElementById("hub-file-input").value = "";
     input.style.height = "auto";
@@ -1782,37 +1860,81 @@ function wsConnect() {
 
         // ─── Стриминг чанков ───
         if (data.type === "chunk") {
-            const ctx = getActiveAiContext();
-            if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            const taskId = data.task_id;
+            const task = activeTasks.get(taskId);
+            // Determine context: use task-specific if available, else fall back
+            let ctx;
+            if (task) {
+                ctx = { div: task.div, text: task.text, chatBox: task.chatBox, typingDiv: task.typingDiv };
+            } else {
+                ctx = getActiveAiContext();
+            }
+            if (ctx.typingDiv) {
+                ctx.typingDiv.remove();
+                if (task) { task.typingDiv = null; }
+                else { setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            }
             if (!ctx.div) {
                 const newDiv = document.createElement("div");
                 newDiv.className = "msg ai";
                 ctx.chatBox.appendChild(newDiv);
-                setActiveAiContext(newDiv, "", ctx.chatBox, null);
+                if (task) { task.div = newDiv; }
+                else { setActiveAiContext(newDiv, "", ctx.chatBox, null); }
             }
             // Append to correct target text
-            const target = pendingResponseTarget || (currentScreen === "main" ? "hub" : "project");
-            if (target === "hub") { currentHubAiText += data.content; }
-            else { currentAiText += data.content; }
+            if (task) {
+                task.text += data.content;
+                // Also mirror to global vars for backwards compatibility
+                if (task.target === "hub") { currentHubAiText = task.text; }
+                else { currentAiText = task.text; }
+            } else {
+                const target = pendingResponseTarget || (currentScreen === "main" ? "hub" : "project");
+                if (target === "hub") { currentHubAiText += data.content; }
+                else { currentAiText += data.content; }
+            }
             tokenCount += (data.content || '').length;
             updateTokenCount();
-            scheduleAiRender();
+            // Pass task-aware context to render function
+            scheduleAiRender(task ? { div: task.div, text: task.text, chatBox: task.chatBox, typingDiv: task.typingDiv } : null);
             return;
         }
 
         // ─── Завершение ответа ───
         if (data.type === "done") {
-            const ctx = getActiveAiContext();
-            if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
-            flushAiRender();
-            // Сбрасываем только ожидание целевого чата
-            const target = pendingResponseTarget || (currentScreen === "main" ? "hub" : "project");
-            if (target === "hub") { setHubWaitingAI(false); }
-            else { setWaitingAI(false); }
-            pendingResponseTarget = null;
-            // Сбрасываем AI-контекст
-            if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
-            else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
+            const taskId = data.task_id;
+            const task = activeTasks.get(taskId);
+            let ctx;
+            if (task) {
+                ctx = { div: task.div, text: task.text, chatBox: task.chatBox, typingDiv: task.typingDiv };
+            } else {
+                ctx = getActiveAiContext();
+            }
+            if (ctx.typingDiv) {
+                ctx.typingDiv.remove();
+                if (task) { task.typingDiv = null; }
+                else { setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            }
+            // Pass task-aware context to flush render
+            flushAiRender(task ? { div: task.div, text: task.text, chatBox: task.chatBox, typingDiv: task.typingDiv } : null);
+            // Task-based cleanup
+            if (taskId) { cleanupTask(taskId); }
+            else {
+                const target = pendingResponseTarget || (currentScreen === "main" ? "hub" : "project");
+                if (target === "hub") { setHubWaitingAI(false); }
+                else { setWaitingAI(false); }
+                pendingResponseTarget = null;
+            }
+            // Only reset context if the completed task matches the current screen
+            if (task) {
+                if (task.target === "hub" && currentScreen === "main") {
+                    currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null;
+                } else if (task.target === "project" && currentScreen === "project" && task.projectId === currentProjectId) {
+                    currentAiDiv = null; currentAiText = ""; currentTypingDiv = null;
+                }
+            } else {
+                if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
+                else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
+            }
             setTimeout(() => { updateHeaderModelBadge(null); }, 3000);
             if (currentProjectId) autoIncrementProgress();
             sessionToolCount = 0;
@@ -1822,30 +1944,79 @@ function wsConnect() {
 
         // ─── Генерация остановлена пользователем ───
         if (data.type === "generation_stopped") {
-            const ctx = getActiveAiContext();
-            if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
-            flushAiRender();
-            setWaitingAI(false);
-            setHubWaitingAI(false);
-            pendingResponseTarget = null;
+            const taskId = data.task_id;
+            const task = activeTasks.get(taskId);
+            let ctx;
+            if (task) {
+                ctx = { div: task.div, text: task.text, chatBox: task.chatBox, typingDiv: task.typingDiv };
+            } else {
+                ctx = getActiveAiContext();
+            }
+            if (ctx.typingDiv) {
+                ctx.typingDiv.remove();
+                if (task) { task.typingDiv = null; }
+                else { setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            }
+            // Pass task-aware context to flush render
+            flushAiRender(task ? { div: task.div, text: task.text, chatBox: task.chatBox, typingDiv: task.typingDiv } : null);
+            if (taskId) cleanupTask(taskId);
+            else {
+                setWaitingAI(false);
+                setHubWaitingAI(false);
+                pendingResponseTarget = null;
+            }
             updateHeaderModelBadge(null);
-            if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
-            else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
+            // Only reset context if the stopped task matches the current screen
+            if (task) {
+                if (task.target === "hub" && currentScreen === "main") {
+                    currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null;
+                } else if (task.target === "project" && currentScreen === "project" && task.projectId === currentProjectId) {
+                    currentAiDiv = null; currentAiText = ""; currentTypingDiv = null;
+                }
+            } else {
+                if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
+                else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
+            }
             addLogEntryToPanel({level:'warning',source:'system',action:data.content||'Генерация остановлена',time:new Date().toLocaleTimeString()});
             return;
         }
 
         // ─── Ошибка — в чат И в панель логов ───
         if (data.type === "error") {
-            const ctx = getActiveAiContext();
-            if (ctx.typingDiv) { ctx.typingDiv.remove(); setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
-            setWaitingAI(false);
-            setHubWaitingAI(false);
-            pendingResponseTarget = null;
+            const taskId = data.task_id;
+            const task = activeTasks.get(taskId);
+            let ctx;
+            if (task) {
+                ctx = { div: task.div, text: task.text, chatBox: task.chatBox, typingDiv: task.typingDiv };
+            } else {
+                ctx = getActiveAiContext();
+            }
+            if (ctx.typingDiv) {
+                ctx.typingDiv.remove();
+                if (task) { task.typingDiv = null; }
+                else { setActiveAiContext(ctx.div, ctx.text, ctx.chatBox, null); }
+            }
+            if (taskId) cleanupTask(taskId);
+            else {
+                setWaitingAI(false);
+                setHubWaitingAI(false);
+                pendingResponseTarget = null;
+            }
             updateHeaderModelBadge(null);
-            if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
-            else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
-            addMessage("error", data.content || "Произошла ошибка");
+            // Only reset context if the errored task matches the current screen
+            if (task) {
+                if (task.target === "hub" && currentScreen === "main") {
+                    currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null;
+                } else if (task.target === "project" && currentScreen === "project" && task.projectId === currentProjectId) {
+                    currentAiDiv = null; currentAiText = ""; currentTypingDiv = null;
+                }
+            } else {
+                if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
+                else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
+            }
+            // Route error message to correct chat box
+            const errorChatBox = (task && task.chatBox) || getActiveChatBox();
+            addMessageTo("error", data.content || "Произошла ошибка", errorChatBox);
             addLogEntryToPanel({level:'error',source:'error',action:data.content||'Произошла ошибка',time:new Date().toLocaleTimeString()});
             return;
         }
@@ -1864,18 +2035,40 @@ function wsConnect() {
 
         // ─── Индикатор набора текста ───
         if (data.type === "typing") {
-            setWaitingAI(true);
-            setHubWaitingAI(true);
-            if (getActiveAiContext().typingDiv) getActiveAiContext().typingDiv.remove();
+            const taskId = data.task_id;
+            const task = activeTasks.get(taskId);
+            // Determine the correct chat box for the typing indicator
+            const taskChatBox = task ? task.chatBox : getActiveChatBox();
+            // Only set waiting for the relevant context
+            if (task) {
+                if (task.target === "hub") setHubWaitingAI(true);
+                else if (task.projectId === currentProjectId) setWaitingAI(true);
+            } else {
+                setWaitingAI(true);
+                setHubWaitingAI(true);
+            }
+            // Remove existing typing indicator for this task's chat box
+            if (task && task.typingDiv) { task.typingDiv.remove(); task.typingDiv = null; }
+            else if (!task) {
+                if (getActiveAiContext().typingDiv) getActiveAiContext().typingDiv.remove();
+            }
             const typingDiv = document.createElement("div");
             typingDiv.className = "msg ai typing-indicator";
             const mn = data.model||'';
             const sn = mn.includes('__') ? mn.split('__').pop() : mn;
             typingDiv.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div><span>Думаю'+(sn?' ('+escapeHtml(sn)+')':'')+'...</span>';
-            getActiveChatBox().appendChild(typingDiv);
-            getActiveChatBox().scrollTop = getActiveChatBox().scrollHeight;
-            if (currentScreen === "main") currentHubTypingDiv = typingDiv;
-            else currentTypingDiv = typingDiv;
+            taskChatBox.appendChild(typingDiv);
+            taskChatBox.scrollTop = taskChatBox.scrollHeight;
+            // Store typing div reference in the correct location
+            if (task) {
+                task.typingDiv = typingDiv;
+                // Also mirror to global for backwards compat
+                if (task.target === "hub") currentHubTypingDiv = typingDiv;
+                else currentTypingDiv = typingDiv;
+            } else {
+                if (currentScreen === "main") currentHubTypingDiv = typingDiv;
+                else currentTypingDiv = typingDiv;
+            }
             if (sn) updateHeaderModelBadge(sn, 'thinking');
             return;
         }

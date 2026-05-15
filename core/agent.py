@@ -7,6 +7,7 @@ import asyncio
 import fnmatch
 import litellm
 import json
+from contextvars import ContextVar
 from pathlib import Path
 from datetime import datetime, timezone
 from core.memory import CONFIG, save_message, get_history, get_project, get_project_token_by_path, git_push_with_token, save_probed_models, save_tool_usage, save_model_usage
@@ -56,15 +57,23 @@ def get_platform_info() -> str:
     return "СЕРВЕР: неизвестная ОС. Используй стандартные bash-команды."
 logger = get_logger()
 
+# Context variable for task ID — propagates through all async calls
+# Set by run.py when creating a parallel task, auto-injected by safe_ws_send
+_current_task_id: ContextVar[str] = ContextVar('current_task_id', default='')
+
 
 def _now():
     """Current UTC time as HH:MM:SS string."""
     return datetime.now(timezone.utc).strftime("%H:%M:%S")
 
 
-async def safe_ws_send(websocket, data: dict):
+async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False):
     """Send JSON to websocket, silently ignoring any errors (closed conn, etc.)."""
     try:
+        if not _skip_task_id:
+            tid = _current_task_id.get('')
+            if tid:
+                data = {**data, "task_id": tid}
         await websocket.send_json(data)
     except Exception:
         pass

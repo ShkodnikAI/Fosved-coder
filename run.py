@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import uuid
 import uvicorn
 import shlex
 import asyncio
@@ -247,6 +248,7 @@ async def websocket_chat(websocket: WebSocket):
 
     # ── Cancellation flag: set by client to abort current generation ──
     ws_cancelled = False
+    active_tasks: dict[str, dict] = {}  # task_id -> {"cancel": bool, "project_id": int|None, "task": Task}
     # ── Drop counter: after stop, drop N queued messages (no timers!) ──
     _messages_to_drop = 0
     # ── Auto-clone dedup: only attempt clone once per project per session ──
@@ -264,6 +266,64 @@ async def websocket_chat(websocket: WebSocket):
         except asyncio.CancelledError:
             pass
     keepalive_task = asyncio.create_task(_ws_keepalive())
+
+    async def _run_chat_task(task_id: str, prompt: str, project_id, repo_map_val, mode_val, model_id_val, priority_models_val, probed_ids_val):
+        """Run a chat task in parallel — each task has its own cancel flag and ContextVar."""
+        from core.agent import _current_task_id, handle_chat_message, handle_hub_message
+        from core.intelligent_router import intelligent_router
+        
+        # Set context var — propagates to all child async calls (safe_ws_send, etc.)
+        _current_task_id.set(task_id)
+        
+        # Per-task cancel flag stored in active_tasks (mutable by outer scope)
+        active_tasks[task_id] = {"cancel": False, "project_id": project_id, "task": None}
+        _cancelled = lambda: active_tasks.get(task_id, {}).get("cancel", False)
+        
+        try:
+            if mode_val == "auto" and project_id:
+                from core.auto_agent import run_auto_mode
+                await run_auto_mode(prompt, project_id, repo_map_val, websocket, model_id=model_id_val, _cancel_check=_cancelled)
+            elif project_id:
+                # Intelligent router (if no explicit model)
+                resolved_model = model_id_val
+                if not resolved_model:
+                    try:
+                        from core.keys_manager import keys_manager
+                        from core.memory import get_project
+                        all_m = keys_manager.get_all_models()
+                        pm = priority_models_val
+                        if not pm and project_id:
+                            proj = await get_project(project_id)
+                            if proj and proj.get("selected_models"):
+                                pm = json.loads(proj["selected_models"])
+                        if probed_ids_val:
+                            route_result = intelligent_router.select_model(
+                                prompt, all_m, user_preferred_model=None,
+                                probed_model_ids=probed_ids_val, failed_probe_ids=set(),
+                                has_been_probed=True, priority_models=pm,
+                                in_project_context=bool(project_id),
+                            )
+                            resolved_model = route_result.get("model_id")
+                    except Exception as route_err:
+                        print(f"  [ws] task {task_id[:8]} router error: {route_err}")
+                
+                if resolved_model:
+                    await handle_chat_message(
+                        prompt, project_id, repo_map_val, websocket,
+                        model_id=resolved_model, _cancel_check=_cancelled
+                    )
+                else:
+                    await safe_ws_send(websocket, {"type": "error", "content": "Не удалось подобрать модель для задачи."})
+            # Hub messages don't go through here (handled separately below)
+        except Exception as task_err:
+            print(f"  [ws] task {task_id[:8]} error: {task_err}")
+            try:
+                await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка задачи: {str(task_err)[:200]}"})
+            except Exception:
+                pass
+        finally:
+            active_tasks.pop(task_id, None)
+            _current_task_id.set('')
 
     # НЕ отправляем кэшированные результаты probe.
     # Клиент сам восстанавливает список из localStorage.
@@ -353,11 +413,19 @@ async def websocket_chat(websocket: WebSocket):
 
                 # Handle stop_generation — abort current LLM call + drop queued messages
                 if payload.get("type") == "stop_generation":
-                    ws_cancelled = True
-                    # Drop all queued messages (no timer — just a counter)
-                    _messages_to_drop = 100
+                    stop_task_id = payload.get("task_id")
+                    if stop_task_id and stop_task_id in active_tasks:
+                        # Cancel specific task
+                        active_tasks[stop_task_id]["cancel"] = True
+                        await safe_ws_send(websocket, {"type": "generation_stopped", "content": "Генерация остановлена", "task_id": stop_task_id}, _skip_task_id=True)
+                    else:
+                        # Cancel ALL active tasks (legacy / no task_id)
+                        ws_cancelled = True
+                        for tid, tinfo in active_tasks.items():
+                            tinfo["cancel"] = True
+                        await safe_ws_send(websocket, {"type": "generation_stopped", "content": "Все задачи остановлены"})
+                    _messages_to_drop = 5
                     logger.user_action("stop_generation", project_id=current_project_id)
-                    await safe_ws_send(websocket, {"type": "generation_stopped", "content": "⏹ Генерация остановлена"})
                     continue
 
                 # ── Drop queued messages after stop (no timers!) ──
@@ -368,7 +436,7 @@ async def websocket_chat(websocket: WebSocket):
                     print(f"  [ws] DROP queued message ({_messages_to_drop} remaining)")
                     continue
                 if _is_gen_msg:
-                    ws_cancelled = False
+                    pass  # cancel is now per-task, not global
 
                 # Handle probe_selected — тихий опрос только выбранных моделей
                 if payload.get("type") == "probe_selected":
@@ -391,18 +459,27 @@ async def websocket_chat(websocket: WebSocket):
                 if payload.get("type") == "hub_chat":
                     hub_prompt = payload.get("prompt", "")
                     hub_model = payload.get("model_id")
-                    if hub_prompt:
-                        logger.user_action("hub_chat", details={"model": hub_model})
+                    task_id = payload.get("task_id") or str(uuid.uuid4())
+                    
+                    async def _run_hub_task(tid, hp, hm):
+                        from core.agent import _current_task_id, handle_hub_message
+                        _current_task_id.set(tid)
+                        active_tasks[tid] = {"cancel": False, "project_id": None, "task": None}
                         try:
-                            await handle_hub_message(hub_prompt, websocket, model_id=hub_model, _cancel_check=lambda: ws_cancelled)
-                        except Exception as chat_err:
-                            import traceback
-                            err_msg = str(chat_err)[:300]
-                            logger.log("hub_chat_error", level="error", source="ws", error=err_msg)
+                            await handle_hub_message(hp, websocket, model_id=hm, _cancel_check=lambda: active_tasks.get(tid, {}).get("cancel", False))
+                        except Exception as hub_err:
+                            print(f"  [ws] hub task {tid[:8]} error: {hub_err}")
                             try:
-                                await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка модели: {err_msg}"})
+                                await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка: {str(hub_err)[:200]}"})
                             except Exception:
                                 pass
+                        finally:
+                            active_tasks.pop(tid, None)
+                            _current_task_id.set('')
+                    
+                    if hub_prompt:
+                        logger.user_action("hub_chat", details={"model": hub_model})
+                        asyncio.create_task(_run_hub_task(task_id, hub_prompt, hub_model))
                     continue
 
                 # Handle start_questionnaire (создание анкеты из UI)
@@ -479,83 +556,22 @@ async def websocket_chat(websocket: WebSocket):
                                 project["path"], current_project_id
                             )
 
-                # Задача 5: Intelligent Router — выбирает модель по сложности
-                # ТОЛЬКО из явно проверенных моделей (explicitly_probed_ids с клиента)
-                # Если пользователь выставил приоритеты (priority) — используем их
-                if not model_id:
-                    # Подгружаем приоритетные модели из БД если клиент не прислал
-                    db_priority = []
-                    if not priority and current_project_id:
-                        try:
-                            proj = await get_project(current_project_id)
-                            if proj and proj.get("selected_models"):
-                                import json as _json
-                                db_priority = _json.loads(proj["selected_models"])
-                                if db_priority:
-                                    priority = db_priority
-                                    print(f"  [router] Loaded {len(db_priority)} priority models from DB")
-                        except Exception:
-                            pass
+                # Model routing handled inside _run_chat_task (parallel)
 
-                    if not explicitly_probed_ids:
-                        if not _no_models_warned:
-                            _no_models_warned = True
-                            await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет проверенных моделей. Откройте вкладку Модели → Опросить выбранные.", "level": "warning"})
-                        continue
-                    try:
-                        from core.keys_manager import keys_manager
-                        all_models = keys_manager.get_all_models()
-                        route_result = intelligent_router.select_model(
-                            prompt, all_models,
-                            user_preferred_model=None,
-                            probed_model_ids=explicitly_probed_ids,
-                            failed_probe_ids=set(),
-                            has_been_probed=True,
-                            priority_models=priority,
-                            in_project_context=bool(current_project_id),
-                        )
-                        if route_result.get("model_id"):
-                            model_id = route_result["model_id"]
-                            print(f"  [router] {route_result.get('reason', '')} → {model_id}")
-                        else:
-                            await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Не удалось подобрать модель. Выберите вручную.", "level": "warning"})
-                            continue
-                    except Exception as route_err:
-                        try:
-                            logger.log("intelligent_router_error", level="warning", source="ws", error=str(route_err)[:200])
-                        except Exception:
-                            pass
-                        await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Ошибка роутера. Выберите модель вручную.", "level": "warning"})
-                        continue
-
-                # Route based on mode
-                if mode == "auto":
-                    logger.user_action("auto_mode_chat", project_id=current_project_id, details={"model": model_id})
-                    from core.auto_agent import run_auto_mode
-                    try:
-                        await run_auto_mode(prompt, current_project_id, repo_map, websocket, model_id=model_id)
-                    except Exception as auto_err:
-                        import traceback
-                        err_msg = str(auto_err)[:300]
-                        logger.log("auto_mode_error", level="error", source="ws", project_id=current_project_id,
-                                   error=err_msg, model=model_id)
-                        try:
-                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка авто-режима: {err_msg}"})
-                        except Exception:
-                            pass
-                else:
-                    logger.user_action("manual_chat", project_id=current_project_id, details={"model": model_id})
-                    try:
-                        await handle_chat_message(prompt, current_project_id, repo_map, websocket, model_id=model_id, _cancel_check=lambda: ws_cancelled)
-                    except Exception as chat_err:
-                        import traceback
-                        err_msg = str(chat_err)[:300]
-                        logger.log("manual_chat_error", level="error", source="ws", project_id=current_project_id,
-                                   error=err_msg, model=model_id)
-                        try:
-                            await safe_ws_send(websocket, {"type": "error", "content": f"Ошибка модели ({model_id}): {err_msg}"})
-                        except Exception:
-                            pass
+                # Route based on mode — launch as parallel task
+                task_id = payload.get("task_id") or str(uuid.uuid4())
+                logger.user_action(f"{'auto' if mode == 'auto' else 'manual'}_chat", project_id=current_project_id, details={"model": model_id, "task_id": task_id[:8]})
+                asyncio.create_task(_run_chat_task(
+                    task_id=task_id,
+                    prompt=prompt,
+                    project_id=current_project_id,
+                    repo_map_val=repo_map,
+                    mode_val=mode,
+                    model_id_val=model_id,
+                    priority_models_val=priority,
+                    probed_ids_val=explicitly_probed_ids,
+                ))
+                print(f"  [ws] task started: {task_id[:8]} project={current_project_id} mode={mode} model={model_id}")
 
             except Exception as iter_err:
                 import traceback
