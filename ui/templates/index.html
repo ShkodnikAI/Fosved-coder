@@ -252,6 +252,53 @@
         background: rgba(200,169,126,0.08);
     }
     .model-card-with-priority .model-card-info { flex: 1; min-width: 0; }
+    /* Collapsible provider groups */
+    .provider-group {
+        margin-bottom: 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+    }
+    .provider-group-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 8px;
+        cursor: pointer;
+        background: var(--bg-secondary);
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        user-select: none;
+        transition: background 0.15s;
+    }
+    .provider-group-header:hover {
+        background: var(--bg-hover);
+    }
+    .provider-group-header .pg-chevron {
+        font-size: 10px;
+        color: var(--text-dim);
+        transition: transform 0.2s;
+        flex-shrink: 0;
+    }
+    .provider-group-header .pg-chevron.collapsed {
+        transform: rotate(-90deg);
+    }
+    .provider-group-header .pg-count {
+        font-size: 9px;
+        color: var(--text-dim);
+        margin-left: auto;
+        white-space: nowrap;
+        font-weight: 400;
+    }
+    .provider-group-body {
+        padding: 4px 6px 6px;
+    }
+    .provider-group-body.collapsed {
+        display: none;
+    }
     .msg.ai { position: relative; margin-bottom: 16px; }
     .probe-btn {
         background: var(--bg-secondary); border: 1px solid var(--border);
@@ -2362,49 +2409,73 @@ function renderModels() {
     const mc = document.getElementById('hub-models-count');
     if (mc) mc.textContent = probedModels.length ? probedModels.length + '/' + allModels.length : '';
 
-    // Сортировка — valid → rate_limited(в низ)
+    // Сортировка внутри каждой группы — priority → status → name
     const _probeRank = (s) => s === 'valid' ? 0 : s === 'rate_limited' ? 2 : s === 'available' ? 1 : 0;
     const sorted = [...probedModels].sort((a, b) => {
-        // Приоритетные модели всегда первые
         const pa = priorityModels.indexOf(a.id);
         const pb = priorityModels.indexOf(b.id);
         if (pa >= 0 && pb < 0) return -1;
         if (pb >= 0 && pa < 0) return 1;
         if (pa >= 0 && pb >= 0) return pa - pb;
-        // Группировка по probe-статусу: valid(0) → available(1) → rate_limited(2)
         const ra = _probeRank(a.status);
         const rb = _probeRank(b.status);
         if (ra !== rb) return ra - rb;
         return (a.name||'').localeCompare(b.name||'');
     });
 
-    const abacus = sorted.filter(m=>m.provider==='abacus');
-    const paidValid = sorted.filter(m=>m.type==="paid"&&m.provider!=='abacus');
-    const free = sorted.filter(m=>m.type==='free'&&(m.status==='valid'||m.status==='rate_limited'));
-    const local = sorted.filter(m=>m.type==='local');
-    const custom = sorted.filter(m=>m.type==='custom');
+    // Группируем по провайдеру
+    const groups = {};
+    sorted.forEach(m => {
+        let prov = m.provider_name || m.provider || 'Other';
+        // Короткие алиасы для известных провайдеров
+        const aliases = {
+            'openai': 'OpenAI', 'anthropic': 'Anthropic', 'google_gemini': 'Google Gemini',
+            'google': 'Google', 'deepseek': 'DeepSeek', 'xai': 'xAI (Grok)',
+            'meta': 'Meta', 'mistral': 'Mistral', 'cohere': 'Cohere',
+            'abacus': 'ABACUS.AI', 'openrouter': 'OpenRouter',
+        };
+        const provLower = prov.toLowerCase();
+        for (const [key, alias] of Object.entries(aliases)) {
+            if (provLower.includes(key)) { prov = alias; break; }
+        }
+        // Определяем тип для иконки
+        const type = m.type || 'paid';
+        const typeLabel = type === 'free' ? ' [FREE]' : type === 'local' ? ' [LOCAL]' : '';
+        const groupKey = prov + typeLabel;
+        if (!groups[groupKey]) groups[groupKey] = { name: prov + typeLabel, models: [], type };
+        groups[groupKey].models.push(m);
+    });
+
+    // Сортируем группы: paid → free → local, внутри по имени
+    const groupOrder = (g) => g.type === 'local' ? 2 : g.type === 'free' ? 1 : 0;
+    const sortedGroups = Object.values(groups).sort((a, b) => {
+        const oa = groupOrder(a), ob = groupOrder(b);
+        if (oa !== ob) return oa - ob;
+        return a.name.localeCompare(b.name);
+    });
+
+    // Состояние свёрнутости (сохраняем между рендерами)
+    if (!window._collapsedProviderGroups) window._collapsedProviderGroups = new Set();
+
     let html = '';
-    if (paidValid.length) {
-        html += '<div class="provider-group"><div class="provider-header"><span class="status-icon ok">+</span> Платные</div>';
-        paidValid.forEach(m => { html += buildModelCard(m,'paid'); });
-        html += '</div>';
-    }
-    if (free.length) {
-        html += '<div class="provider-group"><div class="provider-header"><span class="status-icon ok">+</span> Бесплатные</div>';
-        free.forEach(m => { html += buildModelCard(m,'free'); });
-        html += '</div>';
-    }
-    if (abacus.length) {
-        html += '<div class="provider-group"><div class="provider-header"><span class="status-icon ok">+</span> ABACUS.AI</div>';
-        abacus.forEach(m => { html += buildModelCard(m,'abacus'); });
-        html += '</div>';
-    }
-    if (local.length || custom.length) {
-        html += '<div class="provider-group"><div class="provider-header"><span class="status-icon ok">+</span> Локальные / Custom</div>';
-        local.forEach(m => { html += buildModelCard(m,'local'); });
-        custom.forEach(m => { html += buildModelCard(m,'custom'); });
-        html += '</div>';
-    }
+    sortedGroups.forEach(g => {
+        const isActive = g.models.some(m => m.id === activeModelId);
+        const isCollapsed = window._collapsedProviderGroups.has(g.name) && !isActive;
+        const chevronClass = isCollapsed ? 'collapsed' : '';
+        const bodyClass = isCollapsed ? 'collapsed' : '';
+        const activeBorder = isActive ? 'border-color:var(--accent);' : '';
+
+        html += `<div class="provider-group" style="${activeBorder}">`;
+        html += `<div class="provider-group-header" onclick="toggleProviderGroup('${escapeHtml(g.name)}')">`;
+        html += `<span class="pg-chevron ${chevronClass}">▼</span>`;
+        html += `<span>${escapeHtml(g.name)}</span>`;
+        html += `<span class="pg-count">${g.models.length}</span>`;
+        html += `</div>`;
+        html += `<div class="provider-group-body ${bodyClass}">`;
+        g.models.forEach(m => { html += buildModelCard(m, g.type); });
+        html += `</div></div>`;
+    });
+
     if (!html) html = '<div class="panel-list-empty">Нет моделей</div>';
     // Обновляем оба списка моделей
     ['hub-models-list', 'proj-models-list'].forEach(id => {
@@ -2414,14 +2485,29 @@ function renderModels() {
     updateStatusBar();
 }
 
+function toggleProviderGroup(groupName) {
+    if (!window._collapsedProviderGroups) window._collapsedProviderGroups = new Set();
+    if (window._collapsedProviderGroups.has(groupName)) {
+        window._collapsedProviderGroups.delete(groupName);
+    } else {
+        window._collapsedProviderGroups.add(groupName);
+    }
+    renderModels();
+}
+
 function filterModels(q) {
     q = q.toLowerCase();
+    // При поиске разворачиваем все группы
+    if (window._collapsedProviderGroups) window._collapsedProviderGroups.clear();
+    renderModels();
     document.querySelectorAll('#hub-models-list .model-card-with-priority').forEach(el => {
         el.style.display = el.dataset.name.includes(q) ? '' : 'none';
     });
 }
 function filterProjModels(q) {
     q = q.toLowerCase();
+    if (window._collapsedProviderGroups) window._collapsedProviderGroups.clear();
+    renderModels();
     document.querySelectorAll('#proj-models-list .model-card-with-priority').forEach(el => {
         el.style.display = el.dataset.name.includes(q) ? '' : 'none';
     });
