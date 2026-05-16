@@ -288,7 +288,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "git_clone",
-            "description": "Склонировать GitHub репозиторий в текущий проект. Использует PAT-токен автоматически для приватных репо. НЕ используй execute_command('git clone ...') — всегда используй этот инструмент.",
+            "description": "Склонировать GitHub репозиторий в текущий проект. Использует PAT-токен автоматически. ВАЖНО: если директория проекта уже существует (с .git или без), инструмент сам обработает это — НЕ используйте rm -rf и НЕ пытайтесь пересоздать. Если clone вернул ошибку о существующей директории — просто работайте с файлами через list_files/read_file. Максимум 2 вызова за сессию.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -334,7 +334,8 @@ SYSTEM_PROMPT_TEMPLATE = """Ты Fosved Coder — AI-ассистент для �
 - Отвечай на том языке, на котором задан вопрос
 - Будь проактивным — если нужно создать файл, создавай его
 - Если задача требует нескольких шагов — делай их последовательно
-- Для кода в тексте ответа используй Markdown code blocks только для объяснений, реальные файлы пиши через write_file"""
+- Для кода в тексте ответа используй Markdown code blocks только для объяснений, реальные файлы пиши через write_file
+- ⚠️ КРИТИЧНО: Если git_clone вернул ошибку или "already cloned" — НЕ делайте rm -rf и НЕ пытайтесь клонировать снова. Директория проекта уже существует. Работайте с файлами через list_files, read_file, execute_command('git pull'). Максимум 2 вызова git_clone за всю сессию."""
 
 
 SYSTEM_PROMPT_INJECTION_TEMPLATE = """Ты Fosved Coder — AI-ассистент для разработки проекта.
@@ -535,6 +536,9 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             command = arguments.get("command", "")
             if not command.strip():
                 return "Ошибка: пустая команда"
+            # ⚡ Блокируем прямые git clone команды — модель должна использовать git_clone tool
+            if "git clone" in command.lower() and project_path:
+                return "ОШИБКА: НЕ используйте execute_command для 'git clone'. Используйте инструмент git_clone(repo_url) — он автоматически обработает токены и существующие директории."
             # Проверяем cwd для git и других команд, требующих директорию
             exec_cwd = project_path
             if not exec_cwd and any(cmd in command.lower() for cmd in ["git ", "git\n", "npm ", "pip ", "python "]):
@@ -591,7 +595,13 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
                 return "Ошибка: не указан URL репозитория"
             if not project_path:
                 return "Ошибка: нет пути к проекту"
-            logger.log(f"tool: git_clone '{repo_url}'", level="info", source="agent")
+            # ⚡ Rate limit: не более 2 вызовов git_clone за сессию
+            _clone_count = getattr(execute_tool, '_git_clone_count', 0)
+            if _clone_count >= 2:
+                await _send_log(websocket, f"⚠️ git_clone rate limit ({_clone_count}/2) — работайте с файлами напрямую", "warning")
+                return f"ОШИБКА: Лимит git_clone превышен ({_clone_count}/2 попыток). Директория проекта уже существует. НЕ пытайтесь удалить и пересоздать. Используйте execute_command('git pull'), list_files, read_file для работы с файлами."
+            execute_tool._git_clone_count = _clone_count + 1
+            logger.log(f"tool: git_clone '{repo_url}' (attempt {_clone_count+1}/2)", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"repo_url": repo_url}, "status": "running"})
             await _send_log(websocket, f"📦 Git clone: {repo_url}", "command")
             try: asyncio.create_task(save_tool_usage(None, "", "", "git_clone", json.dumps({"repo_url": repo_url}), "done", duration_ms=int((time.time()-_tool_start)*1000)))

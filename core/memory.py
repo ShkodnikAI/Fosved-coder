@@ -693,30 +693,58 @@ async def git_clone_with_token(executor, target_dir: str, repo_url: str, token: 
             "error": None,
         }
 
-    # ⚡ Если целевая директория существует (но без .git) — не пытаемся clone в неё
+    # ⚡ Если целевая директория существует — НЕ пытаемся git clone (он всегда fails для существующих dir)
     # Вместо этого инициализируем git и подтягиваем файлы
-    if _os.path.isdir(target_dir) and _os.listdir(target_dir):
-        try:
-            r = await executor.execute(
-                f"git init && git remote add origin {shlex_quote(clean_url)} 2>/dev/null; git fetch --depth=1 origin 2>/dev/null && git checkout -f main 2>/dev/null || git checkout -f master 2>/dev/null",
-                cwd=target_dir,
-                need_approval=False,
-                timeout=60,
-            )
-            if _os.path.isdir(_os.path.join(target_dir, ".git")):
-                return {
-                    "success": True,
-                    "output": "Existing directory — initialized git and fetched (fallback, no full clone needed)",
-                    "error": None,
-                }
-        except Exception as pull_err:
-            pass
-        # Если git init/fetch не помогли — возвращаем ошибку с пояснением
-        return {
-            "success": False,
-            "output": "",
-            "error": f"Directory '{target_dir}' exists but is not a git repo. Use 'execute_command' tool to run shell commands inside it instead of cloning.",
-        }
+    if _os.path.isdir(target_dir):
+        # Проверяем что директория не пустая (пустую можно clone'ить, но лучше через init)
+        if _os.listdir(target_dir):
+            # Директория существует и не пуста, но без .git
+            try:
+                r = await executor.execute(
+                    f"git init && git remote add origin {shlex_quote(clean_url)} 2>/dev/null; git fetch --depth=1 origin 2>/dev/null && git checkout -f main 2>/dev/null || git checkout -f master 2>/dev/null",
+                    cwd=target_dir,
+                    need_approval=False,
+                    timeout=60,
+                )
+                if _os.path.isdir(_os.path.join(target_dir, ".git")):
+                    return {
+                        "success": True,
+                        "output": "Existing directory — initialized git and fetched (fallback). НЕ удаляйте и не пытайтесь клонировать снова.",
+                        "error": None,
+                    }
+            except Exception:
+                pass
+            # Если git init/fetch не помогли — возвращаем ЯВНОЕ указание модели
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Директория '{_os.path.basename(target_dir)}' УЖЕ СУЩЕСТВУЕТ. НЕ пытайтесь удалить (rm -rf) и клонировать снова — это не сработает. Просто работайте с файлами через execute_command, list_files, read_file. Если нужно обновить — используйте 'execute_command' с 'git pull'.",
+            }
+        else:
+            # Пустая директория — clone внутрь через clone <url> .
+            try:
+                r = await executor.execute(
+                    f"git clone {shlex_quote(auth_url)} .",
+                    cwd=target_dir,
+                    need_approval=False,
+                    timeout=120,
+                )
+                output = (r.get("stdout", "") or "") + (r.get("stderr", "") or "")
+                exit_code = r.get("exit_code", -1)
+                if exit_code == 0:
+                    return {"success": True, "output": output.strip()[:200], "error": None}
+                # Если clone в . тоже не сработал — git init + fetch
+                r2 = await executor.execute(
+                    f"git init && git remote add origin {shlex_quote(clean_url)} && git fetch --depth=1 origin && git checkout -f main 2>/dev/null || git checkout -f master 2>/dev/null",
+                    cwd=target_dir,
+                    need_approval=False,
+                    timeout=60,
+                )
+                if _os.path.isdir(_os.path.join(target_dir, ".git")):
+                    return {"success": True, "output": "Cloned via git init+fetch fallback.", "error": None}
+                return {"success": False, "output": output, "error": f"Не удалось склонировать в пустую директорию: {output[:300]}"}
+            except Exception as e:
+                return {"success": False, "output": str(e), "error": str(e)}
 
     # Ensure parent dir exists
     parent = _os.path.dirname(target_dir)
