@@ -1083,10 +1083,13 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
                     except Exception:
                         pass
 
-    # Auto-compression
+    # Auto-compression (с cooldown — не чаще 1 раза в 30 секунд)
     compressed_context_text = ""
     compressor = ContextCompressor()
-    if project_id and compressor.should_compress(history):
+    _comp_now = time.time()
+    _last_comp_time = getattr(handle_chat_message, '_last_compress_time', 0)
+    if project_id and compressor.should_compress(history) and (_comp_now - _last_comp_time) > 30:
+        handle_chat_message._last_compress_time = _comp_now
         try:
             comp_model = ContextCompressor.get_compression_model_config()
             await safe_ws_send(websocket, {"type": "auto_log", "content": "Автосжатие контекста...", "level": "info"})
@@ -1192,6 +1195,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if error_info.get("no_credits") and model_provider:
             _mark_no_credits(model_provider)
             await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов, кэш 5 мин)", "warning")
+        # ⚡ STOP: если пользователь нажал Stop — прерываем fallback chain НЕМЕДЛЕННО
+        if _cancel_check and _cancel_check():
+            print(f"  [agent] chat: STOP detected after model {model_to_try}, aborting fallback")
+            break
         # Если модель упала и есть ещё модели в списке — продолжаем с fallback
         if ai_response is None and i == 0 and len(models_to_try) > 1:
             await _send_log(websocket, f"⚠️ {display_model} не ответила, пробую следующую модель...", "warning")
@@ -1436,6 +1443,10 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
         if error_info.get("no_credits") and model_provider:
             _mark_no_credits(model_provider)
+        # ⚡ STOP: если пользователь нажал Stop — прерываем fallback chain НЕМЕДЛЕННО
+        if _cancel_check and _cancel_check():
+            print(f"  [agent] hub: STOP detected after model {model_to_try}, aborting fallback")
+            break
         if ai_response is not None:
             break
 

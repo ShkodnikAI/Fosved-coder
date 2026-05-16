@@ -1433,18 +1433,7 @@ function handleToolCall(data) {
                 container.appendChild(entry);
                 container.scrollTop = container.scrollHeight;
             });
-            // ─── Встроенный индикатор в чат ───
-            const chatBox = getActiveChatBox();
-            if (chatBox && !document.getElementById('chat-tool-'+CSS.escape(key))) {
-                const toolDiv = document.createElement('div');
-                toolDiv.className = 'inline-tool-call';
-                toolDiv.id = 'chat-tool-'+CSS.escape(key);
-                toolDiv.innerHTML = `<span class="itc-icon">${icon}</span><span class="itc-label">${escapeHtml(label)}</span>${detail?'<span class="itc-detail">'+escapeHtml(detail)+'</span>':''}<span class="itc-spinner">⏳</span>`;
-                const aiDiv = chatBox.querySelector('.msg.ai:last-of-type') || chatBox.querySelector('.typing-indicator');
-                if (aiDiv) chatBox.insertBefore(toolDiv, aiDiv);
-                else chatBox.appendChild(toolDiv);
-                chatBox.scrollTop = chatBox.scrollHeight;
-            }
+            // ─── Чат: НЕ показываем inline индикаторы — только в логах ───
             activeToolDivs[key] = true;
             autoLogCount++;
             updateLogBadge();
@@ -1466,14 +1455,7 @@ function handleToolCall(data) {
                     if (currentLogFilter!=='all') entry.style.display = entry.dataset.level===currentLogFilter?'':'none';
                 }
             });
-            // Обновить встроенный индикатор в чате
-            const chatTool = document.getElementById('chat-tool-'+CSS.escape(key));
-            if (chatTool) {
-                const spinner = chatTool.querySelector('.itc-spinner');
-                if (spinner) spinner.textContent = si;
-                chatTool.classList.add('itc-done');
-                setTimeout(() => chatTool.remove(), 4000);
-            }
+            // ─── Чат: НЕ обновляем inline индикаторы — только в логах ───
             activeToolDivs[key] = null;
             autoLogCount++;
         }
@@ -1488,13 +1470,7 @@ function handleToolCall(data) {
                     if (currentLogFilter!=='all'&&'error'!==currentLogFilter) entry.style.display='none';
                 }
             });
-            const chatTool = document.getElementById('chat-tool-'+CSS.escape(key));
-            if (chatTool) {
-                const spinner = chatTool.querySelector('.itc-spinner');
-                if (spinner) spinner.textContent = '❌';
-                chatTool.classList.add('itc-error');
-                setTimeout(() => chatTool.remove(), 4000);
-            }
+            // ─── Чат: НЕ обновляем inline индикаторы — только в логах ───
             activeToolDivs[key] = null;
         }
     }
@@ -2057,7 +2033,11 @@ function wsConnect() {
                 if (currentScreen === "main") { currentHubAiDiv = null; currentHubAiText = ""; currentHubTypingDiv = null; }
                 else { currentAiDiv = null; currentAiText = ""; currentTypingDiv = null; }
             }
-            addLogEntryToPanel({level:'warning',source:'system',action:data.content||'Генерация остановлена',time:new Date().toLocaleTimeString()});
+            // ⚡ Дедупликация: не спамим лог "Генерация остановлена"
+            if (!window._lastStopLogTime || (Date.now() - window._lastStopLogTime) > 3000) {
+                window._lastStopLogTime = Date.now();
+                addLogEntryToPanel({level:'warning',source:'system',action:data.content||'Генерация остановлена',time:new Date().toLocaleTimeString()});
+            }
             return;
         }
 
@@ -3257,7 +3237,15 @@ function addLogEntryToPanel(entry) {
 }
 
 function handleAutoLog(data) {
-    const entry = {level:data.level||'info',source:data.source||'',action:data.content||data.message||data.action||'',time:data.time||new Date().toLocaleTimeString()};
+    const action = data.content||data.message||data.action||'';
+    const entry = {level:data.level||'info',source:data.source||'',action:action,time:data.time||new Date().toLocaleTimeString()};
+    // ⚡ Дедупликация: если последний лог с таким же action был менее 2с назад — пропускаем
+    // (спасает от "Нет доступных моделей", "Автосжатие", model switch спама)
+    if (window._lastAutoLogAction === action && window._lastAutoLogTime && (Date.now() - window._lastAutoLogTime) < 2000) {
+        return;
+    }
+    window._lastAutoLogAction = action;
+    window._lastAutoLogTime = Date.now();
     addLogEntryToPanel(entry);
     // Авто-переключение на вкладку логов — ТОЛЬКО для реальных пользовательских событий,
     // не для background/system логов

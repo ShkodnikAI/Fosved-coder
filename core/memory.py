@@ -685,12 +685,37 @@ async def git_clone_with_token(executor, target_dir: str, repo_url: str, token: 
             f"https://{token}@github.com",
         )
 
-    # Skip if already cloned
+    # Skip if already cloned (has .git folder)
     if _os.path.isdir(_os.path.join(target_dir, ".git")):
         return {
             "success": True,
             "output": "Already a git repository — skipped clone",
             "error": None,
+        }
+
+    # ⚡ Если целевая директория существует (но без .git) — не пытаемся clone в неё
+    # Вместо этого инициализируем git и подтягиваем файлы
+    if _os.path.isdir(target_dir) and _os.listdir(target_dir):
+        try:
+            r = await executor.execute(
+                f"git init && git remote add origin {shlex_quote(clean_url)} 2>/dev/null; git fetch --depth=1 origin 2>/dev/null && git checkout -f main 2>/dev/null || git checkout -f master 2>/dev/null",
+                cwd=target_dir,
+                need_approval=False,
+                timeout=60,
+            )
+            if _os.path.isdir(_os.path.join(target_dir, ".git")):
+                return {
+                    "success": True,
+                    "output": "Existing directory — initialized git and fetched (fallback, no full clone needed)",
+                    "error": None,
+                }
+        except Exception as pull_err:
+            pass
+        # Если git init/fetch не помогли — возвращаем ошибку с пояснением
+        return {
+            "success": False,
+            "output": "",
+            "error": f"Directory '{target_dir}' exists but is not a git repo. Use 'execute_command' tool to run shell commands inside it instead of cloning.",
         }
 
     # Ensure parent dir exists
