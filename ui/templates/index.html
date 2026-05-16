@@ -401,6 +401,34 @@
     </div>
 </header>
 
+<!-- ═══ СТАТУС-БАР (под заголовком) ═══ -->
+<div class="status-bar" id="status-bar">
+    <div class="status-section" data-color="purple">
+        <span class="status-label">Навыки</span>
+        <span class="status-content" id="status-skills">—</span>
+    </div>
+    <div class="status-section" data-color="green">
+        <span class="status-label">Модель</span>
+        <span class="status-content" id="status-model">—</span>
+    </div>
+    <div class="status-section" data-color="blue">
+        <span class="status-label">Модели</span>
+        <span class="status-content" id="status-models-count">—</span>
+    </div>
+    <div class="status-section" data-color="accent">
+        <span class="status-label">Экран</span>
+        <span class="status-content" id="status-screen">Главная</span>
+    </div>
+    <div class="status-section" data-color="amber">
+        <span class="status-label">Скиллы</span>
+        <span class="status-content" id="status-tools">—</span>
+    </div>
+    <div class="status-section" data-color="yellow">
+        <span class="status-label">Токены</span>
+        <span class="status-content" id="status-tokens">—</span>
+    </div>
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════════
      ГЛАВНЫЙ ЭКРАН (Hub) — Модели, чат, скиллы, логи
      ═══════════════════════════════════════════════════════ -->
@@ -679,34 +707,6 @@
 
 <!-- ═══ НИЖНЯЯ ПАНЕЛЬ КНОПОК ═══ -->
 <div class="bottom-bar" id="bottom-bar"></div>
-
-<!-- ═══ СТАТУС-БАР ═══ -->
-<div class="status-bar" id="status-bar">
-    <div class="status-section" data-color="purple">
-        <span class="status-label">Навыки</span>
-        <span class="status-content" id="status-skills">—</span>
-    </div>
-    <div class="status-section" data-color="green">
-        <span class="status-label">Модель</span>
-        <span class="status-content" id="status-model">—</span>
-    </div>
-    <div class="status-section" data-color="blue">
-        <span class="status-label">Модели</span>
-        <span class="status-content" id="status-models-count">—</span>
-    </div>
-    <div class="status-section" data-color="accent">
-        <span class="status-label">Экран</span>
-        <span class="status-content" id="status-screen">Главная</span>
-    </div>
-    <div class="status-section" data-color="amber">
-        <span class="status-label">Скиллы</span>
-        <span class="status-content" id="status-tools">—</span>
-    </div>
-    <div class="status-section" data-color="yellow">
-        <span class="status-label">Токены</span>
-        <span class="status-content" id="status-tokens">—</span>
-    </div>
-</div>
 
 <!-- ═══════════════════════════════════════════════════════════════
      SLIDE-ПАНЕЛИ (поиск, файлы)
@@ -2157,22 +2157,22 @@ function wsConnect() {
             return;
         }
 
-        // ─── Авто-режим ───
+        // ─── Авто-режим — всё в логи, НЕ в чат ───
         if (data.type === "auto_step") {
             autoModeRunning = true;
-            addAutoStepMessage(data.content||"Авто-шаг", "step");
+            addLogEntryToPanel({level:'info',source:'auto',action:data.content||"Авто-шаг",time:new Date().toLocaleTimeString()});
             return;
         }
         if (data.type === "auto_done") {
             autoModeRunning = false;
             const hasErr = data.content && data.content.includes("ошибк");
-            addAutoStepMessage(data.content||"Авто завершено", hasErr?"warning":"done");
+            addLogEntryToPanel({level:hasErr?'warning':'success',source:'auto',action:data.content||"Авто завершено",time:new Date().toLocaleTimeString()});
             setWaitingAI(false);
             return;
         }
         if (data.type === "auto_error") {
             autoModeRunning = false;
-            addAutoStepMessage(data.content, "error", true);
+            addLogEntryToPanel({level:'error',source:'auto',action:data.content,time:new Date().toLocaleTimeString()});
             setWaitingAI(false);
             return;
         }
@@ -2219,9 +2219,8 @@ function wsConnect() {
             return;
         }
 
-        // ─── Прочие типы сообщений — ТОЛЬКО разрешённые для чата ───
-        // Фильтруем системные/служебные типы, которые НЕ должны появляться в чате
-        const _chat_allowed_types = ["system", "user", "ai", "error", "info", "typing", "idea", "terminal"];
+        // ─── Catch-all — ТОЛЬКО user и ai сообщения в чат ───
+        const _chat_allowed_types = ["user", "ai"];
         if (_chat_allowed_types.includes(data.type) && data.content) {
             addMessage(data.type, data.content);
         }
