@@ -299,6 +299,33 @@
     .provider-group-body.collapsed {
         display: none;
     }
+    /* Selector group — inherits provider-group style but with checkbox header */
+    .selector-group {
+        margin-bottom: 4px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+    }
+    .selector-group-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        cursor: pointer;
+        background: var(--bg-secondary);
+        user-select: none;
+        transition: background 0.15s;
+    }
+    .selector-group-header:hover {
+        background: var(--bg-hover);
+    }
+    .selector-group-body {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+    .selector-group-body.collapsed {
+        display: none;
+    }
     .msg.ai { position: relative; margin-bottom: 16px; }
     .probe-btn {
         background: var(--bg-secondary); border: 1px solid var(--border);
@@ -2607,34 +2634,71 @@ function _modelSelectorToggle(id, checked) {
     else _modelSelectorChecked.delete(id);
 }
 
-/** Отрендерить списки моделей в селекторе — сгруппированные по операторам с выбором блоками */
+/** Отрендерить списки моделей в селекторе — сворачиваемые группы по провайдеру */
 function renderModelSelectorLists() {
     if (!allModels.length) return;
-    // Группируем по провайдеру (оператору)
+
+    // Алиасы провайдеров (те же что в renderModels)
+    function _resolveProviderName(m) {
+        let prov = m.provider_name || m.provider || 'Other';
+        const aliases = {
+            'openai': 'OpenAI', 'anthropic': 'Anthropic', 'google_gemini': 'Google Gemini',
+            'google': 'Google', 'deepseek': 'DeepSeek', 'xai': 'xAI (Grok)',
+            'meta': 'Meta', 'mistral': 'Mistral', 'cohere': 'Cohere',
+            'abacus': 'ABACUS.AI', 'openrouter': 'OpenRouter',
+        };
+        const provLower = prov.toLowerCase();
+        for (const [key, alias] of Object.entries(aliases)) {
+            if (provLower.includes(key)) { return alias; }
+        }
+        return prov;
+    }
+
+    // Группируем по типу и провайдеру
     const groups = {};
     allModels.forEach(m => {
-        const prov = m.provider_name || m.provider || 'Other';
-        if (!groups[prov]) groups[prov] = [];
-        groups[prov].push(m);
+        const type = m.type || 'paid';
+        const prov = _resolveProviderName(m);
+        const typeLabel = type === 'free' ? ' [FREE]' : type === 'local' ? ' [LOCAL]' : '';
+        const groupKey = prov + '||' + type;
+        const displayName = prov + typeLabel;
+        if (!groups[groupKey]) groups[groupKey] = { name: displayName, models: [], type };
+        groups[groupKey].models.push(m);
     });
+
+    // Сортировка: paid → free → local, внутри по имени
+    const groupOrder = (g) => g.type === 'local' ? 2 : g.type === 'free' ? 1 : 0;
+    const sortedGroups = Object.values(groups).sort((a, b) => {
+        const oa = groupOrder(a), ob = groupOrder(b);
+        if (oa !== ob) return oa - ob;
+        return a.name.localeCompare(b.name);
+    });
+
+    // Состояние свёрнутости
+    if (!window._collapsedSelectorGroups) window._collapsedSelectorGroups = new Set();
+
     let html = '';
-    for (const [provName, models] of Object.entries(groups)) {
-        const allChecked = models.length > 0 && models.every(m => _modelSelectorChecked.has(m.id));
-        const someChecked = models.some(m => _modelSelectorChecked.has(m.id));
+    sortedGroups.forEach(g => {
+        const allChecked = g.models.length > 0 && g.models.every(m => _modelSelectorChecked.has(m.id));
+        const someChecked = g.models.some(m => _modelSelectorChecked.has(m.id));
         const checkIcon = allChecked ? '\u2705' : (someChecked ? '\u25A3' : '\u25A2');
-        const checkedCount = models.filter(m => _modelSelectorChecked.has(m.id)).length;
-        // Заголовок группы — кликабельный для выбора/снятия блока
-        html += `<div class="model-selector-group" style="border-bottom:1px solid var(--border);">`;
-        html += `<div class="model-selector-group-header" onclick="toggleModelSelectorGroup('${escapeHtml(provName)}')" style="display:flex;align-items:center;gap:6px;padding:6px 6px 2px;cursor:pointer;background:var(--bg-hover);">`;
-        html += `<span style="font-size:12px;">${checkIcon}</span>`;
-        html += `<div style="flex:1;min-width:0;">`;
-        html += `<div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(provName)}</div>`;
+        const checkedCount = g.models.filter(m => _modelSelectorChecked.has(m.id)).length;
+        const isCollapsed = window._collapsedSelectorGroups.has(g.name) && !someChecked;
+        const chevronClass = isCollapsed ? 'collapsed' : '';
+        const bodyClass = isCollapsed ? 'collapsed' : '';
+
+        html += `<div class="selector-group">`;
+        html += `<div class="selector-group-header" onclick="toggleSelectorGroup('${escapeHtml(g.name)}')">`;
+        html += `<span class="pg-chevron ${chevronClass}" style="font-size:9px;color:var(--text-dim);">▼</span>`;
+        html += `<span onclick="event.stopPropagation();toggleSelectorGroupCheck('${escapeHtml(g.name)}')" style="font-size:11px;cursor:pointer;">${checkIcon}</span>`;
+        html += `<span style="flex:1;min-width:0;font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(g.name)}</span>`;
+        html += `<span class="pg-count">${checkedCount}/${g.models.length}</span>`;
         html += `</div>`;
-        html += `<span style="font-size:9px;color:var(--text-dim);white-space:nowrap;">${checkedCount}/${models.length}</span>`;
-        html += `</div>`;
-        models.forEach(m => { html += _buildModelSelectorItem(m); });
-        html += `</div>`;
-    }
+        html += `<div class="selector-group-body ${bodyClass}">`;
+        g.models.forEach(m => { html += _buildModelSelectorItem(m); });
+        html += `</div></div>`;
+    });
+
     if (!html) html = '<div class="panel-list-empty">Нет моделей</div>';
     const el1 = document.getElementById('model-selector-list');
     const el2 = document.getElementById('proj-model-selector-list');
@@ -2642,9 +2706,40 @@ function renderModelSelectorLists() {
     if (el2) el2.innerHTML = html;
 }
 
-/** Выбрать/снять все модели в группе оператора */
-function toggleModelSelectorGroup(provName) {
-    const groupModels = allModels.filter(m => (m.provider_name || m.provider || 'Other') === provName);
+/** Свернуть/развернуть группу в селекторе */
+function toggleSelectorGroup(groupName) {
+    if (!window._collapsedSelectorGroups) window._collapsedSelectorGroups = new Set();
+    if (window._collapsedSelectorGroups.has(groupName)) {
+        window._collapsedSelectorGroups.delete(groupName);
+    } else {
+        window._collapsedSelectorGroups.add(groupName);
+    }
+    renderModelSelectorLists();
+}
+
+/** Выбрать/снять все модели в группе (по отображаемому имени) */
+function toggleSelectorGroupCheck(groupName) {
+    const typeLabel = groupName.includes('[FREE]') ? 'free' : groupName.includes('[LOCAL]') ? 'local' : 'paid';
+    const provClean = groupName.replace(/ \[(FREE|LOCAL)\]/, '');
+    function _resolveProviderName(m) {
+        let prov = m.provider_name || m.provider || 'Other';
+        const aliases = {
+            'openai': 'OpenAI', 'anthropic': 'Anthropic', 'google_gemini': 'Google Gemini',
+            'google': 'Google', 'deepseek': 'DeepSeek', 'xai': 'xAI (Grok)',
+            'meta': 'Meta', 'mistral': 'Mistral', 'cohere': 'Cohere',
+            'abacus': 'ABACUS.AI', 'openrouter': 'OpenRouter',
+        };
+        const provLower = prov.toLowerCase();
+        for (const [key, alias] of Object.entries(aliases)) {
+            if (provLower.includes(key)) { return alias; }
+        }
+        return prov;
+    }
+    const groupModels = allModels.filter(m => {
+        const pName = _resolveProviderName(m);
+        const mType = m.type || 'paid';
+        return pName === provClean && mType === typeLabel;
+    });
     const allChecked = groupModels.length > 0 && groupModels.every(m => _modelSelectorChecked.has(m.id));
     if (allChecked) {
         groupModels.forEach(m => _modelSelectorChecked.delete(m.id));
@@ -2669,6 +2764,8 @@ function projModelSelectorSelectAll(selectAll) {
 
 function filterModelSelector(q) {
     q = q.toLowerCase();
+    if (window._collapsedSelectorGroups) window._collapsedSelectorGroups.clear();
+    renderModelSelectorLists();
     document.querySelectorAll('#model-selector-list .model-selector-item').forEach(el => {
         el.style.display = el.dataset.name.includes(q) ? '' : 'none';
     });
@@ -2676,6 +2773,8 @@ function filterModelSelector(q) {
 
 function filterProjModelSelector(q) {
     q = q.toLowerCase();
+    if (window._collapsedSelectorGroups) window._collapsedSelectorGroups.clear();
+    renderModelSelectorLists();
     document.querySelectorAll('#proj-model-selector-list .model-selector-item').forEach(el => {
         el.style.display = el.dataset.name.includes(q) ? '' : 'none';
     });
