@@ -61,10 +61,48 @@ logger = get_logger()
 # Set by run.py when creating a parallel task, auto-injected by safe_ws_send
 _current_task_id: ContextVar[str] = ContextVar('current_task_id', default='')
 
+# Глобальный кэш провайдеров с нулевым балансом (402 / insufficient credits)
+# Избегает бесконечных повторных попыток к мёртвым провайдерам
+_no_credits_providers: set[str] = set()
+_NO_CREDITS_COOLDOWN = 300  # секунд до сброса (5 минут)
+_no_credits_ts: float = 0.0  # timestamp последнего добавления
+
 
 def _now():
     """Current UTC time as HH:MM:SS string."""
     return datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+
+def _mark_no_credits(provider_id: str):
+    """Пометить провайдера как без кредитов (глобальный кэш с TTL 5 мин)."""
+    import time as _time
+    global _no_credits_ts
+    _no_credits_providers.add(provider_id)
+    _no_credits_ts = _time.time()
+    print(f"  [agent] no-credits provider: {provider_id} (cached {_NO_CREDITS_COOLDOWN}s)")
+
+
+def _is_no_credits_provider(model_id: str) -> bool:
+    """Проверить, относится ли модель к провайдеру без кредитов."""
+    import time as _time
+    global _no_credits_ts
+    # Сброс кэша по TTL
+    if _no_credits_providers and _time.time() - _no_credits_ts > _NO_CREDITS_COOLDOWN:
+        print(f"  [agent] no-credits cache expired, clearing")
+        _no_credits_providers.clear()
+        return False
+    mc = keys_manager.get_model_config(model_id)
+    if not mc:
+        return False
+    provider = mc.get("provider", "")
+    if provider in _no_credits_providers:
+        return True
+    # Также проверяем по model_id напрямую (provider__model формат)
+    if "__" in model_id:
+        pid = model_id.split("__")[0]
+        if pid in _no_credits_providers:
+            return True
+    return False
 
 
 async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False):
@@ -834,8 +872,10 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             except Exception: pass
             # Ошибки API (401/429/402/500) — ТОЛЬКО в панель логов, НЕ на главный экран
             await _send_log(websocket, f"❌ {model}: {error_msg}", "error")
-            # Signal 402 to caller for provider skipping in fallback
-            if _error_info is not None and ("402" in error_msg or "insufficient credits" in error_msg.lower()):
+            # Signal 402/credit errors to caller for provider skipping in fallback
+            _no_credits_kw = ("402" in error_msg or "insufficient credits" in error_msg.lower()
+                              or "credit balance" in error_msg.lower())
+            if _error_info is not None and _no_credits_kw:
                 _error_info["no_credits"] = True
             return None
 
@@ -889,6 +929,8 @@ def _build_models_to_try(
             return False
         if mid in keys_manager._failed_probe_ids:
             return False
+        if _is_no_credits_provider(mid):
+            return False
         if m.get("type") == "free" and not m.get("api_key"):
             return False
         if m.get("type") == "local" and not m.get("base_url"):
@@ -928,6 +970,10 @@ def _build_models_to_try(
 
     if model_id:
         # Указанная модель — первая, но с fallback на проверенные
+        # Если модель от провайдера без кредитов — пропускаем её, только fallback
+        if _is_no_credits_provider(model_id):
+            print(f"  [agent] _build_models_to_try: skip {model_id} (no credits provider), fallback only")
+            return _add_probed_models([])
         return _add_probed_models([model_id])
 
     # Приоритетные модели проекта
@@ -1104,7 +1150,7 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
     # Try each model
     ai_response = None
     tried_count = 0
-    no_credits_providers = set()  # providers that returned 402 — skip remaining models from them
+    # no_credits фильтрация через глобальный кэш _no_credits_providers (в _is_usable)
 
     for i, model_to_try in enumerate(models_to_try):
         model_config = keys_manager.get_model_config(model_to_try)
@@ -1115,10 +1161,10 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         if not has_key and not is_local:
             continue
 
-        # Skip models from providers with no credits (402)
+        # Двойная проверка no_credits (уже в _is_usable, но на всякий случай)
         model_provider = model_config.get("provider", "")
-        if model_provider in no_credits_providers:
-            print(f"  [agent] skipping #{i} {model_to_try} — provider {model_provider} has no credits")
+        if _is_no_credits_provider(model_to_try):
+            print(f"  [agent] skipping #{i} {model_to_try} — provider has no credits (global cache)")
             continue
 
         tried_count += 1
@@ -1144,8 +1190,8 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
         )
         print(f"  [agent] chat: model {model_to_try} result={'OK' if ai_response else 'FAILED'}, no_tools={error_info.get('no_tools')}, no_credits={error_info.get('no_credits')}")
         if error_info.get("no_credits") and model_provider:
-            no_credits_providers.add(model_provider)
-            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов)", "warning")
+            _mark_no_credits(model_provider)
+            await _send_log(websocket, f"⏭️ Пропускаю {model_provider} (нет кредитов, кэш 5 мин)", "warning")
         # Если модель упала и есть ещё модели в списке — продолжаем с fallback
         if ai_response is None and i == 0 and len(models_to_try) > 1:
             await _send_log(websocket, f"⚠️ {display_model} не ответила, пробую следующую модель...", "warning")
@@ -1300,7 +1346,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
     print(f"  [agent] hub: models_to_try={len(models_to_try)}, first={models_to_try[0] if models_to_try else 'none'}")
     ai_response = None
     tried_count = 0
-    no_credits_providers = set()
+    # no_credits фильтрация через глобальный кэш _no_credits_providers
 
     for i, model_to_try in enumerate(models_to_try):
         model_config = keys_manager.get_model_config(model_to_try)
@@ -1311,8 +1357,10 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         if not has_key and not is_local:
             continue
 
+        # Двойная проверка no_credits
         model_provider = model_config.get("provider", "")
-        if model_provider in no_credits_providers:
+        if _is_no_credits_provider(model_to_try):
+            print(f"  [agent] hub: skip {model_to_try} (no credits provider)")
             continue
 
         tried_count += 1
@@ -1336,7 +1384,7 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
         )
         print(f"  [agent] hub: model {model_to_try} result={'OK' if ai_response else 'FAILED'}")
         if error_info.get("no_credits") and model_provider:
-            no_credits_providers.add(model_provider)
+            _mark_no_credits(model_provider)
         if ai_response is not None:
             break
 
