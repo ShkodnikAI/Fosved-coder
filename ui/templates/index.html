@@ -1018,7 +1018,7 @@ let hubWaitingTaskId = null;  // task_id of the current hub generation
 function generateTaskId() { return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 6); }
 let diffViewMode = "unified";
 let currentFileViewPath = null;
-let activeSkills = new Set();
+let activeSkills = new Set(JSON.parse(localStorage.getItem('fosved_active_skills') || '[]'));
 let currentScreen = "main";        // "main" или "project"
 let tokenCount = 0;                // Счётчик токенов
 // Маршрутизация streaming-ответов: "hub" или "project"
@@ -2353,10 +2353,39 @@ function handleQuestionnaireCreated(data) {
     if (currentScreen !== 'main') switchScreen('main');
 }
 
-/** Запрос навыка */
+/** Запрос навыка — автоматически активирует скилл и обновляет UI */
 function handleSkillRequest(data) {
-    const skillName = data.skill || data.name || 'навык';
-    showToast(`⚡ Активация навыка: ${skillName}`, 'info');
+    const rawName = data.skill || data.name || '';
+    if (!rawName) return;
+
+    // Ищем скилл по id или name (нечувствительно к регистру)
+    const allSkills = SKILL_GROUPS.flatMap(g => g.skills);
+    const normalized = rawName.toLowerCase().replace(/[\s_-]+/g, '-').replace(/[^\w-]/g, '');
+    let skill = allSkills.find(s =>
+        s.id.toLowerCase() === normalized ||
+        s.id.toLowerCase() === rawName.toLowerCase() ||
+        s.name.toLowerCase().replace(/\s+/g, '-') === normalized
+    );
+    // Фоллбэк — ищем по вхождению id
+    if (!skill) skill = allSkills.find(s =>
+        s.id.toLowerCase().includes(rawName.toLowerCase()) ||
+        rawName.toLowerCase().includes(s.id.toLowerCase())
+    );
+
+    if (skill) {
+        const wasAlreadyActive = activeSkills.has(skill.id);
+        activeSkills.add(skill.id);
+        renderSkills();
+        updateStatusBar();
+        _saveActiveSkills();
+        if (wasAlreadyActive) {
+            showToast(`${skill.icon} ${skill.name} — уже активен`, 'info');
+        } else {
+            showToast(`${skill.icon} ${skill.name} — подключён`, 'success');
+        }
+    } else {
+        showToast(`Скилл "${rawName}" — не найден в списке`, 'warning');
+    }
 }
 
 /** Начать анкетирование */
@@ -3198,6 +3227,11 @@ function toggleSkill(id) {
     else activeSkills.add(id);
     renderSkills();
     updateStatusBar();
+    _saveActiveSkills();
+}
+
+function _saveActiveSkills() {
+    localStorage.setItem('fosved_active_skills', JSON.stringify([...activeSkills]));
 }
 
 // ═══════════════════════════════════════════════════════
