@@ -1,23 +1,52 @@
 ---
 Task ID: 1
-Agent: main
-Task: Упрощение моделиной системы fosved-coder V3
+Agent: Super Z (main)
+Task: Анализ логов + добавление индикатора активности в статус-бар
 
 Work Log:
-- Клонировал репозиторий fosved-coder из GitHub
-- Изучил полную архитектуру: agent.py (1984 строки), run.py (1065 строк), index.html (~4200 строк), intelligent_router.py (371 строка), keys_manager.py (1371 строка)
-- Удалил из agent.py: `_no_credits_providers` кэш (64-109), `_mark_no_credits()` (80-86), `_is_no_credits_provider()` (89-109), `_last_model_error` дедуп (70-72), `_MODEL_ERROR_COOLDOWN`
-- Заменил `_build_models_to_try()` (90 строк fallback-логики) на `_pick_model()` (простая выборка одной модели по приоритету)
-- Упростил `handle_chat_message()`: убрал fallback-цикл (60+ строк), pre-validation loop, no_credits проверки, `stream_with_prompt_injection` fallback. Теперь = одна модель, один вызов
-- Упростил `handle_hub_message()`: аналогично, убран fallback-цикл (50+ строк)
-- Упростил `stream_llm_response()`: убран `_error_info` параметр, убрана дедупликация ошибок (30с cooldown), убран traceback в логах, убран signal no_credits для caller. Ошибка = лог-панель + error message + done
-- Обновил комментарий в run.py (318)
-- Проверил фронтенд: routing уже правильный (chunk/done → чат, error/auto_log/tool_call → лог-панель)
-- Проверил синтаксис: agent.py OK, run.py OK
-- Проверил отсутствие ссылок на удалённые функции во всех .py файлах
+- Клонирован репозиторий fosved-coder (git pull — уже был склонирован)
+- Прочитаны ключевые файлы: run.py (1064 строки), agent.py (1770 строк), index.html (4241 строка), style.css
+- Проанализированы логи пользователя — выявлены проблемы:
+  - Запущен СТАРЫЙ код с ретраями и авто-переключением моделей (V2)
+  - Текущий код уже V3: одна модель, одна попытка, без fallback-циклов
+  - gpt-4.1 с quota exceeded + все fallback модели с rate limit
+  - Параллельные задачи конкурируют
+  - Чат area уже чистая — только chunk/done идут в чат
+
+- Добавлена секция "Активность" в статус-бар (HTML):
+  - Новый `<div class="status-section status-section-activity">` с id="status-activity"
+  - Цвет cyan для акцента активности
+
+- Добавлен CSS (style.css):
+  - `.status-section[data-color="cyan"]` — cyan акцент
+  - `.status-section-activity` — flex:1, max-width:40vw, truncate
+  - `.is-active` класс с pulsing анимацией
+
+- Модифицирован бэкенд (agent.py):
+  - Новые функции `_send_status()` и `_clear_status()`
+  - Отправка `status_activity` сообщений при:
+    - Модель думает: "🧠 model_name думает..."
+    - read_file: "📖 path"
+    - write_file: "💾 path"
+    - list_files: "📁 path"
+    - search_files: "🔍 pattern"
+    - execute_command: "⚡ command"
+    - git_commit_push: "🚀 Git push: message"
+    - git_clone: "📦 Git clone..."
+    - Автосжатие: "📦 Автосжатие контекста..."
+    - Ошибка: "❌ Ошибка: model_name"
+    - Tool iteration: "🔧 Обработка (шаг N/10)..."
+  - Очистка статуса при done/error/cancel
+
+- Модифицирован фронтенд (index.html):
+  - Обработчик `status_activity` в ws.onmessage
+  - Обновляет текст и добавляет/убирает is-active класс
+  - Очистка статуса при получении `done` сообщения
+
+- Закоммичено и запушено: commit 7d2069c
 
 Stage Summary:
-- agent.py: удалено ~200 строк сложной логики, заменено на простую выборку одной модели
-- run.py: минимальное изменение (комментарий)
-- index.html: не трогалось — routing уже правильный
-- Ключевой принцип: одна модель = одна попытка = никаких fallback-циклов, retry-цепочек, кэшей no-credits
+- Статус-бар теперь показывает реальное время что делает модель
+- Чат остаётся чистым — только пользовательские сообщения и ответ AI
+- Код уже V3 без ретраев — но у пользователя запущен старый
+- Рекомендация: обновить код на сервере (git pull)
