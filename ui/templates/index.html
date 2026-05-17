@@ -327,6 +327,17 @@
         display: none;
     }
     .msg.ai { position: relative; margin-bottom: 16px; }
+    /* Пустой чат — минимальный плейсхолдер (не msg элемент, исчезает при первом сообщении) */
+    .chat-area:empty::after {
+        content: "Начните диалог...";
+        display: block;
+        text-align: center;
+        color: var(--text-dim);
+        font-size: 13px;
+        padding: 40px 20px;
+        opacity: 0.5;
+        pointer-events: none;
+    }
     .probe-btn {
         background: var(--bg-secondary); border: 1px solid var(--border);
         border-radius: 6px; padding: 2px 10px; cursor: pointer;
@@ -471,9 +482,7 @@
 
         <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ: Чат -->
         <div class="center-area">
-            <div class="chat-area" id="hub-chat-box">
-                <div class="msg system">Fosved Coder V2.0 — Главная. Выберите модель и начните обсуждение.</div>
-            </div>
+            <div class="chat-area" id="hub-chat-box"></div>
             <!-- Панель анкетирования (скрыта по умолчанию) -->
             <div class="questionnaire-panel" id="questionnaire-panel">
                 <div class="q-title">📝 Анкетирование</div>
@@ -608,9 +617,7 @@
 
         <!-- ЦЕНТРАЛЬНАЯ ОБЛАСТЬ: Чат проекта -->
         <div class="center-area">
-            <div class="chat-area" id="project-chat-box">
-                <div class="msg system">Выберите проект для начала работы</div>
-            </div>
+            <div class="chat-area" id="project-chat-box"></div>
             <div class="input-area">
                 <div class="input-wrapper" id="project-input-wrapper">
                     <textarea id="project-user-input" placeholder="Опишите задачу для ИИ..." rows="4" onkeydown="handleProjectKeyDown(event)"></textarea>
@@ -1880,9 +1887,7 @@ function wsConnect() {
         if (isFirstConnect) {
             hubChatBox.innerHTML = "";
             projectChatBox.innerHTML = "";
-            addMessageTo("system", "Fosved Coder V2.0 готов. Добро пожаловать!", hubChatBox);
-            addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
-            // Restore hub chat history from server
+            // Restore hub chat history from server (без системных сообщений в чате)
             loadHubHistory().then(msgs => {
                 if (msgs.length > 0) {
                     renderHistoryMessages(msgs, hubChatBox, null);
@@ -2114,7 +2119,7 @@ function wsConnect() {
             typingDiv.className = "msg ai typing-indicator";
             const mn = data.model||'';
             const sn = mn.includes('__') ? mn.split('__').pop() : mn;
-            typingDiv.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div><span>Думаю'+(sn?' ('+escapeHtml(sn)+')':'')+'...</span>';
+            typingDiv.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
             taskChatBox.appendChild(typingDiv);
             taskChatBox.scrollTop = taskChatBox.scrollHeight;
             // Store typing div reference in the correct location
@@ -2230,8 +2235,7 @@ function wsConnect() {
             setTimeout(wsConnect, delay);
         } else {
             addClientLog('ws', 'Max reconnect attempts reached. Reload page (F5).');
-            addMessageTo("error", "Не удалось подключиться. Перезагрузите (F5).", hubChatBox);
-            addMessageTo("error", "Не удалось подключиться. Перезагрузите (F5).", projectChatBox);
+            addLogEntryToPanel({level:'error',source:'ws',action:'Не удалось подключиться. Перезагрузите (F5).',time:new Date().toLocaleTimeString()});
         }
     };
     ws.onerror = (event) => {
@@ -2985,7 +2989,7 @@ async function selectProject(id) {
     if (p) {
         switchScreen('project');
         const history = await loadProjectHistory(id);
-        renderHistoryMessages(history, projectChatBox, `Проект: ${p.name}`);
+        renderHistoryMessages(history, projectChatBox, null);
         showToast('Проект: ' + p.name, 'info');
         // Show project name in header center
         const hpn = document.getElementById('header-project-name');
@@ -3007,7 +3011,6 @@ async function confirmDeleteProject(id, name) {
         if (currentProjectId===id) {
             currentProjectId = null;
             projectChatBox.innerHTML = "";
-            addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
         }
         showToast(`"${name}" удалён`, "success");
     } catch(e) { showToast(e.message, "error"); }
@@ -4189,8 +4192,6 @@ function showHelp() {
 function clearChat() {
     hubChatBox.querySelectorAll(".msg").forEach(m=>m.remove());
     projectChatBox.querySelectorAll(".msg").forEach(m=>m.remove());
-    addMessageTo("system", "Чат очищен.", hubChatBox);
-    addMessageTo("system", "Чат очищен.", projectChatBox);
     tokenCount = 0;
     updateTokenCount();
 }
@@ -4200,7 +4201,6 @@ function goHome() {
     priorityModels = [];
     switchScreen('main');
     projectChatBox.innerHTML = "";
-    addMessageTo("system", "Выберите проект для начала работы.", projectChatBox);
     // Restore hub chat history
     loadHubHistory().then(msgs => {
         if (msgs.length > 0) {
