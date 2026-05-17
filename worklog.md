@@ -48,3 +48,36 @@ Stage Summary:
 - Free-tier providers are now resilient: never permanently hidden due to transient errors
 - Models show as "free" type in UI instead of "paid"
 - All changes committed: 566ac27, pushed to origin/main
+
+---
+Task ID: 2
+Agent: main
+Task: Implement skill creation module (CRUD API + UI)
+
+Work Log:
+- Read worklog and studied project architecture (Python/FastAPI backend + vanilla JS frontend)
+- Added 4 CRUD API endpoints to api/endpoints.py after existing skill endpoints (line 1086):
+  - POST /skills — create new skill with SKILL.md + _meta.json
+  - PUT /skills/{name} — update SKILL.md content (with best-effort frontmatter meta sync)
+  - DELETE /skills/{name} — delete skill dir (protected built-in skills)
+  - GET /skills/{name}/template — return blank SKILL.md template
+- Added skill-modal HTML to index.html (after file-viewer modal, before <script>)
+  - Title, slug (auto-generated), description, group dropdown, content textarea
+  - Save/Cancel buttons using existing btn-primary/btn-ghost classes
+- Modified renderSkills() to add "+ Новый навык" button at top
+- Added edit (📝) and delete (🗑) action buttons per skill item (delete hidden for built-in skills)
+- Added agents-best-practices entry to SKILL_GROUPS Development section
+- Added JavaScript functions: titleToSlug(), onSkillTitleChange(), closeSkillModal(),
+  openCreateSkillModal(), openEditSkill(), handleSkillSave(), deleteSkill()
+- Added CSS styles: .btn-create-skill, .skill-actions, .skill-action-btn,
+  .skill-action-delete, .skill-form (with label/input/textarea/select styles)
+- Verified endpoints.py compiles successfully
+- All changes use existing patterns: fetch() for API calls, showToast() for notifications,
+  showConfirmModal() for delete confirmation, modal-overlay/modal pattern for modal UI
+
+Stage Summary:
+- Backend: 4 new CRUD endpoints for skill management (create/update/delete/template)
+- Frontend: Skill creation modal + edit/delete buttons on each skill item
+- New "agents-best-practices" entry added to Development skill group
+- Dark theme consistent with existing VS Code-like UI
+- Files modified: api/endpoints.py, ui/templates/index.html, ui/static/style.css
