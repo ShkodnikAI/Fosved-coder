@@ -1,52 +1,26 @@
+# Worklog — Fosved Coder
+
 ---
 Task ID: 1
-Agent: Super Z (main)
-Task: Анализ логов + добавление индикатора активности в статус-бар
+Agent: Main Agent
+Task: Анализ кодовой базы и исправление silent fallback при ручном выборе модели
 
 Work Log:
-- Клонирован репозиторий fosved-coder (git pull — уже был склонирован)
-- Прочитаны ключевые файлы: run.py (1064 строки), agent.py (1770 строк), index.html (4241 строка), style.css
-- Проанализированы логи пользователя — выявлены проблемы:
-  - Запущен СТАРЫЙ код с ретраями и авто-переключением моделей (V2)
-  - Текущий код уже V3: одна модель, одна попытка, без fallback-циклов
-  - gpt-4.1 с quota exceeded + все fallback модели с rate limit
-  - Параллельные задачи конкурируют
-  - Чат area уже чистая — только chunk/done идут в чат
-
-- Добавлена секция "Активность" в статус-бар (HTML):
-  - Новый `<div class="status-section status-section-activity">` с id="status-activity"
-  - Цвет cyan для акцента активности
-
-- Добавлен CSS (style.css):
-  - `.status-section[data-color="cyan"]` — cyan акцент
-  - `.status-section-activity` — flex:1, max-width:40vw, truncate
-  - `.is-active` класс с pulsing анимацией
-
-- Модифицирован бэкенд (agent.py):
-  - Новые функции `_send_status()` и `_clear_status()`
-  - Отправка `status_activity` сообщений при:
-    - Модель думает: "🧠 model_name думает..."
-    - read_file: "📖 path"
-    - write_file: "💾 path"
-    - list_files: "📁 path"
-    - search_files: "🔍 pattern"
-    - execute_command: "⚡ command"
-    - git_commit_push: "🚀 Git push: message"
-    - git_clone: "📦 Git clone..."
-    - Автосжатие: "📦 Автосжатие контекста..."
-    - Ошибка: "❌ Ошибка: model_name"
-    - Tool iteration: "🔧 Обработка (шаг N/10)..."
-  - Очистка статуса при done/error/cancel
-
-- Модифицирован фронтенд (index.html):
-  - Обработчик `status_activity` в ws.onmessage
-  - Обновляет текст и добавляет/убирает is-active класс
-  - Очистка статуса при получении `done` сообщения
-
-- Закоммичено и запушено: commit 7d2069c
+- Клонирован репозиторий fosved-coder с GitHub
+- Изучены ключевые файлы: run.py (55KB), core/agent.py, core/intelligent_router.py, ui/templates/index.html
+- Проверена маршрутизация сообщений WebSocket (frontend):
+  - `chunk` → чат-баббл (чистый ответ AI) ✅
+  - `error` → панель логов ✅
+  - `auto_log` → панель логов ✅
+  - `tool_call` → панель логов ✅
+  - `status_activity` → статус-бар ✅
+  - `typing` → индикатор набора ✅
+  - `done` → завершение ✅
+- Найден баг: `_pick_model()` при ручном выборе модели пользователем (mode=manual) делал silent fallback на другую модель, если выбранная модель не проходила `_is_usable()` проверку
+- Исправлен баг: добавлен параметр `_user_explicit` в `_pick_model()`, `handle_chat_message()`, `handle_hub_message()`
+- Обновлены call sites в run.py для передачи `_user_explicit=True` при ручном выборе модели
 
 Stage Summary:
-- Статус-бар теперь показывает реальное время что делает модель
-- Чат остаётся чистым — только пользовательские сообщения и ответ AI
-- Код уже V3 без ретраев — но у пользователя запущен старый
-- Рекомендация: обновить код на сервере (git pull)
+- Разделение чата/логов уже правильно реализовано в текущем V3 коде
+- Исправлен silent fallback: при manual mode выбранная модель используется БЕЗ подмены
+- Изменённые файлы: core/agent.py, run.py (2 файла, +26/-12 строк)
