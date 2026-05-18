@@ -105,3 +105,30 @@ Stage Summary:
 - 4 файла изменено, 397 insertions, 1 deletion
 - Новые возможности: (1) Пользователь может генерировать навык через AI прямо в модалке создания, (2) Модель может сама создавать навыки через tool во время работы, (3) Клиент автоматически обновляет список при создании навыка моделью
 - Ключевые файлы: core/agent.py (tool), api/endpoints.py (endpoint), ui/templates/index.html (UI), ui/static/style.css (styles)
+---
+Task ID: 1
+Agent: main
+Task: Fix infinite loop when all providers are rate_limited (circuit breaker)
+
+Work Log:
+- Read core/agent.py: found _is_usable() at line 1081 allows "rate_limited" models
+- Read core/context_compressor.py: found get_compression_model_config() has "rate_limited free models" fallback
+- Read core/keys_manager.py: found _resolve_model() fallback accepts rate_limited
+- Read core/intelligent_router.py: found 6 places allowing rate_limited in model filters
+- Fixed _is_usable() to only accept "valid" and "available"
+- Fixed _resolve_model() fallback to only check "valid" providers
+- Fixed intelligent_router: 6 status checks removing rate_limited
+- Fixed probe_candidates list comprehension to exclude rate_limited
+- Fixed context_compressor: removed rate_limited last-resort fallback
+- Fixed context_compressor._compress_with_llm: added _update_provider_on_error() call on failure
+- Fixed error classification: added "quota" and "exceeded your current" to catch OpenAI quota errors
+- Fixed _update_provider_on_error: added "速率限制" Chinese rate limit keyword
+- Added litellm.num_retries = 0 in both agent.py and keys_manager.py
+- Committed as eae4a93
+
+Stage Summary:
+- Root cause: all model selection paths (agent, router, compressor) treated rate_limited as usable
+- When _update_provider_on_error marked provider as rate_limited, it was STILL picked on next call
+- This caused infinite error loops when providers ran out of quota/balance
+- Fix: rate_limited models are now excluded from ALL selection paths
+- When ALL providers are rate_limited, system shows "Нет доступных моделей" and stops gracefully
