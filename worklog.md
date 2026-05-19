@@ -132,3 +132,31 @@ Stage Summary:
 - This caused infinite error loops when providers ran out of quota/balance
 - Fix: rate_limited models are now excluded from ALL selection paths
 - When ALL providers are rate_limited, system shows "Нет доступных моделей" and stops gracefully
+
+---
+Task ID: 1
+Agent: main
+Task: Глубокий аудит и исправление корневых причин бесконечного цикла агента в fosved-coder
+
+Work Log:
+- Полный аудит core/agent.py (1700+ строк) — трассировка всех путей выполнения
+- Полный аудит core/keys_manager.py — провайдер cascade, rate limit, auto-recovery
+- Полный аудит core/run.py — WebSocket handler, stop button, task management
+- Полный аудит core/context_compressor.py — compression triggers, LLM fallback
+
+Stage Summary:
+- Найдено 5 корневых причин бесконечного цикла:
+  1. _consecutive_cached_reads сбрасывался ЛЮБЫМ tool call → модель обходила детектор чередованием read_file→search_files→read_file
+  2. Нет валидации имён tool calls → модель вызывала несуществующие инструменты
+  3. _user_explicit=True обходил проверки доступности → rate_limited модель выбиралась без fallback
+  4. Auto-recovery rate_limited за 5 минут → провайдер flip-flop
+  5. Слишком мягкие лимиты (max 4 итерации × 15 tool calls = до 60 операций)
+
+- Все 5 причин исправлены в commit adcc5eb
+- Ключевые изменения:
+  * _consecutive_cached_reads: только write_file сбрасывает (не search_files/list_files)
+  * VALID_TOOL_NAMES: валидация перед выполнением + информативная ошибка модели
+  * _pick_model: explicit модель теперь проверяется через _is_usable + fallback
+  * handle_chat_message: уведомление при fallback на другую модель
+  * Cooldown: 5 мин → 15 мин (agent.py + keys_manager.py)
+  * Лимиты: max_tool_iterations=2, MAX_TOTAL_TOOL_CALLS=10, MAX_RESPONSE_TIME=120s, MAX_UNIQUE_READS=5
