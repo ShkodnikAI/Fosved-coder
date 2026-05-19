@@ -1,162 +1,22 @@
-# Worklog — Fosved Coder
-
----
-Task ID: 1
-Agent: Main Agent
-Task: Анализ кодовой базы и исправление silent fallback при ручном выборе модели
-
-Work Log:
-- Клонирован репозиторий fosved-coder с GitHub
-- Изучены ключевые файлы: run.py (55KB), core/agent.py, core/intelligent_router.py, ui/templates/index.html
-- Проверена маршрутизация сообщений WebSocket (frontend):
-  - `chunk` → чат-баббл (чистый ответ AI) ✅
-  - `error` → панель логов ✅
-  - `auto_log` → панель логов ✅
-  - `tool_call` → панель логов ✅
-  - `status_activity` → статус-бар ✅
-  - `typing` → индикатор набора ✅
-  - `done` → завершение ✅
-- Найден баг: `_pick_model()` при ручном выборе модели пользователем (mode=manual) делал silent fallback на другую модель, если выбранная модель не проходила `_is_usable()` проверку
-- Исправлен баг: добавлен параметр `_user_explicit` в `_pick_model()`, `handle_chat_message()`, `handle_hub_message()`
-- Обновлены call sites в run.py для передачи `_user_explicit=True` при ручном выборе модели
-
-Stage Summary:
-- Разделение чата/логов уже правильно реализовано в текущем V3 коде
-- Исправлен silent fallback: при manual mode выбранная модель используется БЕЗ подмены
-- Изменённые файлы: core/agent.py, run.py (2 файла, +26/-12 строк)
-
 ---
 Task ID: 1
 Agent: main
-Task: Research Jules & Stitch and improve their integration in fosved-coder
+Task: Глубокий анализ корневых причин бесконечного цикла fosved-coder
 
 Work Log:
-- Researched what Google Jules and Stitch are (subagent: web search + documentation)
-- Found: Jules = autonomous coding agent (jules.google.com), Stitch = UI design generator (stitch.withgoogle.com)
-- Neither is an LLM API endpoint — they're specialized Google Labs AI tools
-- BUT their API keys (AQ.* format) are standard Google AI Studio / Gemini API keys
-- These keys CAN work as regular Gemini API keys for LLM calls via litellm
-- Verified existing integration: jules/stitch already registered as providers in keys_manager.py
-- Added is_free: True flag to both provider definitions
-- Updated get_all_models() to return type="free" for is_free providers
-- Updated get_model_config() to pass api_base explicitly for is_free providers
-- Added soft validation for free-tier providers: 401/400 → rate_limited (never invalid)
-- Committed and pushed all changes
+- Прочитал полностью core/agent.py (2421 строк), core/keys_manager.py, run.py
+- Трассировал полный поток: WS message → _run_chat_task → handle_chat_message → stream_llm_response → tool calls
+- Проанализировал 3 вложенных уровня защиты от бесконечного цикла в stream_llm_response
+- Нашёл что stream_llm_response внутренне корректен (max_tool_iterations=2, 7 анти-зацикливание проверок)
+- Обнаружил ГЛАВНУЮ причину: asyncio.create_task в run.py создаёт НЕОГРАНИЧЕННОЕ количество параллельных тасок
+- Параллельные таски на один проект одновременно вызывают _pick_model → litellm → rate limit
+- Каждая rate-limited таска отправляет "Нет доступных моделей" — создавая эффект бесконечного спама
+- Обнаружил что пустой ответ модели (0 симв.) сохраняется как AI-сообщение, засоряя контекст
+- Обнаружил что rate_limited cooldown 15 минут слишком долгий для Gemini (который восстанавливается за 1-2 мин)
 
 Stage Summary:
-- Jules & Stitch keys work as additional Gemini API key slots (extra rate limit quota)
-- Free-tier providers are now resilient: never permanently hidden due to transient errors
-- Models show as "free" type in UI instead of "paid"
-- All changes committed: 566ac27, pushed to origin/main
-
----
-Task ID: 2
-Agent: main
-Task: Implement skill creation module (CRUD API + UI)
-
-Work Log:
-- Read worklog and studied project architecture (Python/FastAPI backend + vanilla JS frontend)
-- Added 4 CRUD API endpoints to api/endpoints.py after existing skill endpoints (line 1086):
-  - POST /skills — create new skill with SKILL.md + _meta.json
-  - PUT /skills/{name} — update SKILL.md content (with best-effort frontmatter meta sync)
-  - DELETE /skills/{name} — delete skill dir (protected built-in skills)
-  - GET /skills/{name}/template — return blank SKILL.md template
-- Added skill-modal HTML to index.html (after file-viewer modal, before <script>)
-  - Title, slug (auto-generated), description, group dropdown, content textarea
-  - Save/Cancel buttons using existing btn-primary/btn-ghost classes
-- Modified renderSkills() to add "+ Новый навык" button at top
-- Added edit (📝) and delete (🗑) action buttons per skill item (delete hidden for built-in skills)
-- Added agents-best-practices entry to SKILL_GROUPS Development section
-- Added JavaScript functions: titleToSlug(), onSkillTitleChange(), closeSkillModal(),
-  openCreateSkillModal(), openEditSkill(), handleSkillSave(), deleteSkill()
-- Added CSS styles: .btn-create-skill, .skill-actions, .skill-action-btn,
-  .skill-action-delete, .skill-form (with label/input/textarea/select styles)
-- Verified endpoints.py compiles successfully
-- All changes use existing patterns: fetch() for API calls, showToast() for notifications,
-  showConfirmModal() for delete confirmation, modal-overlay/modal pattern for modal UI
-
-Stage Summary:
-- Backend: 4 new CRUD endpoints for skill management (create/update/delete/template)
-- Frontend: Skill creation modal + edit/delete buttons on each skill item
-- New "agents-best-practices" entry added to Development skill group
-- Dark theme consistent with existing VS Code-like UI
-- Files modified: api/endpoints.py, ui/templates/index.html, ui/static/style.css
----
-Task ID: 1
-Agent: Super Z (main)
-Task: Интеграция модуля генерации скиллов в раздел скиллов fosved-coder
-
-Work Log:
-- Изучен референсный репозиторий agents-best-practices (DenisSergeevitch) — Markdown-only skill specification с YAML frontmatter, progressive disclosure, SKILL.md format
-- Изучен текущий раздел скиллов fosved-coder: ~55 skill dirs, CRUD endpoints, SKILL_GROUPS в frontend, _load_skill_context в agent.py, handleSkillRequest для WS
-- Спроектирован модуль генерации: endpoint /api/v1/skills/generate (backend), create_skill tool (model function calling), AI generator panel (frontend)
-- Реализован бэкенд: POST /api/v1/skills/generate в endpoints.py — AI генерирует skill JSON из описания задачи
-- Добавлен tool create_skill в agent.py TOOLS + execute_tool handler — модель может создавать навыки через function calling
-- Tool отправляет WS event skill_created с метаданными навыка
-- Реализован фронтенд: collapsible "✨ Генерация с AI" панель в модалке создания навыка
-- Функции: toggleSkillAIGen(), generateSkillWithAI(), handleSkillCreated()
-- WS handler обрабатывает skill_created → добавляет навык в SKILL_GROUPS и показывает toast
-- Стили для AI-генератора в style.css
-- System prompt обновлён с инструкцией использовать create_skill
-- Синтаксическая проверка Python и HTML пройдена
-- Коммит cd2c9e9
-
-Stage Summary:
-- 4 файла изменено, 397 insertions, 1 deletion
-- Новые возможности: (1) Пользователь может генерировать навык через AI прямо в модалке создания, (2) Модель может сама создавать навыки через tool во время работы, (3) Клиент автоматически обновляет список при создании навыка моделью
-- Ключевые файлы: core/agent.py (tool), api/endpoints.py (endpoint), ui/templates/index.html (UI), ui/static/style.css (styles)
----
-Task ID: 1
-Agent: main
-Task: Fix infinite loop when all providers are rate_limited (circuit breaker)
-
-Work Log:
-- Read core/agent.py: found _is_usable() at line 1081 allows "rate_limited" models
-- Read core/context_compressor.py: found get_compression_model_config() has "rate_limited free models" fallback
-- Read core/keys_manager.py: found _resolve_model() fallback accepts rate_limited
-- Read core/intelligent_router.py: found 6 places allowing rate_limited in model filters
-- Fixed _is_usable() to only accept "valid" and "available"
-- Fixed _resolve_model() fallback to only check "valid" providers
-- Fixed intelligent_router: 6 status checks removing rate_limited
-- Fixed probe_candidates list comprehension to exclude rate_limited
-- Fixed context_compressor: removed rate_limited last-resort fallback
-- Fixed context_compressor._compress_with_llm: added _update_provider_on_error() call on failure
-- Fixed error classification: added "quota" and "exceeded your current" to catch OpenAI quota errors
-- Fixed _update_provider_on_error: added "速率限制" Chinese rate limit keyword
-- Added litellm.num_retries = 0 in both agent.py and keys_manager.py
-- Committed as eae4a93
-
-Stage Summary:
-- Root cause: all model selection paths (agent, router, compressor) treated rate_limited as usable
-- When _update_provider_on_error marked provider as rate_limited, it was STILL picked on next call
-- This caused infinite error loops when providers ran out of quota/balance
-- Fix: rate_limited models are now excluded from ALL selection paths
-- When ALL providers are rate_limited, system shows "Нет доступных моделей" and stops gracefully
-
----
-Task ID: 1
-Agent: main
-Task: Глубокий аудит и исправление корневых причин бесконечного цикла агента в fosved-coder
-
-Work Log:
-- Полный аудит core/agent.py (1700+ строк) — трассировка всех путей выполнения
-- Полный аудит core/keys_manager.py — провайдер cascade, rate limit, auto-recovery
-- Полный аудит core/run.py — WebSocket handler, stop button, task management
-- Полный аудит core/context_compressor.py — compression triggers, LLM fallback
-
-Stage Summary:
-- Найдено 5 корневых причин бесконечного цикла:
-  1. _consecutive_cached_reads сбрасывался ЛЮБЫМ tool call → модель обходила детектор чередованием read_file→search_files→read_file
-  2. Нет валидации имён tool calls → модель вызывала несуществующие инструменты
-  3. _user_explicit=True обходил проверки доступности → rate_limited модель выбиралась без fallback
-  4. Auto-recovery rate_limited за 5 минут → провайдер flip-flop
-  5. Слишком мягкие лимиты (max 4 итерации × 15 tool calls = до 60 операций)
-
-- Все 5 причин исправлены в commit adcc5eb
-- Ключевые изменения:
-  * _consecutive_cached_reads: только write_file сбрасывает (не search_files/list_files)
-  * VALID_TOOL_NAMES: валидация перед выполнением + информативная ошибка модели
-  * _pick_model: explicit модель теперь проверяется через _is_usable + fallback
-  * handle_chat_message: уведомление при fallback на другую модель
-  * Cooldown: 5 мин → 15 мин (agent.py + keys_manager.py)
-  * Лимиты: max_tool_iterations=2, MAX_TOTAL_TOOL_CALLS=10, MAX_RESPONSE_TIME=120s, MAX_UNIQUE_READS=5
+- 3 КОРНЕВЫЕ ПРИЧИНЫ найдены и исправлены
+- Fix 1: Per-project asyncio.Lock в run.py — mutex для параллельных тасок
+- Fix 2: Empty response guard в agent.py — return None вместо пустой строки
+- Fix 3: Rate limit cooldown 15мин → 2мин в agent.py
+- Commit: 85a8 (fosved-coder submodule)
