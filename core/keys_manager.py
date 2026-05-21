@@ -43,17 +43,6 @@ PROVIDER_DEFS = {
             "gpt-4o-mini",
         ],
     },
-    "openrouter": {
-        "name": "OpenRouter",
-        "litellm_prefix": "openrouter",
-        "api_base": "https://openrouter.ai/api/v1",
-        "suggested_models": [
-            "anthropic/claude-opus-4-7",
-            "anthropic/claude-sonnet-4-6",
-            "openai/gpt-4.1",
-            "google/gemini-2.5-flash-preview-05-20",
-        ],
-    },
     "grok": {
         "name": "Grok (xAI)",
         "litellm_prefix": "xai",
@@ -163,26 +152,7 @@ PROVIDER_DEFS = {
     },
 }
 
-# Бесплатные модели (через OpenRouter) — требуют OPENROUTER_API_KEY
-# Обновлено 2026-04-22: актуальный список free-моделей
-FREE_MODELS = [
-    # --- ЛУЧШИЕ ДЛЯ КОДА ---
-    {"id": "qwen3-coder-480b-free", "name": "Qwen3 Coder 480B", "model": "qwen/qwen3-coder-480b-a35b-07-25:free", "provider": "openrouter", "tags": ["coding"]},
-    {"id": "gpt-oss-120b-free", "name": "OpenAI GPT-OSS 120B", "model": "openai/gpt-oss-120b:free", "provider": "openrouter", "tags": ["coding"]},
-    {"id": "nemotron-super-120b-free", "name": "Nemotron 3 Super 120B", "model": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter", "tags": ["coding"]},
-    # --- РАССУЖДЕНИЯ / GENERAL ---
-    {"id": "llama-3.3-70b-free", "name": "Llama 3.3 70B", "model": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"},
-    {"id": "qwen3-next-80b-free", "name": "Qwen3-Next 80B", "model": "qwen/qwen3-next-80b-a3b-instruct-2509:free", "provider": "openrouter"},
-    {"id": "nemotron-nano-30b-free", "name": "Nemotron 3 Nano 30B", "model": "nvidia/nemotron-3-nano-30b-a3b:free", "provider": "openrouter"},
-    {"id": "ling-2.6-flash-free", "name": "Ling 2.6 Flash 196B", "model": "inclusionai/ling-2.6-flash:free", "provider": "openrouter"},
-    # --- МУЛЬТИМОДАЛЬНЫЕ ---
-    {"id": "gemma-4-31b-free", "name": "Gemma 4 31B", "model": "google/gemma-4-31b-it:free", "provider": "openrouter"},
-    {"id": "gemma-4-26b-free", "name": "Gemma 4 26B", "model": "google/gemma-4-26b-a4b-it:free", "provider": "openrouter"},
-    # --- МАЛЕНЬКИЕ / БЫСТРЫЕ ---
-    {"id": "nemotron-nano-9b-free", "name": "Nemotron Nano 9B", "model": "nvidia/nemotron-nano-9b-v2:free", "provider": "openrouter"},
-    {"id": "gpt-oss-20b-free", "name": "GPT-OSS 20B", "model": "openai/gpt-oss-20b:free", "provider": "openrouter"},
-    {"id": "glm-4.5-air-free", "name": "GLM 4.5 Air", "model": "z-ai/glm-4.5-air:free", "provider": "openrouter"},
-]
+FREE_MODELS = []  # OpenRouter free models removed — use free providers directly (Cerebras, Groq, Gemini, etc.)
 
 # Локальные провайдеры по умолчанию
 LOCAL_PROVIDERS = {
@@ -218,7 +188,6 @@ LEGACY_KEYS_FILE = "data/keys.json"
 
 # Mapping: env var name -> provider_id
 ENV_KEY_MAP = {
-    "OPENROUTER_API_KEY": "openrouter",
     "ANTHROPIC_API_KEY": "claude",
     "OPENAI_API_KEY": "openai",
     "XAI_API_KEY": "grok",
@@ -324,7 +293,6 @@ class KeysManager:
                 "openai": "openai",
                 "grok": "grok",
                 "gemini": "gemini",
-                "openrouter": "openrouter",
             }
 
             migrated = 0
@@ -336,9 +304,7 @@ class KeysManager:
                 # Определяем реальный провайдер по формату ключа
                 real_provider = prov_id
                 if prov_id == "custom" or prov_id not in PROVIDER_DEFS:
-                    if api_key.startswith("sk-or-v1"):
-                        real_provider = "openrouter"
-                    elif api_key.startswith("sk-ant-"):
+                    if api_key.startswith("sk-ant-"):
                         real_provider = "claude"
                     elif api_key.startswith("sk-proj-") or api_key.startswith("sk-"):
                         real_provider = "openai"
@@ -1125,7 +1091,7 @@ class KeysManager:
 
     def get_all_models(self) -> list[dict]:
         """
-        Все доступные модели: платные → локальные → OpenRouter(inline key) → бесплатные → кастомные.
+        Все доступные модели: платные → локальные → бесплатные → кастомные.
         Returns: [{id, name, model, provider, provider_name, type, status, category, thinking}]
         """
         models = []
@@ -1201,23 +1167,7 @@ class KeysManager:
                 "base_url": lm.get("base_url", ""),
             })
 
-        # 3. Бесплатные модели (OpenRouter :free) — только если провайдер включён
-        or_config = self.providers.get("openrouter", {})
-        if or_config.get("enabled", True):
-            or_key = or_config.get("api_key", "")
-            or_status = or_config.get("status", "not_configured")
-            for fm in FREE_MODELS:
-                models.append({
-                    "id": fm["id"],
-                    "name": fm["name"],
-                    "model": fm["model"],
-                    "provider": "openrouter",
-                    "provider_name": "OpenRouter",
-                    "type": "free",
-                    "status": or_status if or_key else "no_key",
-                })
-
-        # 4. Кастомные модели (force connect)
+        # 3. Кастомные модели (force connect)
         for cm in self.custom_models:
             models.append({
                 "id": cm["id"],
@@ -1321,17 +1271,6 @@ class KeysManager:
                     "api_base": base_url,
                 }
 
-        # Бесплатные модели (OpenRouter :free)
-        for fm in FREE_MODELS:
-            if fm["id"] == model_id:
-                or_key = self.providers.get("openrouter", {}).get("api_key", "")
-                or_base = self.providers.get("openrouter", {}).get("api_base", "") or "https://openrouter.ai/api/v1"
-                return {
-                    "model": f"openrouter/{fm['model']}",
-                    "api_key": or_key,
-                    "api_base": or_base,
-                    "provider": "openrouter",
-                }
         # Кастомные модели
         for cm in self.custom_models:
             if cm["id"] == model_id:
