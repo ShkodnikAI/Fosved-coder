@@ -65,6 +65,10 @@ _current_task_id: ContextVar[str] = ContextVar('current_task_id', default='')
 _no_credits_providers: dict[str, float] = {}  # provider_id -> timestamp пометки
 _NO_CREDITS_COOLDOWN = 300  # 5 минут на каждый провайдер
 
+# ─── Tool-call loop (правка B.1) ────────────────────────────────────
+MAX_TOOL_ITERATIONS = 10  # Жёсткий предел итераций tool calling в одном ответе.
+DUPLICATE_TOOL_THRESHOLD = 3  # Сколько одинаковых tool_call подряд считать залипанием.
+
 
 def _now():
     """Current UTC time as HH:MM:SS string."""
@@ -703,7 +707,23 @@ async def stream_llm_response(prompt: str, history: list, websocket,
 
     start_time = time.time()
     full_response = ""
-    max_tool_iterations = 10  # Prevent infinite loops
+    max_tool_iterations = MAX_TOOL_ITERATIONS  # Жёсткий предел (см. константу)
+
+    # ─── Антизалипание (правка B.2) ────────────────────────────────
+    # Храним последовательность подписей tool_calls (name + args) для детекции повторов.
+    _recent_tool_signatures: list[str] = []
+
+    def _tool_call_signature(tool_calls_list: list) -> str:
+        """Подпись группы tool_calls: имена и args в стабильном порядке. Для детекции дубликатов."""
+        import hashlib as _hashlib
+        parts = []
+        for tc in tool_calls_list:
+            fn = tc.get("function", {})
+            name = fn.get("name", "")
+            args = fn.get("arguments", "") or ""
+            parts.append(f"{name}::{args}")
+        joined = "|".join(sorted(parts))
+        return _hashlib.md5(joined.encode("utf-8", errors="ignore")).hexdigest()
 
     for iteration in range(max_tool_iterations):
         # Check cancellation before each iteration
@@ -815,6 +835,41 @@ async def stream_llm_response(prompt: str, history: list, websocket,
                     })
 
                 assistant_msg = {"role": "assistant", "content": current_content or None, "tool_calls": tool_calls_list}
+
+                # Антизалипание (правка B.3)
+                _sig = _tool_call_signature(tool_calls_list)
+                _recent_tool_signatures.append(_sig)
+                _consec = 0
+                for s in reversed(_recent_tool_signatures):
+                    if s == _sig:
+                        _consec += 1
+                    else:
+                        break
+                if _consec >= DUPLICATE_TOOL_THRESHOLD:
+                    fn_names = ", ".join(set(tc["function"]["name"] for tc in tool_calls_list))
+                    warn_msg = (
+                        f"⚠️ Обнаружен повтор tool_calls ({_consec} раз подряд: {fn_names}). "
+                        f"Останавливаю цикл и прошу модель свернуть работу."
+                    )
+                    print(f"  [agent] DUPLICATE TOOL DETECTED: model={model}, sig={_sig[:8]}, consec={_consec}")
+                    await _send_log(websocket, warn_msg, "warning")
+                    messages.append(assistant_msg)
+                    for tc_data in tool_calls_list:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_data["id"],
+                            "content": (
+                                "STOP. You called this tool with the same arguments "
+                                f"{_consec} times in a row. Do NOT call any more tools. "
+                                "Summarize what you've learned so far and respond to the user in plain text."
+                            ),
+                        })
+                    _recent_tool_signatures.clear()
+                    use_tools = False
+                    kwargs.pop("tools", None)
+                    continue
+
+                # Нормальный путь: выполняем tool_calls
                 messages.append(assistant_msg)
 
                 # Execute each tool call
