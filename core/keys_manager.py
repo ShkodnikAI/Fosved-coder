@@ -3,6 +3,7 @@ Fosved Coder v2.0 — Keys Manager
 Управление API-ключами, валидация, провайдеры, бесплатные модели, локальные модели.
 """
 import os
+import time
 import yaml
 import asyncio
 import aiohttp
@@ -183,6 +184,19 @@ LOCAL_PROVIDERS = {
     },
 }
 
+# ─── Status TTLs (наряд №2) ────────────────────────────────────────
+# Time-to-live для статуса rate_limited (секунды) — после истечения
+# фоновое revalidation пробует ключ снова. 10 минут.
+RATE_LIMITED_TTL = 600
+
+# TTL для статуса invalid — реже, т.к. invalid обычно стабилен.
+# 30 минут. Применяется только в фоновом revalidation.
+INVALID_TTL = 1800
+
+# Интервал фонового revalidation в секундах. Каждый интервал проверяются
+# провайдеры со статусом rate_limited (если TTL истёк) и invalid (если INVALID_TTL истёк).
+BG_REVALIDATION_INTERVAL = 300  # 5 минут
+
 KEYS_FILE = os.environ.get("KEYS_FILE_PATH", "keys.yaml")
 LEGACY_KEYS_FILE = "data/keys.json"
 
@@ -244,6 +258,10 @@ class KeysManager:
                 with open(KEYS_FILE, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
                 self.providers = data.get("providers", {})
+                # Нормализация: для ключей без status_ts ставим 0 (старая запись, будет переvalidated)
+                for pid, cfg in self.providers.items():
+                    if "status_ts" not in cfg:
+                        cfg["status_ts"] = 0.0
                 self.local_models = data.get("local_models", [])
                 self.custom_models = data.get("custom_models", [])
                 github = data.get("github", {})
@@ -328,6 +346,7 @@ class KeysManager:
                     "litellm_prefix": provider_def["litellm_prefix"],
                     "models": prov_data.get("models") or provider_def["suggested_models"],
                     "status": "valid",  # Будет перевалидирован при startup_validation
+                    "status_ts": time.time(),
                 }
                 migrated += 1
 
@@ -364,6 +383,7 @@ class KeysManager:
                     "litellm_prefix": provider_def["litellm_prefix"],
                     "models": existing.get("models") or provider_def["suggested_models"],
                     "status": "valid",  # Assume valid, startup_validation will re-check
+                    "status_ts": time.time(),
                 }
                 # Preserve enabled state from existing config
                 if existing.get("enabled") is False:
@@ -486,10 +506,12 @@ class KeysManager:
             elif "insufficient" in error_str or "billing" in error_str or "402" in error_str or "payment" in error_str or "credits" in error_str or "no credits" in error_str or "balance" in error_str:
                 return {"status": "rate_limited", "error": "Недостаточно средств — бесплатные модели доступны"}
             elif "timeout" in error_str:
-                return {"status": "valid", "error": ""}
+                # ПРАВКА A.4: timeout = временная сетевая проблема, не valid. rate_limited даёт ключу шанс на revalidation.
+                return {"status": "rate_limited", "error": "Таймаут проверки — будет повторно проверен"}
             elif "404" in error_str or "not found" in error_str or "model not found" in error_str:
-                # 404 может означать что модель не найдена, а не что ключ неверный
-                return {"status": "valid", "error": "Модель может быть недоступна"}
+                # ПРАВКА A.4: 404 на тестовой модели не означает, что ключ невалиден.
+                # Возвращаем rate_limited — ключ сохранится, фоновое revalidation попробует другую модель.
+                return {"status": "rate_limited", "error": f"Тестовая модель {test_model} не найдена — попробуем позже"}
             elif "connection" in error_str or "connect" in error_str:
                 return {"status": "rate_limited", "error": f"Не удалось подключиться к {provider.get('name', provider_id)} — будет перевалидирован"}
             else:
@@ -552,6 +574,7 @@ class KeysManager:
             "litellm_prefix": provider["litellm_prefix"],
             "models": models or provider["suggested_models"],
             "status": validation["status"],
+            "status_ts": time.time(),
         }
         self._save_keys()
 
@@ -994,19 +1017,11 @@ class KeysManager:
                 api_base=config.get("api_base"),
             )
 
-            # Смягчение: при startup не убиваем ключи за временные ошибки
-            if validation["status"] == "invalid":
-                err_lower = validation.get("error", "").lower()
-                if ("не удалось подключиться" in err_lower or "connection" in err_lower
-                        or "timeout" in err_lower or "временная" in err_lower):
-                    validation["status"] = "rate_limited"
-                elif not ("Неверный" in validation.get("error", "")
-                          or "unauthorized" in err_lower
-                          or "401" in err_lower
-                          or "authentication" in err_lower):
-                    validation["status"] = "rate_limited"
+            # ПРАВКА A.5: убрано принудительное смягчение — validate_key (A.4) уже
+            # корректно классифицирует ошибки. invalid возвращается ТОЛЬКО для 400/401.
 
             self.providers[provider_id]["status"] = validation["status"]
+            self.providers[provider_id]["status_ts"] = time.time()
             return provider_id, {"status": validation["status"], "models": config.get("models", [])}
 
         # Параллельная валидация всех провайдеров (вместо последовательной)
@@ -1070,10 +1085,76 @@ class KeysManager:
                 except Exception:
                     pass
             self.providers[provider_id]["status"] = new_status
+            self.providers[provider_id]["status_ts"] = time.time()
             self._save_keys()
             return new_status
         except Exception:
             return status  # При ошибке валидации — оставляем текущий статус
+
+    # ─── Background Revalidation (наряд №2, A.7) ───────────────────────
+
+    async def background_revalidation_loop(self):
+        """
+        Бесконечный цикл: каждые BG_REVALIDATION_INTERVAL проверяет провайдеров,
+        у которых истёк TTL для их статуса. Запускается из run.py lifespan.
+        """
+        while True:
+            try:
+                await asyncio.sleep(BG_REVALIDATION_INTERVAL)
+                now = time.time()
+                to_check = []
+                for pid, cfg in list(self.providers.items()):
+                    if not cfg.get("enabled", True):
+                        continue
+                    if not cfg.get("api_key"):
+                        continue
+                    status = cfg.get("status", "")
+                    ts = cfg.get("status_ts", 0.0)
+                    age = now - ts
+                    if status == "rate_limited" and age > RATE_LIMITED_TTL:
+                        to_check.append(pid)
+                    elif status == "invalid" and age > INVALID_TTL:
+                        to_check.append(pid)
+                if not to_check:
+                    continue
+                print(f"  [bg-revalidate] checking {len(to_check)} provider(s): {to_check}")
+                # Перевалидируем параллельно
+                async def _check_one(pid):
+                    cfg = self.providers.get(pid)
+                    if not cfg:
+                        return
+                    api_key = cfg.get("api_key", "")
+                    test_model = cfg.get("models", [None])[0] if cfg.get("models") else None
+                    if not api_key or not test_model:
+                        return
+                    try:
+                        validation = await self.validate_key(pid, api_key, test_model, api_base=cfg.get("api_base"))
+                        old_status = cfg.get("status", "")
+                        new_status = validation["status"]
+                        self.providers[pid]["status"] = new_status
+                        self.providers[pid]["status_ts"] = time.time()
+                        if old_status != new_status:
+                            print(f"  [bg-revalidate] {pid}: {old_status} -> {new_status}")
+                            try:
+                                logger.log("bg_revalidated", level="info", source="keys_manager",
+                                           details={"provider": pid, "from": old_status, "to": new_status})
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        print(f"  [bg-revalidate] {pid}: error {str(e)[:80]}")
+                await asyncio.gather(*[_check_one(pid) for pid in to_check], return_exceptions=True)
+                # Сохраняем обновлённые статусы
+                try:
+                    self._save_keys()
+                except Exception as e:
+                    print(f"  [bg-revalidate] save error: {str(e)[:80]}")
+            except asyncio.CancelledError:
+                print("  [bg-revalidate] cancelled")
+                raise
+            except Exception as e:
+                print(f"  [bg-revalidate] loop error: {str(e)[:120]}")
+                # Не выходим из цикла — продолжаем после паузы
+                await asyncio.sleep(60)
 
     # ─── Probe Cache ───────────────────────────────────────
 
@@ -1120,6 +1201,7 @@ class KeysManager:
                 # Фильтр по probe: только скрываем модели, явно не прошедшие probe
                 if mid in self._failed_probe_ids:
                     continue  # Модель явно не прошла probe — скрываем
+                status_age_sec = int(time.time() - config.get("status_ts", 0)) if config.get("status_ts") else None
                 models.append({
                     "id": mid,
                     "name": model_name,
@@ -1130,6 +1212,7 @@ class KeysManager:
                     "status": status,
                     "category": category,
                     "thinking": model_name in thinking_models,
+                    "status_age_sec": status_age_sec,
                 })
 
             # Extended Thinking: генерируем -thinking варианты для Abacus
@@ -1152,6 +1235,7 @@ class KeysManager:
                             "status": status,
                             "category": "Extended Thinking",
                             "thinking": True,
+                            "status_age_sec": status_age_sec,
                         })
 
         # 2. Локальные модели

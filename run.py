@@ -113,6 +113,11 @@ async def lifespan(app: FastAPI):
             print(f"  [abacus] Фоновая загрузка: {e}")
     asyncio.create_task(_bg_load_abacus())
 
+    # Фоновое revalidation: периодически перепроверяет rate_limited/invalid провайдеров (правка A.8)
+    from core.keys_manager import BG_REVALIDATION_INTERVAL as _bg_interval
+    bg_revalidate_task = asyncio.create_task(keys_manager.background_revalidation_loop())
+    print(f"  [startup] Background revalidation task started (interval: {_bg_interval}s)")
+
     # При старте — НЕ восстанавливаем кэш probe.
     # Модели доступны ТОЛЬКО после ручного опроса через кнопку в UI.
     # (DB-кэш используется только для восстановления списка на клиенте,
@@ -131,6 +136,13 @@ async def lifespan(app: FastAPI):
 
     print(f"  Готово! Откройте приложение в браузере.\n")
     yield
+
+    # Shutdown: остановить фоновое revalidation
+    try:
+        bg_revalidate_task.cancel()
+        await asyncio.wait_for(bg_revalidate_task, timeout=2)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        pass
 
 
 app = FastAPI(title="Fosved Coder", version="2.0", lifespan=lifespan)

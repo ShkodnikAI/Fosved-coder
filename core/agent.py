@@ -61,11 +61,9 @@ logger = get_logger()
 # Set by run.py when creating a parallel task, auto-injected by safe_ws_send
 _current_task_id: ContextVar[str] = ContextVar('current_task_id', default='')
 
-# Глобальный кэш провайдеров с нулевым балансом (402 / insufficient credits)
-# Избегает бесконечных повторных попыток к мёртвым провайдерам
-_no_credits_providers: set[str] = set()
-_NO_CREDITS_COOLDOWN = 300  # секунд до сброса (5 минут)
-_no_credits_ts: float = 0.0  # timestamp последнего добавления
+# ПРАВКА A.6: per-provider TTL вместо общего.
+_no_credits_providers: dict[str, float] = {}  # provider_id -> timestamp пометки
+_NO_CREDITS_COOLDOWN = 300  # 5 минут на каждый провайдер
 
 
 def _now():
@@ -74,28 +72,24 @@ def _now():
 
 
 def _mark_no_credits(provider_id: str):
-    """Пометить провайдера как без кредитов (глобальный кэш с TTL 5 мин)."""
-    import time as _time
-    global _no_credits_ts
-    _no_credits_providers.add(provider_id)
-    _no_credits_ts = _time.time()
+    """Пометить провайдера как без кредитов (per-provider TTL 5 мин)."""
+    _no_credits_providers[provider_id] = time.time()
     print(f"  [agent] no-credits provider: {provider_id} (cached {_NO_CREDITS_COOLDOWN}s)")
 
 
 def _is_no_credits_provider(model_id: str) -> bool:
-    """Проверить, относится ли модель к провайдеру без кредитов."""
-    import time as _time
-    global _no_credits_ts
-    # Сброс кэша по TTL
-    if _no_credits_providers and _time.time() - _no_credits_ts > _NO_CREDITS_COOLDOWN:
-        print(f"  [agent] no-credits cache expired, clearing")
-        _no_credits_providers.clear()
+    """Проверить, относится ли модель к провайдеру без кредитов (per-provider TTL)."""
+    now = time.time()
+    # Чистим протухшие записи (per-provider)
+    expired = [pid for pid, ts in _no_credits_providers.items() if now - ts > _NO_CREDITS_COOLDOWN]
+    for pid in expired:
+        del _no_credits_providers[pid]
+        print(f"  [agent] no-credits cache expired for: {pid}")
+    if not _no_credits_providers:
         return False
     mc = keys_manager.get_model_config(model_id)
-    if not mc:
-        return False
-    provider = mc.get("provider", "")
-    if provider in _no_credits_providers:
+    provider = mc.get("provider", "") if mc else ""
+    if provider and provider in _no_credits_providers:
         return True
     # Также проверяем по model_id напрямую (provider__model формат)
     if "__" in model_id:
