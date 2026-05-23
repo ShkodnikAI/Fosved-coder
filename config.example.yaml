@@ -3,6 +3,15 @@ llm:
   router_model: ""
   temperature: 0.2
   max_tokens: 4096
+  # fallback_chain — порядок моделей для автоматического переключения при ошибке.
+  # Формат: "litellm_prefix/model_name". Используется в _build_models_to_try().
+  fallback_chain:
+    - "openai/gpt-4o"
+    - "anthropic/claude-sonnet-4-6"
+    - "gemini/gemini-2.5-flash"
+    - "deepseek/deepseek-chat"
+    - "openai/llama-4-scout-17b-16e-instruct"   # Cerebras (бесплатно)
+    - "groq/llama-3.3-70b-versatile"              # Groq (бесплатно)
 system:
   db_url: "sqlite+aiosqlite:///fosved_coder.db"
   projects_dir: "./projects"

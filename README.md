@@ -26,7 +26,7 @@
 | Компонент | Технология |
 |-----------|-----------|
 | Веб-сервер | FastAPI + Uvicorn |
-| ИИ-оболочка | LiteLLM (OpenRouter, Anthropic, OpenAI, Ollama) |
+| ИИ-оболочка | LiteLLM (Anthropic, OpenAI, Grok, Cerebras (бесплатно), DeepSeek, Gemini, Qwen, Abacus, Ollama) |
 | База данных | SQLite + SQLAlchemy (async) |
 | HTTP-клиент | aiohttp |
 | Терминал | asyncio.create_subprocess_shell |
@@ -43,7 +43,7 @@
 
 - Python 3.10+
 - Windows 10 / macOS / Linux
-- API ключ [OpenRouter](https://openrouter.ai/) (бесплатный тариф доступен)
+- API ключи [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), [Groq](https://console.groq.com/) (бесплатно), [Cerebras](https://cloud.cerebras.ai/) (бесплатно), или другие поддерживаемые провайдеры
 
 ### Шаги
 
@@ -67,8 +67,8 @@ pip install -r requirements.txt
 # 5. Создайте файл конфигурации
 copy config.example.yaml config.yaml
 
-# 6. Отредактируйте config.yaml — вставьте свой API ключ OpenRouter
-#    api_key: "sk-or-v1-..."
+# 6. Отредактируйте config.yaml — настройте API ключи (через UI или переменные окружения)
+#    Минимальный набор: хотя бы один API ключ (Groq и Cerebras — бесплатны!)
 
 # 7. Запустите
 python run.py
@@ -110,36 +110,47 @@ Fosved-coder/
 
 ## Конфигурация
 
-Редактируйте `config.yaml`:
+Редактируйте `config.yaml` или используйте UI для добавления API-ключей:
 
 ```yaml
 llm:
-  default_model: "openrouter/anthropic/claude-3.5-sonnet"    # Дорогая модель
-  router_model: "openrouter/google/gemini-2.0-flash-exp:free" # Дешёвая модель
-  api_base: "https://openrouter.ai/api/v1"
-  api_key: "ВАШ_API_КЛЮЧ"
+  default_model: "grok/grok-3"
   temperature: 0.2
   max_tokens: 4096
+  fallback_chain:
+    - "openai/gpt-4o"
+    - "anthropic/claude-sonnet-4-6"
+    - "gemini/gemini-2.5-flash"
+    - "deepseek/deepseek-chat"
+    - "openai/llama-4-scout-17b-16e-instruct"   # Cerebras (бесплатно)
+    - "groq/llama-3.3-70b-versatile"              # Groq (бесплатно)
 
 system:
   db_url: "sqlite+aiosqlite:///fosved_coder.db"
   projects_dir: "./projects"
   ideas_cache_dir: "./.cache/ideas"
-  max_iterations: 3           # Максимум итераций циклического агента
-  max_context_files: 20       # Максимум файлов в Repo Map
+  max_iterations: 3
+  max_context_files: 20
 ```
 
 ### Поддерживаемые провайдеры
 
-Через LiteLLM поддерживаются любые провайдеры:
+Через LiteLLM поддерживаются любые провайдеры. Бесплатные: Groq и Cerebras.
 
-| Провайдер | Формат модели |
-|-----------|--------------|
-| OpenRouter | `openrouter/anthropic/claude-3.5-sonnet` |
-| Anthropic | `anthropic/claude-3.5-sonnet` |
-| OpenAI | `openai/gpt-4o` |
-| Ollama (local) | `ollama/llama3` |
-| Google | `gemini/gemini-2.0-flash` |
+| Провайдер | Статус | Пример модели |
+|-----------|--------|--------------|
+| Anthropic | Платный | `claude-sonnet-4-6` |
+| OpenAI | Платный | `gpt-4o`, `gpt-4.1` |
+| xAI Grok | Платный | `grok-3`, `grok-3-mini` |
+| Google Gemini | Платный | `gemini-2.5-pro`, `gemini-2.5-flash` |
+| DeepSeek | Платный | `deepseek-chat`, `deepseek-reasoner` |
+| Qwen (Alibaba) | Платный | `qwen3-235b-a22b` |
+| Z.AI (GLM) | Платный | `glm-5.1` |
+| Kimi (Moonshot) | Платный | `kimi-k2-0711` |
+| Abacus.AI (RouteLLM) | Платный | `route-llm` (65+ моделей) |
+| **Groq** | **Бесплатно** | `llama-3.3-70b-versatile` |
+| **Cerebras** | **Бесплатно** | `llama-4-scout-17b-16e-instruct` |
+| Ollama (local) | Локальный | `llama3` и другие |
 
 ---
 

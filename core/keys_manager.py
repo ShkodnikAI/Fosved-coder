@@ -100,6 +100,27 @@ PROVIDER_DEFS = {
         "suggested_models": ["glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.6", "glm-4.5", "glm-4.5-air"],
         "is_custom": True,
     },
+    "cerebras": {
+        "name": "Cerebras (бесплатно)",
+        "litellm_prefix": "openai",
+        "api_base": "https://api.cerebras.ai/v1",
+        "suggested_models": [
+            "llama-4-scout-17b-16e-instruct",
+            "llama-4-maverick-17b-128e-instruct",
+        ],
+        "is_free": True,
+    },
+    "groq": {
+        "name": "Groq (бесплатно)",
+        "litellm_prefix": "groq",
+        "api_base": "https://api.groq.com/openai/v1",
+        "suggested_models": [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "gemma2-9b-it",
+        ],
+        "is_free": True,
+    },
     "abacus": {
         "name": "Abacus.AI (RouteLLM)",
         "litellm_prefix": "openai",
@@ -212,6 +233,8 @@ ENV_KEY_MAP = {
     "QWEN_API_KEY": "qwen",
     "ZAI_API_KEY": "zai",
     "ABACUS_API_KEY": "abacus",
+    "CEREBRAS_API_KEY": "cerebras",
+    "GROQ_API_KEY": "groq",
 }
 
 
