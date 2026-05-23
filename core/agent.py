@@ -960,94 +960,131 @@ def _get_priority_models(project: dict) -> list[str]:
 
 
 def _build_models_to_try(
-    model_id: str | None,
+    user_prompt: str,
+    explicit_model_id: str | None,
     all_models: list[dict],
     project: dict | None = None,
+    priority_models: list[str] | None = None,
+    probed_model_ids: set[str] | None = None,
+    failed_probe_ids: set[str] | None = None,
+    in_project_context: bool = False,
 ) -> list[str]:
-    """Единая функция построения списка моделей для попытки (DRY).
+    """Единственная точка решения по моделям. Возвращает упорядоченный список для попыток.
 
-    Логика:
-    1. Если model_id задан — эта модель ПЕРВАЯ, затем проверенные как fallback
-    2. Если не задан — приоритетные модели проекта + проверенные (probed)
-    3. Если НЕТ проверенных — fallback на любые валидные модели с API-ключом
-    4. Фильтры: status valid/available/rate_limited, skip free+no_key/local без base_url,
-       skip failed_probe_ids
+    Приоритет (сверху вниз):
+    1. Если explicit_model_id указан явно пользователем -> эта модель ПЕРВОЙ
+       (если она не от провайдера без кредитов).
+    2. fallback_chain из config.yaml (явный порядок моделей).
+    3. Приоритетные модели проекта (priority_models) — в указанном порядке.
+    4. Рекомендация intelligent_router — лидер для сложных задач, бесплатная для простых.
+    5. Probed-модели (явно опрошенные клиентом) — добавляются как fallback.
+    6. Любые валидные модели (если result короткий) — финальный fallback.
 
-    Returns: list[model_id, ...]
+    Фильтрация на каждом шаге:
+    - status in (valid, available, rate_limited)
+    - не в failed_probe_ids
+    - не в _no_credits_providers (per-provider TTL)
+    - есть API-ключ (кроме local с base_url)
+    - не дубликаты
     """
-    models_to_try: list[str] = []
+    from core.intelligent_router import intelligent_router
+
+    probed_set = probed_model_ids or set()
+    failed_set = failed_probe_ids or set()
     seen: set[str] = set()
+    result: list[str] = []
 
     def _is_usable(m: dict) -> bool:
-        """Проверяет, что модель пригодна для использования."""
         mid = m["id"]
         if mid in seen:
             return False
         status = m.get("status", "")
         if status not in ("valid", "available", "rate_limited"):
             return False
-        if mid in keys_manager._failed_probe_ids:
+        if mid in failed_set:
             return False
         if _is_no_credits_provider(mid):
             return False
         if m.get("type") == "free" and not m.get("api_key"):
-            return False
+            mc = keys_manager.get_model_config(mid)
+            if not mc or not mc.get("api_key"):
+                return False
         if m.get("type") == "local" and not m.get("base_url"):
             return False
-        # Модель должна иметь API-ключ (кроме local с base_url)
         mc = keys_manager.get_model_config(mid)
         if not mc or not mc.get("api_key"):
             if m.get("type") != "local":
                 return False
         return True
 
-    def _add_probed_models(existing: list[str]) -> list[str]:
-        """Добавить проверенные модели к списку (без дублей)."""
-        result = list(existing)
+    def _add(mid: str) -> bool:
+        """Добавить model_id, если он usable и ещё не добавлен. Возвращает True если добавлено."""
+        if mid in seen:
+            return False
+        m = next((x for x in all_models if x.get("id") == mid), None)
+        if not m or not _is_usable(m):
+            return False
+        result.append(mid)
+        seen.add(mid)
+        return True
+
+    # 1. Explicit model — первая
+    if explicit_model_id:
+        if _is_no_credits_provider(explicit_model_id):
+            print(f"  [agent] _build_models_to_try: skip explicit {explicit_model_id} (no credits)")
+        else:
+            _add(explicit_model_id)
+
+    # 2. fallback_chain из конфига
+    chain = CONFIG.get("llm", {}).get("fallback_chain", [])
+    if chain:
+        for entry in chain:
+            if "/" not in entry:
+                continue
+            provider_part, model_part = entry.split("/", 1)
+            target_id = f"{provider_part}__{model_part}"
+            if any(m["id"] == target_id for m in all_models):
+                _add(target_id)
+                continue
+            for m in all_models:
+                if m["id"].endswith(f"__{model_part}"):
+                    mc = keys_manager.get_model_config(m["id"])
+                    if mc and mc.get("litellm_prefix", "") == provider_part:
+                        _add(m["id"])
+                        break
+
+    # 3. Priority models из проекта
+    for pm in (priority_models or []):
+        _add(pm)
+
+    # 4. Рекомендация intelligent_router (как советник)
+    try:
+        route_result = intelligent_router.select_model(
+            user_prompt, all_models,
+            user_preferred_model=None,
+            probed_model_ids=probed_set,
+            failed_probe_ids=failed_set,
+            has_been_probed=bool(probed_set),
+            priority_models=None,
+            in_project_context=in_project_context,
+        )
+        router_pick = route_result.get("model_id", "")
+        if router_pick:
+            _add(router_pick)
+    except Exception as e:
+        print(f"  [agent] _build_models_to_try: router advisor error: {str(e)[:100]}")
+
+    # 5. Probed-модели (fallback)
+    for m in all_models:
+        if m["id"] in probed_set:
+            _add(m["id"])
+
+    # 6. Любые валидные модели (последний fallback)
+    if len(result) < 2:
         for m in all_models:
-            mid = m["id"]
-            if mid in result:
-                continue
-            if mid not in keys_manager._probed_model_ids:
-                continue
-            if _is_usable(m):
-                result.append(mid)
-                seen.add(mid)
-        return result
+            _add(m["id"])
 
-    def _add_any_valid_models(existing: list[str]) -> list[str]:
-        """Fallback: добавить ЛЮБЫЕ валидные модели (когда нет probed)."""
-        result = list(existing)
-        for m in all_models:
-            mid = m["id"]
-            if mid in result or mid in seen:
-                continue
-            if _is_usable(m):
-                result.append(mid)
-                seen.add(mid)
-        return result
-
-    if model_id:
-        # Указанная модель — первая, но с fallback на проверенные
-        # Если модель от провайдера без кредитов — пропускаем её, только fallback
-        if _is_no_credits_provider(model_id):
-            print(f"  [agent] _build_models_to_try: skip {model_id} (no credits provider), fallback only")
-            return _add_probed_models([])
-        return _add_probed_models([model_id])
-
-    # Приоритетные модели проекта
-    for pm in _get_priority_models(project):
-        models_to_try.append(pm)
-        seen.add(pm)
-
-    # Проверенные (probed) модели
-    models_to_try = _add_probed_models(models_to_try)
-
-    # FALLBACK: если нет проверенных моделей — пробуем любые валидные с API-ключом
-    if not models_to_try:
-        models_to_try = _add_any_valid_models(models_to_try)
-
-    return models_to_try
+    return result
 
 
 # ═══════════════════════════════════════════════════════
@@ -1181,33 +1218,28 @@ async def handle_chat_message(prompt: str, project_id, repo_map: str | None, web
 
     await save_message(project_id, "user", prompt)
 
-    # Build model list — единая логика через _build_models_to_try()
+    # Build model list — единая логика (правка C.2)
     all_models = keys_manager.get_all_models()
     project = await get_project(project_id) if project_id else None
-    models_to_try = _build_models_to_try(model_id, all_models, project)
+    priority_from_project = _get_priority_models(project) if project else []
+    models_to_try = _build_models_to_try(
+        user_prompt=prompt,
+        explicit_model_id=model_id,
+        all_models=all_models,
+        project=project,
+        priority_models=priority_from_project,
+        probed_model_ids=keys_manager._probed_model_ids,
+        failed_probe_ids=keys_manager._failed_probe_ids,
+        in_project_context=bool(project_id),
+    )
 
     if not models_to_try:
         await _send_log(websocket, "❌ Нет доступных моделей. Добавьте API-ключ или опросите модели.", "error")
         await safe_ws_send(websocket, {"type": "done", "tools_used": 0, "duration_ms": 0, "tokens": 0})
         return
 
-    # Автоперевалидация rate_limited провайдеров перед первой попыткой
-    validated_providers = set()
-    for m_id in models_to_try:
-        if "__" in m_id:
-            pid = m_id.split("__")[0]
-        elif m_id.startswith("local_") or m_id.startswith("custom_"):
-            continue
-        else:
-            # bare model name — skip
-            continue
-        if pid not in validated_providers:
-            config = keys_manager.providers.get(pid, {})
-            if config.get("status") == "rate_limited":
-                new_status = await keys_manager.ensure_provider_active(pid)
-                if new_status == "valid":
-                    await _send_log(websocket, f"✓ {pid} перевалидирован и активен", "success")
-            validated_providers.add(pid)
+    # Автоперевалидация rate_limited вынесена в background_revalidation_loop (правка C.4).
+    # Здесь больше ничего не делаем — статусы актуальны на момент get_all_models().
 
     # Try each model
     ai_response = None
@@ -1453,7 +1485,14 @@ async def handle_hub_message(prompt: str, websocket, model_id: str = None, _canc
 
     # Build model list — единая логика через _build_models_to_try()
     all_models = keys_manager.get_all_models()
-    models_to_try = _build_models_to_try(model_id, all_models)
+    models_to_try = _build_models_to_try(
+        user_prompt=prompt,
+        explicit_model_id=model_id,
+        all_models=all_models,
+        probed_model_ids=keys_manager._probed_model_ids,
+        failed_probe_ids=keys_manager._failed_probe_ids,
+        in_project_context=False,
+    )
 
     if not models_to_try:
         print(f"  [agent] hub: NO models available! all_models={len(all_models)}")

@@ -302,41 +302,15 @@ async def websocket_chat(websocket: WebSocket):
                 from core.auto_agent import run_auto_mode
                 await run_auto_mode(prompt, project_id, repo_map_val, websocket, model_id=model_id_val, _cancel_check=_cancelled)
             elif project_id:
-                # Intelligent router (if no explicit model)
-                resolved_model = model_id_val
-                if not resolved_model:
-                    try:
-                        from core.keys_manager import keys_manager
-                        from core.memory import get_project
-                        all_m = keys_manager.get_all_models()
-                        pm = priority_models_val
-                        if not pm and project_id:
-                            proj = await get_project(project_id)
-                            if proj and proj.get("selected_models"):
-                                pm = json.loads(proj["selected_models"])
-                        # Всегда пытаемся маршрутизировать — даже без probe,
-                        # передаём пустой probed set и has_been_probed=False
-                        route_result = intelligent_router.select_model(
-                            prompt, all_m, user_preferred_model=None,
-                            probed_model_ids=probed_ids_val or set(), failed_probe_ids=set(),
-                            has_been_probed=bool(probed_ids_val), priority_models=pm,
-                            in_project_context=bool(project_id),
-                        )
-                        resolved_model = route_result.get("model_id")
-                    except Exception as route_err:
-                        print(f"  [ws] task {task_id[:8]} router error: {route_err}")
-                
-                # Всегда вызываем handle_chat_message — если resolved_model=None,
-                # внутри используется _build_models_to_try() с фоллбэком на проверенные модели
-                if project_id:
-                    await handle_chat_message(
-                        prompt, project_id, repo_map_val, websocket,
-                        model_id=resolved_model, _cancel_check=_cancelled,
-                        active_skills=skills_val or None
-                    )
-                else:
-                    await safe_ws_send(websocket, {"type": "auto_log", "content": "⚠️ Нет выбранного проекта", "level": "warning"})
-                    await safe_ws_send(websocket, {"type": "done", "tools_used": 0, "duration_ms": 0, "tokens": 0})
+                # Маршрутизация полностью внутри handle_chat_message (правка C.3).
+                # Перед вызовом — устанавливаем probed_model_ids из payload клиента
+                if probed_ids_val:
+                    keys_manager._probed_model_ids = set(probed_ids_val)
+                await handle_chat_message(
+                    prompt, project_id, repo_map_val, websocket,
+                    model_id=model_id_val, _cancel_check=_cancelled,
+                    active_skills=skills_val or None
+                )
             # Hub messages don't go through here (handled separately below)
         except Exception as task_err:
             print(f"  [ws] task {task_id[:8]} error: {task_err}")
