@@ -1,4 +1,4 @@
-pip install lunar_python
+# Требуется зависимость: pip install lunar_python
 import datetime
 from lunar_python import Lunar, Solar
 
