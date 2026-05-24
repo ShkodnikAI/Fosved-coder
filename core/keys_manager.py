@@ -1209,7 +1209,7 @@ class KeysManager:
             if not config.get("enabled", True):
                 continue  # Пропускаем отключённые провайдеры
             status = config.get("status", "not_configured")
-            if status in ("invalid", "no_key"):
+            if status == "invalid":
                 continue  # Пропускаем невалидные провайдеры — их модели не работают
             provider_def = PROVIDER_DEFS.get(provider_id, {})
             prefix = config.get("litellm_prefix", provider_id)
