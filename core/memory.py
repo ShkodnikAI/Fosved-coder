@@ -76,6 +76,7 @@ def _resolve_db_url() -> tuple[str, bool]:
             return config_url, False
 
     # 3. Fallback: SQLite (local development)
+    os.makedirs("data", exist_ok=True)
     print("  [db] DATABASE_URL не задан — используется SQLite (локальный режим)")
     return "sqlite+aiosqlite:///data/fosved_coder.db", False
 
