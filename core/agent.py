@@ -418,8 +418,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             logger.log(f"tool: read_file {path}", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": path}, "status": "done"})
             await _send_log(websocket, f"📖 Читаю: {path} ({len(content)} симв.)", "info")
-            try: asyncio.create_task(save_tool_usage(None, "", "", "read_file", json.dumps({"path": path}), "done", duration_ms=int((time.time()-_tool_start)*1000), result_length=len(content)))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_tool_usage(None, "", "", "read_file", json.dumps({"path": path}), "done", duration_ms=int((time.time()-_tool_start)*1000), result_length=len(content)))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             return content
 
         elif name == "write_file":
@@ -438,8 +441,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             logger.log(f"tool: write_file {path} ({len(content)} chars)", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": path, "size": len(content)}, "status": "done"})
             await _send_log(websocket, f"💾 Записываю: {path} ({len(content)} симв.)", "file")
-            try: asyncio.create_task(save_tool_usage(None, "", "", "write_file", json.dumps({"path": path}), "done", duration_ms=int((time.time()-_tool_start)*1000), result_length=len(content)))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_tool_usage(None, "", "", "write_file", json.dumps({"path": path}), "done", duration_ms=int((time.time()-_tool_start)*1000), result_length=len(content)))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             return f"Файл {path} сохранён ({len(content)} символов)"
 
         elif name == "list_files":
@@ -480,8 +486,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             logger.log(f"tool: list_files {rel_path} ({len(entries)} entries)", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"path": rel_path}, "status": "done"})
             await _send_log(websocket, f"📁 Список файлов: {rel_path} ({len(entries)} элементов)", "info")
-            try: asyncio.create_task(save_tool_usage(None, "", "", "list_files", json.dumps({"path": rel_path}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_tool_usage(None, "", "", "list_files", json.dumps({"path": rel_path}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             return result
 
         elif name == "search_files":
@@ -526,8 +535,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             logger.log(f"tool: search_files '{pattern}' -> {len(results)} results", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"pattern": pattern}, "status": "done"})
             await _send_log(websocket, f"🔍 Поиск '{pattern}': {len(results)} совпадений", "info")
-            try: asyncio.create_task(save_tool_usage(None, "", "", "search_files", json.dumps({"pattern": pattern}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_tool_usage(None, "", "", "search_files", json.dumps({"pattern": pattern}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             return result
 
         elif name == "execute_command":
@@ -544,8 +556,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             logger.log(f"tool: execute_command '{command[:100]}'", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"command": command}, "status": "running"})
             await _send_log(websocket, f"⚡ Выполняю: $ {command[:120]}", "command")
-            try: asyncio.create_task(save_tool_usage(None, "", "", "execute_command", json.dumps({"command": command[:200]}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_tool_usage(None, "", "", "execute_command", json.dumps({"command": command[:200]}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             result = await executor.execute(command, cwd=project_path, need_approval=False, timeout=60)
             output = ""
             if result.get("stdout"):
@@ -572,8 +587,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             logger.log(f"tool: git_commit_push '{message}'", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"message": message}, "status": "running"})
             await _send_log(websocket, f"🚀 Git commit: {message}", "command")
-            try: asyncio.create_task(save_tool_usage(None, "", "", "git_commit_push", json.dumps({"message": message}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_tool_usage(None, "", "", "git_commit_push", json.dumps({"message": message}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             # Stage all
             r1 = await executor.execute("git add -A", cwd=project_path, need_approval=False)
             # Commit
@@ -602,8 +620,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
             logger.log(f"tool: git_clone '{repo_url}' (attempt {_clone_count+1}/2)", level="info", source="agent")
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"repo_url": repo_url}, "status": "running"})
             await _send_log(websocket, f"📦 Git clone: {repo_url}", "command")
-            try: asyncio.create_task(save_tool_usage(None, "", "", "git_clone", json.dumps({"repo_url": repo_url}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_tool_usage(None, "", "", "git_clone", json.dumps({"repo_url": repo_url}), "done", duration_ms=int((time.time()-_tool_start)*1000)))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             project_token = await get_project_token_by_path(project_path)
             result = await git_clone_with_token(executor, project_path, repo_url, token=project_token)
             await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "args": {"repo_url": repo_url}, "status": "done"})
@@ -622,8 +643,11 @@ async def execute_tool(name: str, arguments: dict, project_path: str | None, web
         logger.log(f"tool_error: {name} -> {str(e)[:200]}", level="error", source="agent")
         await safe_ws_send(websocket, {"type": "tool_call", "tool": name, "status": "error", "error": str(e)[:200]})
         await _send_log(websocket, f"❌ Ошибка {name}: {str(e)[:150]}", "error")
-        try: asyncio.create_task(save_tool_usage(None, "", "", name, "", "error", duration_ms=int((time.time()-_tool_start)*1000)))
-        except Exception: pass
+        try:
+            asyncio.create_task(save_tool_usage(None, "", "", name, "", "error", duration_ms=int((time.time()-_tool_start)*1000)))
+        except Exception as _telemetry_err:
+            logger.log("telemetry_save_failed", level="warning", source="agent",
+                       error=str(_telemetry_err)[:200])
         return f"Ошибка выполнения {name}: {str(e)[:500]}"
 
 
@@ -903,8 +927,11 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             tokens = len(full_response) // 4
             await safe_ws_send(websocket, {"type": "done", "tools_used": iteration, "duration_ms": int(duration), "tokens": tokens})
             logger.ai_response(model=model, tokens=tokens, success=True, duration_ms=duration)
-            try: asyncio.create_task(save_model_usage(None, "", model, "", "", total_tokens=tokens, duration_ms=int(duration), success=True))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_model_usage(None, "", model, "", "", total_tokens=tokens, duration_ms=int(duration), success=True))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             await _send_log(websocket, f"✅ Ответ от {model}: {len(full_response)} симв., {(duration/1000):.1f}с", "success")
             return full_response
 
@@ -927,8 +954,11 @@ async def stream_llm_response(prompt: str, history: list, websocket,
             else:
                 error_msg = f"Ошибка ИИ: {error_msg}"
             logger.ai_response(model=model, success=False, error=error_msg, duration_ms=duration)
-            try: asyncio.create_task(save_model_usage(None, "", model, "", "", duration_ms=int(duration), success=False))
-            except Exception: pass
+            try:
+                asyncio.create_task(save_model_usage(None, "", model, "", "", duration_ms=int(duration), success=False))
+            except Exception as _telemetry_err:
+                logger.log("telemetry_save_failed", level="warning", source="agent",
+                           error=str(_telemetry_err)[:200])
             # Ошибки API (401/429/402/500) — ТОЛЬКО в панель логов, НЕ на главный экран
             await _send_log(websocket, f"❌ {model}: {error_msg}", "error")
             # Signal 402/credit errors to caller for provider skipping in fallback
@@ -941,8 +971,11 @@ async def stream_llm_response(prompt: str, history: list, websocket,
     # Max iterations reached — return accumulated response even if empty
     await safe_ws_send(websocket, {"type": "done", "tools_used": max_tool_iterations, "duration_ms": int((time.time()-start_time)*1000), "tokens": len(full_response)//4})
     await _send_log(websocket, f"⚠️ Достигнут лимит {max_tool_iterations} итераций tool calling", "warning")
-    try: asyncio.create_task(save_model_usage(None, "", model, "", "", total_tokens=len(full_response)//4, duration_ms=int((time.time()-start_time)*1000), tool_calls_count=max_tool_iterations, success=True))
-    except Exception: pass
+    try:
+        asyncio.create_task(save_model_usage(None, "", model, "", "", total_tokens=len(full_response)//4, duration_ms=int((time.time()-start_time)*1000), tool_calls_count=max_tool_iterations, success=True))
+    except Exception as _telemetry_err:
+        logger.log("telemetry_save_failed", level="warning", source="agent",
+                   error=str(_telemetry_err)[:200])
     return full_response or "⚠️ Лимит итераций tool calling достигнут. Задача слишком сложная для одного запроса — попробуйте разбить на шаги."
 
 
