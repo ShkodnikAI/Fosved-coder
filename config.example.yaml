@@ -1,26 +1,60 @@
+# Fosved Coder — пример конфигурации.
+# Скопируй в config.yaml (он в .gitignore) и заполни под себя.
+# API-ключи можно задавать через UI (приоритет) или через .env (см. .env.example).
+
 llm:
+  # Модель по умолчанию (используется, если пользователь не выбрал явно
+  # и в проекте нет priority_models). Формат: "<provider>/<model>".
   default_model: "grok/grok-3"
+
+  # Модель для intelligent_router (классификатор сложности задачи).
+  # Если пусто — используется default_model.
   router_model: ""
+
   temperature: 0.2
   max_tokens: 4096
-  # fallback_chain — порядок моделей для автоматического переключения при ошибке.
-  # Формат: "litellm_prefix/model_name". Используется в _build_models_to_try().
+
+  # fallback_chain — порядок моделей при ошибке текущей.
+  # Используется в _build_models_to_try() как ступень после
+  # explicit / priority / router_advisor. Формат: "<litellm_prefix>/<model>".
   fallback_chain:
     - "openai/gpt-4o"
     - "anthropic/claude-sonnet-4-6"
     - "gemini/gemini-2.5-flash"
     - "deepseek/deepseek-chat"
     - "openai/llama-4-scout-17b-16e-instruct"   # Cerebras (бесплатно)
-    - "groq/llama-3.3-70b-versatile"              # Groq (бесплатно)
+    - "groq/llama-3.3-70b-versatile"             # Groq (бесплатно)
+
 system:
-  db_url: "sqlite+aiosqlite:///fosved_coder.db"
+  # URL базы данных. Поддерживается:
+  #   sqlite+aiosqlite:///data/fosved_coder.db (по умолчанию, локально)
+  #   postgresql+asyncpg://user:pass@host:5432/dbname (продакшен)
+  # Также можно переопределить через переменную окружения DATABASE_URL.
+  db_url: "sqlite+aiosqlite:///data/fosved_coder.db"
+
+  # Папка с рабочими проектами пользователя. Содержимое в .gitignore.
   projects_dir: "./projects"
+
+  # Кеш скачанных GitHub-репозиториев (для /ideas).
   ideas_cache_dir: "./.cache/ideas"
+
+  # Архивы завершённых проектов.
+  archives_dir: "./archives"
+
+  # Лимит итераций tool-calling в одном запросе (см. также MAX_TOOL_ITERATIONS в core/agent.py).
   max_iterations: 3
+
+  # Сколько файлов можно подложить в контекст из Repo Map.
   max_context_files: 20
+
+  # Сколько файлов брать из GitHub-репозитория при анализе идеи.
   max_idea_files: 10
+
+  # Лимит размера одного файла в KB (для контекста и идей).
   max_file_size_kb: 50
+
 security:
+  # Разрешённые shell-команды для terminal-инструмента.
   allowed_commands:
     - git
     - python
@@ -35,6 +69,8 @@ security:
     - echo
     - mkdir
     - cd
+
+  # Заблокированные паттерны — киборг-режим требует подтверждения.
   blocked_patterns:
     - "rm -rf /"
     - "DROP DATABASE"
