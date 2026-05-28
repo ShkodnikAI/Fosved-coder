@@ -96,8 +96,10 @@ class SessionSummary(Base):
 
 async def ensure_observation_tables():
     """Создать таблицы observations, session_summaries, observation_embeddings."""
-    async with engine.begin() as conn:
-        if IS_POSTGRES:
+    if IS_POSTGRES:
+        # PostgreSQL: каждое DDL в отдельной транзакции, т.к. при ошибке
+        # одного оператора вся транзакция становится aborted (InFailedSQLTransactionError)
+        async with engine.begin() as conn:
             await conn.execute(sa_text("""
                 CREATE TABLE IF NOT EXISTS observations (
                     id SERIAL PRIMARY KEY,
@@ -118,6 +120,7 @@ async def ensure_observation_tables():
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
+        async with engine.begin() as conn:
             await conn.execute(sa_text("""
                 CREATE TABLE IF NOT EXISTS session_summaries (
                     id SERIAL PRIMARY KEY,
@@ -133,27 +136,32 @@ async def ensure_observation_tables():
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
-            for idx_sql in [
-                "CREATE INDEX IF NOT EXISTS idx_obs_project ON observations(project_id)",
-                "CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id)",
-                "CREATE INDEX IF NOT EXISTS idx_obs_type ON observations(obs_type)",
-                "CREATE INDEX IF NOT EXISTS idx_obs_created ON observations(created_at)",
-                "CREATE INDEX IF NOT EXISTS idx_obs_access ON observations(access_count)",
-                "CREATE INDEX IF NOT EXISTS idx_sum_project ON session_summaries(project_id)",
-                "CREATE INDEX IF NOT EXISTS idx_sum_session ON session_summaries(session_id)",
-            ]:
-                try:
-                    await conn.execute(sa_text(idx_sql))
-                except Exception:
-                    pass
+        # Индексы — каждый в отдельной транзакции (некоторые могут упасть)
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_obs_project ON observations(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_obs_type ON observations(obs_type)",
+            "CREATE INDEX IF NOT EXISTS idx_obs_created ON observations(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_obs_access ON observations(access_count)",
+            "CREATE INDEX IF NOT EXISTS idx_sum_project ON session_summaries(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sum_session ON session_summaries(session_id)",
+        ]:
             try:
+                async with engine.begin() as conn:
+                    await conn.execute(sa_text(idx_sql))
+            except Exception:
+                pass
+        # GIN index для FTS — может упасть (напр. если content column слишком большой)
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(sa_text("""
                     CREATE INDEX IF NOT EXISTS idx_obs_content_fts ON observations
                     USING gin(to_tsvector('english', content))
                 """))
-            except Exception:
-                pass
-            # observation_embeddings (vector search)
+        except Exception:
+            pass
+        # observation_embeddings (vector search) — в отдельной транзакции
+        async with engine.begin() as conn:
             await conn.execute(sa_text("""
                 CREATE TABLE IF NOT EXISTS observation_embeddings (
                     obs_id INTEGER PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
@@ -161,7 +169,8 @@ async def ensure_observation_tables():
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
-        else:
+    else:
+        async with engine.begin() as conn:
             await conn.execute(sa_text("""
                 CREATE TABLE IF NOT EXISTS observations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -223,19 +232,21 @@ async def _migrate_observation_decay_columns():
     """Добавить колонки decay (access_count, last_accessed_at) если не существуют."""
     if IS_POSTGRES:
         from sqlalchemy import text
-        async with engine.begin() as conn:
-            try:
+        # Каждая миграция в отдельной транзакции (PostgreSQL: failed statement aborts tx)
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(
                     "ALTER TABLE observations ADD COLUMN IF NOT EXISTS access_count INTEGER DEFAULT 0"
                 ))
-            except Exception:
-                pass
-            try:
+        except Exception:
+            pass
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(
                     "ALTER TABLE observations ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ DEFAULT NULL"
                 ))
-            except Exception:
-                pass
+        except Exception:
+            pass
     else:
         import sqlite3
         db_file = _get_sqlite_path()
