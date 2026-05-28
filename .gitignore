@@ -53,3 +53,7 @@ audit-trace/
 
 # Archives
 archives/
+
+# Local server
+logs/
+start.sh

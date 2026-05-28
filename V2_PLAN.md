@@ -1,14 +1,13 @@
-> **Статус документа: ИСТОРИЧЕСКИЙ (на 2026-05-25).**
-> Большая часть пунктов выполнена. Документ сохранён для понимания того, как
+> **Статус документа: ИСТОРИЧЕСКИЙ (на 2026-05-28).**
+> Все фазы 1–6 выполнены. Документ сохранён для понимания того, как
 > проект задумывался. Актуальное состояние смотри в README.md и в коде.
 >
-> Расхождения с реальностью (на момент закрытия наряда № 4):
-> - `core/chat.py` — упомянут как «удалить (deprecated)»; уже удалён.
-> - `core/router.py` — упомянут; реальное имя `core/intelligent_router.py`.
-> - Единая точка маршрутизации (1.3) — реализована в `_build_models_to_try` (наряд № 2).
-> - Тихое зондирование (4.1) — реализовано (`probe_selected_models` в `agent.py`).
-> - Динамическая анкета (4.2) — реализована (эндпоинты `/questionnaire`, `/drafts`).
-> - Авто-выбор скиллов (4.3) — реализован (`_load_skill_context` в `agent.py`).
+> Расхождения с реальностью (на момент закрытия наряда № 6):
+> - Фаза 1–4: полностью реализованы (Наряды №1–5).
+> - Фаза 5 (CodeGraph): исследование завершено, интеграция отложена.
+> - Фаза 6 (Smart Memory): **полностью реализована** (коммит `7c2cd5a`).
+>   См. `core/memory_embeddings.py`, `core/memory_decay.py`, обновлённый
+>   `core/observation_manager.py`.
 
 ---
 
@@ -174,9 +173,9 @@ codegraph trace <A> <B>        — как A достигает B через вы
 
 ---
 
-## Фаза 6: Умная система памяти (Smart Memory)
+## Фаза 6: Умная система памяти (Smart Memory) — РЕАЛИЗОВАНА
 
-> **Статус**: исследование завершено, интеграция отложена до Слоя 3+.
+> **Статус**: полностью реализована (2026-05-28, коммит `7c2cd5a`, merge `464b66c`).
 > Оригинал: https://github.com/rohitg00/agentmemory
 
 ### Что изучено: agentmemory
@@ -235,54 +234,47 @@ codegraph trace <A> <B>        — как A достигает B через вы
    для Claude Code/Cursor; fosved-coder использует собственный WS-агент-луп.
 5. **21,800 LOC TypeScript** — нереально поддерживать как зависимость в Python-проекте.
 
-### Предлагаемая архитектура (нативная Python-реализация)
+### Реализованная архитектура (2026-05-28)
 
 ```
 core/
-├── memory.py              # (текущий) CRUD + retrieval
-├── memory_search.py       # (новый) BM25 + векторный поиск
-├── memory_consolidate.py  # (новый) 4-уровневая консолидация
-├── memory_profile.py      # (новый) профиль проекта
-└── memory_decay.py        # (новый) retention policy + decay
-
-db/
-├── chat_history           # (текущий) + колонка archived: bool
-├── chat_history_fts       # (новый) FTS5 виртуальная таблица
-├── memory_facts           # (новый) semantic facts + embedding
-├── memory_sessions        # (новый) эпизодические саммари сессий
-└── memory_patterns        # (новый) процедурные паттерны
+├── memory.py              # SQLAlchemy модели + CRUD (26 таблиц)
+├── memory_embeddings.py   # Vector embeddings + RRF fusion (BLOB в SQLite/PG)
+├── memory_decay.py        # Кривая Эббингауза + eviction loop
+├── observation_manager.py # Observations, hybrid search, smart context assembly
+├── context_compressor.py   # LLM + regex сжатие (archived=True)
+└── context_manager.py     # Repo Map + MD5 кеш
 ```
 
-**Зависимости (Python, минимальные):**
-- `sentence-transformers` + `numpy` — векторные эмбеддинги (локально, без API)
-- `whoosh` или `rank_bm25` — полнотекстовый BM25-поиск
-- Или чистый `sqlite3 FTS5` (уже встроен в Python 3.12) — нулевые зависимости
+**Зависимости:**
+- `sentence-transformers` + `numpy` — векторные эмбеддинги (опционально, FTS5 fallback)
+- `sqlite3 FTS5` / PostgreSQL `gin(to_tsvector)` — полнотекстовый поиск (встроен)
 
-### Low-hanging fruit (можно реализовать до Слоя 3)
+### Реализованные компоненты Smart Memory
 
-Независимо от полной реализации Phase 6, несколько идей внедрить сейчас:
+| Идея | Статус | Где |
+|------|--------|-----|
+| FTS5 / GIN на `observations.content` | ✅ Реализовано | `observation_manager.py` |
+| Не-деструктивная компрессия (`archived=True`) | ✅ Реализовано | `context_compressor.py` |
+| Project profile (Repo Map + MD5 кеш) | ✅ Реализовано | `context_manager.py` |
+| SHA-256 дедуп tool outputs | ✅ Реализовано | `tool_usage_stats.content_hash` |
+| Memory decay (кривая Эббингауза) | ✅ Реализовано | `memory_decay.py` |
+| Vector embeddings (sentence-transformers) | ✅ Реализовано | `memory_embeddings.py` |
+| Hybrid search (FTS5 + Vector + RRF) | ✅ Реализовано | `observation_manager.py` |
+| Smart Context Assembly | ✅ Реализовано | `observation_manager.py` |
 
-| Идея | Сложность | Время | Влияние |
-|------|-----------|-------|---------|
-| FTS5 на `chat_history.content` | Низкая | 30 мин | Мгновенный поиск по истории |
-| Не-деструктивная компрессия (`archived=True`) | Низкая | 1 час | Сохранение данных |
-| Project profile в `repo_maps` | Низкая | 2 часа | Лучший контекст |
-| SHA-256 дедуп tool outputs | Низкая | 1 час | Меньше шума |
-| Memory decay (cron eviction) | Средняя | 3 часа | Автоочистка |
+### Не реализовано (будущее)
 
-### Предусловия для полной реализации
-
-- [ ] Фаза 1–4 V2 завершены
-- [ ] `agent.py` разбит на модули (Слой 3)
-- [ ] БД мигрирована на PostgreSQL (для `pgvector`, если нужен продакшн-масштаб)
-- [ ] Проведён бенчмарк retrieval accuracy на реальных проектах fosved-coder
-- [ ] Оценена нагрузка на БД при индексации векторных эмбеддингов
+- [ ] Knowledge Graph (граф связей между фактами) — избыточно для текущего масштаба
+- [ ] 4-уровневая консолидация (Working → Episodic → Semantic → Procedural) — текущая система достаточна
+- [ ] Процедурная память (шаблоны решений) — при необходимости через отдельную таблицу
+- [ ] `pgvector` extension для PostgreSQL — numpy-поиск достаточен для <10K observations
 
 ### Приоритет относительно CodeGraph (Phase 5)
 
-CodeGraph **релевантнее** для fosved-coder на текущем этапе:
+Smart Memory (Phase 6) **реализована**. CodeGraph (Phase 5) остаётся отложенным:
 - CodeGraph понимает **структуру кода** (AST, call graph, framework-aware)
 - Smart Memory понимает **историю чатов** (семантический поиск по фактам/сессиям)
 - Для coding-ассистента знание кода > знание истории чатов
 
-Порядок: Phase 5 (CodeGraph) → Phase 6 (Smart Memory).
+Следующий шаг: CodeGraph (Phase 5) при необходимости.
