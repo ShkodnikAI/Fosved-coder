@@ -440,7 +440,7 @@ body {
 .type-tag.free { background: rgba(86,156,214,0.15); color: var(--blue); }
 .type-tag.local { background: rgba(224,96,112,0.15); color: #e06070; }
 .type-tag.custom { background: rgba(192,128,208,0.15); color: var(--purple); }
-.type-tag.abacus { background: rgba(240,160,48,0.15); color: var(--yellow); }
+
 .type-tag.thinking { background: rgba(147,130,220,0.2); color: #9382dc; font-style: italic; }
 
 /* Model action link */

@@ -1,23 +1,19 @@
 ---
-Task ID: 1
-Agent: main
-Task: Полная переработка логики работы с моделями и исправление WS стабильности
+Task ID: 0
+Agent: Main
+Task: Audit + verify Smart Memory v2 features, update docs, push
 
 Work Log:
-- Прочитал текущее состояние core/agent.py (2264 строки), run.py (1144 строки), index.html
-- Проанализировал корень проблемы WS code 1006: сервер отправлял JSON text ping вместо WebSocket PING control frames
-- Прокси (Render/nginx) распознаёт только WebSocket PING frames (RFC 6455) как keepalive
-- Исправил WS keepalive в run.py: заменил `safe_ws_send({"type":"ping"})` на `websocket.send_ping()`
-- Переработал _AgentLoopState: добавил трекинг прогресса, классификацию tool calls, детекцию зацикливания
-- Увеличил лимит итераций с 3 до 8 (было слишком мало для реальных задач)
-- Добавил детекцию отсутствия прогресса (3 итерации без записи/команды → стоп)
-- Добавил защиту "все дубликаты" (если все tool calls были дубликатами → немедленный стоп)
-- Увеличил лимит tool calls с 15 до 25, контекст с 80K до 120K
-- Удалил мёртвый код: SYSTEM_PROMPT_INJECTION_TEMPLATE (~50 строк), stream_with_prompt_injection (~200 строк)
-- Итого удалено ~300 строк мёртвого кода, добавлено ~50 строк новых защит
+- Read and audited all 5 core files: memory.py, memory_embeddings.py, memory_decay.py, observation_manager.py, context_manager.py
+- Confirmed ALL 3 features (Vector Embeddings + RRF, Smart Context Assembly, Memory Decay) are fully implemented and committed (7c2cd5a, merge 464b66c)
+- Started fosved-coder locally on port 8000 (without sentence-transformers — FTS5 fallback)
+- Added logs/ and start.sh to .gitignore
+- Updated V2_PLAN.md: Phase 6 status → fully implemented, replaced old tables with realized components
+- README.md already up-to-date with all features documented
+- Committed and pushed: 33cbf0c
 
 Stage Summary:
-- core/agent.py: 2264 → 1969 строк (чистый синтаксис)
-- run.py: 1144 → 1065 строк
-- WS keepalive: JSON text → WebSocket PING frame (критический фикс для code 1006)
-- Agent loop: увеличены лимиты, добавлена детекция прогресса
+- All 3 Smart Memory v2 features verified as complete
+- Server running locally (PID 4759, port 8000, SQLite mode)
+- Docs synced: README.md + V2_PLAN.md up to date
+- Pushed to main: 464b66c..33cbf0c

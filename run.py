@@ -100,20 +100,6 @@ async def lifespan(app: FastAPI):
             print(f"  [bg] Key validation error: {e}")
     asyncio.create_task(_bg_validate_keys())
 
-    # Abacus.AI: загрузка моделей в фоне (не блокирует старт)
-    async def _bg_load_abacus():
-        try:
-            abacus_cfg = keys_manager.providers.get("abacus", {})
-            if abacus_cfg.get("api_key"):
-                result = await keys_manager.fetch_abacus_models()
-                if result["success"]:
-                    print(f"  [abacus] Загружено {result['count']} моделей в фоне")
-                else:
-                    print(f"  [abacus] Фоновая загрузка не удалась: {result.get('error', '?')[:80]}")
-        except Exception as e:
-            print(f"  [abacus] Фоновая загрузка: {e}")
-    asyncio.create_task(_bg_load_abacus())
-
     # Фоновое revalidation: периодически перепроверяет rate_limited/invalid провайдеров (правка A.8)
     from core.keys_manager import BG_REVALIDATION_INTERVAL as _bg_interval
     bg_revalidate_task = asyncio.create_task(keys_manager.background_revalidation_loop())

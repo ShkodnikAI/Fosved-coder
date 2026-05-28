@@ -62,7 +62,7 @@ AI-ассистент для разработки с персистентной 
 | Компонент | Технология |
 |-----------|-----------|
 | Веб-сервер | FastAPI + Uvicorn (async) |
-| ИИ-оболочка | LiteLLM (Anthropic, OpenAI, Grok, Cerebras, DeepSeek, Gemini, Qwen, Abacus, Ollama) |
+| ИИ-оболочка | LiteLLM (Anthropic, OpenAI, Grok, Cerebras, DeepSeek, Gemini, Qwen, Ollama) |
 | Память | sentence-transformers + numpy + FTS5 |
 | База данных | PostgreSQL (asyncpg) / SQLite (aiosqlite) + SQLAlchemy |
 | HTTP-клиент | aiohttp + httpx |
@@ -178,7 +178,6 @@ system:
 | Qwen (Alibaba) | Платный | `qwen3-235b-a22b` |
 | Z.AI (GLM) | Платный | `glm-5.1` |
 | Kimi (Moonshot) | Платный | `kimi-k2-0711` |
-| Abacus.AI | Платный | `route-llm` (65+ моделей) |
 | **Groq** | **Бесплатно** | `llama-3.3-70b-versatile` |
 | **Cerebras** | **Бесплатно** | `llama-4-scout-17b-16e-instruct` |
 | Ollama | Локальный | `llama3` и другие |
@@ -234,7 +233,7 @@ User Query
 |-------|---------|--------|
 | Проекты | `/projects` | CRUD, переименование, регенерация ключа |
 | Ключи | `/keys` | добавление, удаление, валидация |
-| Модели | `/models` | список, probe, local, abacus |
+| Модели | `/models` | список, probe, local |
 | Скиллы | `/skills` | список, активация |
 | Идеи | `/ideas` | анализ GitHub-репо |
 | Память | `/memory` | observations, поиск, статистика |

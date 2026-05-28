@@ -84,7 +84,6 @@ LEADER_MODEL_PATTERNS = [
     "gemini-2.5-pro", "gemini-3",     # Google Gemini Pro
     "grok-4", "grok-3",               # xAI Grok
     "deepseek-reasoner",              # DeepSeek Reasoner
-    "route-llm",                       # Abacus RouteLLM (smart routing)
     "qwen3-coder", "qwen3-235b",     # Qwen coding
     # Бесплатные модели высокой производительности
     "llama-4-scout", "llama-4-maverick",  # Cerebras (бесплатно, fast)

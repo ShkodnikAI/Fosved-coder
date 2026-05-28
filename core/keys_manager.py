@@ -121,57 +121,6 @@ PROVIDER_DEFS = {
         ],
         "is_free": True,
     },
-    "abacus": {
-        "name": "Abacus.AI (RouteLLM)",
-        "litellm_prefix": "openai",
-        "api_base": "https://routellm.abacus.ai/v1",
-        "is_custom": True,
-        # RouteLLM: 1 ключ = 65+ моделей от всех провайдеров без наценки.
-        # route-llm — умная маршрутизация (автоматически выбирает лучшую модель по сложности запроса)
-        # -thinking — расширенное мышление (extended thinking) для поддерживаемых моделей
-        # Динамический список моделей доступен через GET /v1/models
-        "suggested_models": [
-            # --- Умная маршрутизация (RouteLLM) ---
-            "route-llm",  # Автоматический выбор лучшей модели по сложности запроса
-            # --- OpenAI ---
-            "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
-            "gpt-5.3-codex",  # Специализированная модель для кода
-            "gpt-5.2", "gpt-5.1", "gpt-5",
-            "gpt-4.1", "gpt-4o",
-            "o4-mini", "o3", "o3-pro",
-            # --- Anthropic Claude ---
-            "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
-            "claude-sonnet-4-6", "claude-sonnet-4-5",
-            "claude-haiku-4-5",
-            # --- Google Gemini ---
-            "gemini-3.1-pro", "gemini-3.1-flash-lite",
-            "gemini-3-pro", "gemini-2.5-pro", "gemini-2.5-flash",
-            # --- xAI Grok ---
-            "grok-4.2", "grok-4.1-fast", "grok-4", "grok-code-fast",
-            # --- Qwen ---
-            "qwen3-235b-a22b", "qwen3-max", "qwen3-coder", "qwq-32b",
-            # --- Meta Llama ---
-            "llama-4-Maverick", "llama-3.3-70B", "llama-3.1-405B",
-            # --- Abacus (собственные) ---
-            "abacus-smaug2", "abacus-dracarys",
-            # --- Kimi ---
-            "kimi-k2.5",
-            # --- GLM ---
-            "glm-5", "glm-4.7", "glm-4.6", "glm-4.5",
-        ],
-        # Модели с поддержкой extended thinking (добавляется суффикс -thinking)
-        "thinking_models": [
-            "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
-            "o3", "o3-pro",
-        ],
-        # Категории моделей для UI
-        "model_categories": {
-            "smart_routing": {"models": ["route-llm"], "label": "Умная маршрутизация"},
-            "coding": {"models": ["gpt-5.3-codex", "grok-code-fast", "qwen3-coder", "claude-sonnet-4-6"], "label": "Код"},
-            "reasoning": {"models": ["claude-opus-4-7", "o3-pro", "o3", "gemini-3.1-pro"], "label": "Рассуждения"},
-            "fast": {"models": ["gpt-4.1-nano", "claude-haiku-4-5", "gemini-3.1-flash-lite", "grok-4.1-fast", "o4-mini"], "label": "Быстрые"},
-        },
-    },
 }
 
 FREE_MODELS = []  # OpenRouter free models removed — use free providers directly (Cerebras, Groq, Gemini, etc.)
@@ -232,7 +181,6 @@ ENV_KEY_MAP = {
     "DEEPSEEK_API_KEY": "deepseek",
     "QWEN_API_KEY": "qwen",
     "ZAI_API_KEY": "zai",
-    "ABACUS_API_KEY": "abacus",
     "CEREBRAS_API_KEY": "cerebras",
     "GROQ_API_KEY": "groq",
 }
@@ -943,82 +891,6 @@ class KeysManager:
             return True
         return False
 
-    # ─── Dynamic Model Fetching ───────────────────────────────
-
-    async def fetch_abacus_models(self, api_key: str = None) -> dict:
-        """
-        Загрузить актуальный список моделей с Abacus.AI RouteLLM API.
-        GET https://routellm.abacus.ai/v1/models
-        Returns: {"success": bool, "models": list, "count": int, "error": str}
-        """
-        config = self.providers.get("abacus", {})
-        key = api_key or config.get("api_key", "")
-        base_url = config.get("api_base", PROVIDER_DEFS["abacus"]["api_base"])
-
-        if not key:
-            return {"success": False, "models": [], "count": 0, "error": "Нет API ключа Abacus.AI"}
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{base_url}/models",
-                    headers={"Authorization": f"Bearer {key}"},
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        return {"success": False, "models": [], "count": 0,
-                                "error": f"API вернул {resp.status}: {error_text[:200]}"}
-
-                    data = await resp.json()
-
-                    # OpenAI-совместимый формат: {"data": [{"id": "model-name", ...}, ...]}
-                    raw_models = data.get("data", [])
-                    if not raw_models:
-                        return {"success": False, "models": [], "count": 0,
-                                "error": "API вернул пустой список моделей"}
-
-                    # Извлекаем ID моделей, фильтруем мусор
-                    model_ids = []
-                    skip_prefixes = ("ft:", "file-", "babbage", "davinci", "curie", "ada", "text-")
-                    for m in raw_models:
-                        model_id = m.get("id", "")
-                        if not model_id or len(model_id) < 2:
-                            continue
-                        if any(model_id.startswith(p) for p in skip_prefixes):
-                            continue
-                        model_ids.append(model_id)
-
-                    if not model_ids:
-                        return {"success": False, "models": [], "count": 0,
-                                "error": "Не найдено подходящих моделей"}
-
-                    # Обновляем список моделей провайдера
-                    if self.providers.get("abacus"):
-                        self.providers["abacus"]["models"] = model_ids
-                        self._save_keys()
-
-                    print(f"  [keys] Abacus.AI: загружено {len(model_ids)} моделей с API")
-                    try:
-                        logger.log("abacus_models_fetched", level="success", source="keys_manager",
-                                   details={"count": len(model_ids)})
-                    except Exception:
-                        pass
-
-                    return {
-                        "success": True,
-                        "models": model_ids,
-                        "count": len(model_ids),
-                        "error": "",
-                    }
-
-        except aiohttp.ClientError as e:
-            return {"success": False, "models": [], "count": 0,
-                    "error": f"Не удалось подключиться к Abacus.AI: {str(e)[:150]}"}
-        except Exception as e:
-            return {"success": False, "models": [], "count": 0,
-                    "error": str(e)[:200]}
-
     # ─── Startup Validation ──────────────────────────────────
 
     async def startup_validation(self) -> dict:
@@ -1213,7 +1085,6 @@ class KeysManager:
                 continue  # Пропускаем невалидные провайдеры — их модели не работают
             provider_def = PROVIDER_DEFS.get(provider_id, {})
             prefix = config.get("litellm_prefix", provider_id)
-            thinking_models = provider_def.get("thinking_models", [])
             categories = provider_def.get("model_categories", {})
 
             for model_name in config.get("models", []):
@@ -1238,32 +1109,8 @@ class KeysManager:
                     "type": "paid",
                     "status": status,
                     "category": category,
-                    "thinking": model_name in thinking_models,
                     "status_age_sec": status_age_sec,
                 })
-
-            # Extended Thinking: генерируем -thinking варианты для Abacus
-            if provider_id == "abacus" and thinking_models:
-                abacus_models = config.get("models", [])
-                for tm in thinking_models:
-                    if tm in abacus_models:
-                        tm_id = f"{provider_id}__{tm}-thinking"
-                        # Фильтр по probe: для -thinking варианта проверяем базовую модель
-                        base_id = f"{provider_id}__{tm}"
-                        if base_id in self._failed_probe_ids:
-                            continue
-                        models.append({
-                            "id": tm_id,
-                            "name": f"{tm}-thinking",
-                            "model": f"{prefix}/{tm}-thinking",
-                            "provider": provider_id,
-                            "provider_name": provider_def.get("name", provider_id),
-                            "type": "paid",
-                            "status": status,
-                            "category": "Extended Thinking",
-                            "thinking": True,
-                            "status_age_sec": status_age_sec,
-                        })
 
         # 2. Локальные модели
         for lm in self.local_models:
@@ -1295,31 +1142,16 @@ class KeysManager:
     def get_model_config(self, model_id: str) -> dict | None:
         """
         Получить конфиг для litellm по ID модели.
-        Returns: {model, api_key, api_base, thinking} или None
+        Returns: {model, api_key, api_base} или None
         
         Поддерживает форматы:
           - provider__model_name (напр. claude__claude-sonnet-4-20250514)
-          - provider__model_name-thinking (Abacus extended thinking)
           - bare model_name (напр. claude-sonnet-4-20250514) — ищет по всем провайдерам
           - free model ID (напр. gemini-2.5-flash-free)
           - local/custom model ID
         
         api_base включается ТОЛЬКО для кастомных/нестандартных провайдеров.
         """
-        # Abacus Extended Thinking: model_id = "abacus__claude-opus-4-7-thinking"
-        _thinking = False
-        if model_id.endswith("-thinking") and "__" in model_id:
-            parts = model_id.rsplit("-thinking", 1)
-            base_id = parts[0]
-            # Проверяем что базовая модель существует у Abacus
-            provider_part = base_id.split("__", 1)
-            if len(provider_part) == 2:
-                pid, mname = provider_part
-                pdef = PROVIDER_DEFS.get(pid, {})
-                if mname in pdef.get("thinking_models", []):
-                    model_id = base_id  # Поиск будет по базовой модели
-                    _thinking = True
-
         # 0. Bare model name fallback: если model_id не содержит "__" и не matches local/free/custom
         if "__" not in model_id and not model_id.startswith("local_") and not model_id.startswith("custom_"):
             # Проверяем — это может быть голое имя модели из config.yaml
@@ -1331,15 +1163,11 @@ class KeysManager:
                             prefix = config.get("litellm_prefix", provider_id)
                             provider_def = PROVIDER_DEFS.get(provider_id, {})
                             litellm_name = f"{prefix}/{model_name}"
-                            if _thinking:
-                                litellm_name += "-thinking"
                             result = {
                                 "model": litellm_name,
                                 "api_key": config.get("api_key", ""),
                                 "provider": provider_id,
                             }
-                            if _thinking:
-                                result["thinking"] = True
                             is_custom = provider_def.get("is_custom", False)
                             default_base = provider_def.get("api_base", "")
                             current_base = config.get("api_base", "")
@@ -1354,15 +1182,11 @@ class KeysManager:
                     prefix = config.get("litellm_prefix", provider_id)
                     provider_def = PROVIDER_DEFS.get(provider_id, {})
                     litellm_name = f"{prefix}/{model_name}"
-                    if _thinking:
-                        litellm_name += "-thinking"
                     result = {
                         "model": litellm_name,
                         "api_key": config.get("api_key", ""),
                         "provider": provider_id,
                     }
-                    if _thinking:
-                        result["thinking"] = True
                     # Only include api_base for custom providers or when explicitly overridden
                     is_custom = provider_def.get("is_custom", False)
                     default_base = provider_def.get("api_base", "")
