@@ -147,6 +147,7 @@ class ChatHistory(Base):
     thread_id: Mapped[int | None] = mapped_column(nullable=True, index=True, default=None)
     role: Mapped[str]
     content: Mapped[str] = mapped_column(Text)
+    archived: Mapped[bool] = mapped_column(default=False, index=True)  # True = compressed away, kept for search
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class ChatThread(Base):
@@ -202,6 +203,7 @@ class ToolUsageStat(Base):
     duration_ms: Mapped[int] = mapped_column(default=0)
     tokens_used: Mapped[int] = mapped_column(default=0)
     result_length: Mapped[int] = mapped_column(default=0)
+    content_hash: Mapped[str] = mapped_column(default="", index=True)  # SHA-256 для дедупа
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class ModelUsageStat(Base):
@@ -1218,6 +1220,18 @@ async def migrate_db():
                     await conn.execute(text(mig_sql))
                 except Exception:
                     pass  # Column may already be TIMESTAMPTZ or table doesn't exist
+            # Add archived column to chat_history
+            try:
+                await conn.execute(text("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chat_history_archived ON chat_history(archived)"))
+            except Exception:
+                pass
+            # Add content_hash column to tool_usage_stats
+            try:
+                await conn.execute(text("ALTER TABLE tool_usage_stats ADD COLUMN IF NOT EXISTS content_hash TEXT DEFAULT ''"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tool_usage_stats_content_hash ON tool_usage_stats(content_hash)"))
+            except Exception:
+                pass
     else:
         import sqlite3
         db_file = DB_URL.split(":///")[-1] if ":///" in DB_URL else "fosved_coder.db"
@@ -1257,6 +1271,63 @@ async def migrate_db():
                     updated_at TEXT DEFAULT ''
                 )
             """)
+            # Add archived column to chat_history (non-destructive compression)
+            try:
+                cursor.execute("PRAGMA table_info(chat_history)")
+                cols = {row[1] for row in cursor.fetchall()}
+                if "archived" not in cols:
+                    cursor.execute("ALTER TABLE chat_history ADD COLUMN archived BOOLEAN DEFAULT 0")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS ix_chat_history_archived ON chat_history(archived)")
+            except Exception:
+                pass
+            # Add content_hash column to tool_usage_stats (SHA-256 dedup)
+            try:
+                cursor.execute("PRAGMA table_info(tool_usage_stats)")
+                cols = {row[1] for row in cursor.fetchall()}
+                if "content_hash" not in cols:
+                    cursor.execute("ALTER TABLE tool_usage_stats ADD COLUMN content_hash TEXT DEFAULT ''")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS ix_tool_usage_stats_content_hash ON tool_usage_stats(content_hash)")
+            except Exception:
+                pass
+            # Create FTS5 virtual table for full-text search on chat_history
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history_fts'")
+                if not cursor.fetchone():
+                    cursor.execute("""
+                        CREATE VIRTUAL TABLE chat_history_fts USING fts5(
+                            content,
+                            content=chat_history,
+                            content_rowid=id,
+                            tokenize='unicode61'
+                        )
+                    """)
+                    # Sync existing data
+                    cursor.execute("""
+                        INSERT INTO chat_history_fts(rowid, content)
+                        SELECT id, content FROM chat_history WHERE content IS NOT NULL
+                    """)
+                    # Create triggers to keep FTS in sync
+                    cursor.execute("""
+                        CREATE TRIGGER IF NOT EXISTS chat_history_ai AFTER INSERT ON chat_history BEGIN
+                            INSERT INTO chat_history_fts(rowid, content) VALUES (new.id, new.content);
+                        END
+                    """)
+                    cursor.execute("""
+                        CREATE TRIGGER IF NOT EXISTS chat_history_ad AFTER DELETE ON chat_history BEGIN
+                            INSERT INTO chat_history_fts(chat_history_fts, rowid, content)
+                            VALUES ('delete', old.id, old.content);
+                        END
+                    """)
+                    cursor.execute("""
+                        CREATE TRIGGER IF NOT EXISTS chat_history_au AFTER UPDATE ON chat_history BEGIN
+                            INSERT INTO chat_history_fts(chat_history_fts, rowid, content)
+                            VALUES ('delete', old.id, old.content);
+                            INSERT INTO chat_history_fts(rowid, content) VALUES (new.id, new.content);
+                        END
+                    """)
+                    print("  [db] FTS5 created on chat_history.content")
+            except Exception as e:
+                print(f"  [db] FTS5 setup skipped: {e}")
             conn.commit()
             conn.close()
         except Exception:
@@ -1518,9 +1589,12 @@ async def save_message(project_id: int | None, role: str, content: str, thread_i
             session.add(ChatHistory(project_id=project_id, role=role, content=content, thread_id=None))
 
 async def get_history(project_id: int | None, limit: int = 50, thread_id: int | None = None) -> list[dict]:
-    """Get chat history for a project. thread_id is accepted for backward compatibility but ignored."""
+    """Get chat history for a project. Skips archived messages (compressed away)."""
     async with async_session() as session:
-        query = select(ChatHistory).where(ChatHistory.project_id == project_id)
+        query = select(ChatHistory).where(
+            ChatHistory.project_id == project_id,
+            ChatHistory.archived == False
+        )
         result = await session.execute(
             query.order_by(ChatHistory.timestamp.asc()).limit(limit)
         )
@@ -1541,6 +1615,92 @@ async def get_message_count(project_id: int | None) -> int:
             select(func.count(ChatHistory.id)).where(ChatHistory.project_id == project_id)
         )
         return result.scalar() or 0
+
+async def search_history(query: str, project_id: int | None = None, limit: int = 20) -> list[dict]:
+    """Full-text search across chat history (including archived messages).
+    
+    Uses FTS5 on SQLite, ILIKE fallback on PostgreSQL.
+    Returns matching messages with role, content snippet, timestamp, archived flag.
+    """
+    from sqlalchemy import text
+    if not query or len(query.strip()) < 2:
+        return []
+
+    search_term = query.strip()
+    results = []
+
+    if IS_POSTGRES:
+        # PostgreSQL: ILIKE search (simple but works without tsvector setup)
+        async with async_session() as session:
+            sql = """
+                SELECT id, role, content, timestamp, archived
+                FROM chat_history
+                WHERE content ILIKE :pattern
+            """
+            params = {"pattern": f"%{search_term}%"}
+            if project_id is not None:
+                sql += " AND project_id = :pid"
+                params["pid"] = project_id
+            sql += " ORDER BY timestamp DESC LIMIT :lim"
+            params["lim"] = limit
+            result = await session.execute(text(sql), params)
+            for row in result.fetchall():
+                content = row[2] or ""
+                # Snippet: show first 200 chars around match
+                idx = content.lower().find(search_term.lower())
+                if idx >= 0:
+                    start = max(0, idx - 80)
+                    end = min(len(content), idx + len(search_term) + 120)
+                    snippet = (">>>" if start > 0 else "") + content[start:end] + ("<<<" if end < len(content) else "")
+                else:
+                    snippet = content[:200]
+                results.append({
+                    "id": row[0], "role": row[1], "snippet": snippet,
+                    "timestamp": str(row[3]), "archived": row[4]
+                })
+    else:
+        # SQLite: FTS5 full-text search
+        async with engine.connect() as conn:
+            try:
+                fts_query = f"SELECT rowid FROM chat_history_fts WHERE chat_history_fts MATCH ? ORDER BY rank LIMIT ?"
+                fts_result = await conn.execute(text(fts_query), [search_term, limit])
+                matched_ids = [row[0] for row in fts_result.fetchall()]
+            except Exception:
+                # FTS table might not exist yet — fallback to LIKE
+                matched_ids = []
+
+            if not matched_ids:
+                # Fallback: LIKE search
+                async with async_session() as session:
+                    q = select(ChatHistory.id).where(ChatHistory.content.ilike(f"%{search_term}%"))
+                    if project_id is not None:
+                        q = q.where(ChatHistory.project_id == project_id)
+                    q = q.order_by(ChatHistory.timestamp.desc()).limit(limit)
+                    r = await session.execute(q)
+                    matched_ids = [row[0] for row in r.fetchall()]
+
+            if matched_ids:
+                async with async_session() as session:
+                    q = select(ChatHistory).where(ChatHistory.id.in_(matched_ids))
+                    if project_id is not None:
+                        q = q.where(ChatHistory.project_id == project_id)
+                    q = q.order_by(ChatHistory.timestamp.desc()).limit(limit)
+                    r = await session.execute(q)
+                    for m in r.scalars().all():
+                        content = m.content or ""
+                        idx = content.lower().find(search_term.lower())
+                        if idx >= 0:
+                            start = max(0, idx - 80)
+                            end = min(len(content), idx + len(search_term) + 120)
+                            snippet = (">>>" if start > 0 else "") + content[start:end] + ("<<<" if end < len(content) else "")
+                        else:
+                            snippet = content[:200]
+                        results.append({
+                            "id": m.id, "role": m.role, "snippet": snippet,
+                            "timestamp": str(m.timestamp), "archived": m.archived
+                        })
+
+    return results
 
 async def clear_main_chat_history(days: int = 10) -> int:
     """Delete main chat messages older than N days. Returns count deleted."""
@@ -1643,11 +1803,14 @@ async def delete_context_snapshot(snapshot_id: int) -> bool:
             return False
 
 async def delete_old_messages(project_id: int, keep_last: int = 10, thread_id: int | None = None) -> int:
-    """Удалить старые сообщения, оставив последние N. Возвращает количество удалённых."""
+    """Archive old messages (set archived=True) instead of deleting. Returns count archived."""
     async with async_session() as session:
         async with session.begin():
-            # Получаем ID последних keep_last сообщений
-            query = select(ChatHistory.id).where(ChatHistory.project_id == project_id)
+            # Get IDs of last keep_last non-archived messages
+            query = select(ChatHistory.id).where(
+                ChatHistory.project_id == project_id,
+                ChatHistory.archived == False
+            )
             if thread_id is not None:
                 query = query.where(ChatHistory.thread_id == thread_id)
             query = query.order_by(ChatHistory.timestamp.desc()).limit(keep_last)
@@ -1657,13 +1820,17 @@ async def delete_old_messages(project_id: int, keep_last: int = 10, thread_id: i
             if not keep_ids:
                 return 0
 
-            # Удаляем все сообщения кроме последних
-            del_query = delete(ChatHistory).where(ChatHistory.project_id == project_id)
+            # Archive all non-archived messages except the last N
+            from sqlalchemy import update
+            upd_query = (
+                update(ChatHistory)
+                .where(ChatHistory.project_id == project_id, ChatHistory.archived == False)
+                .where(ChatHistory.id.notin_(keep_ids))
+                .values(archived=True)
+            )
             if thread_id is not None:
-                del_query = del_query.where(ChatHistory.thread_id == thread_id)
-            if keep_ids:
-                del_query = del_query.where(ChatHistory.id.notin_(keep_ids))
-            result = await session.execute(del_query)
+                upd_query = upd_query.where(ChatHistory.thread_id == thread_id)
+            result = await session.execute(upd_query)
             return result.rowcount
 
 # ═══════════════════════════════════════════════════════════════
@@ -1732,7 +1899,36 @@ async def save_tool_usage(
     tool_name: str, args_summary: str, status: str,
     duration_ms: int = 0, tokens_used: int = 0, result_length: int = 0
 ):
-    """Сохранить запись об использовании инструмента."""
+    """Сохранить запись об использовании инструмента. Пропускает дубли по SHA-256 (5-мин окно)."""
+    import hashlib
+    # SHA-256 дедуп: хеш tool_name + args_summary + result_length
+    raw = f"{tool_name}:{args_summary}:{result_length}"
+    content_hash = hashlib.sha256(raw.encode()).hexdigest()
+
+    # Проверяем дубли за последние 5 минут
+    try:
+        from sqlalchemy import text as sql_text
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+        async with async_session() as check_session:
+            if IS_POSTGRES:
+                result = await check_session.execute(
+                    sql_text(
+                        "SELECT id FROM tool_usage_stats WHERE content_hash = :h AND timestamp > :cutoff LIMIT 1"
+                    ),
+                    {"h": content_hash, "cutoff": cutoff},
+                )
+            else:
+                result = await check_session.execute(
+                    sql_text(
+                        "SELECT id FROM tool_usage_stats WHERE content_hash = ? AND timestamp > ? LIMIT 1"
+                    ),
+                    [content_hash, cutoff.isoformat()],
+                )
+            if result.fetchone():
+                return  # Duplicate — skip
+    except Exception:
+        pass  # Dedup check failed — proceed with insert
+
     async with async_session() as session:
         async with session.begin():
             session.add(ToolUsageStat(
@@ -1740,7 +1936,7 @@ async def save_tool_usage(
                 model_id=model_id, tool_name=tool_name,
                 args_summary=args_summary, status=status,
                 duration_ms=duration_ms, tokens_used=tokens_used,
-                result_length=result_length
+                result_length=result_length, content_hash=content_hash
             ))
 
 async def save_model_usage(

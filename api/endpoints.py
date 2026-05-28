@@ -826,6 +826,24 @@ async def get_hub_history(limit: int = Query(default=100, le=500)):
     return {"messages": history, "count": len(history)}
 
 
+@router.get("/projects/{project_id}/history/search")
+async def search_project_history(project_id: int, q: str = Query(min_length=2), limit: int = Query(default=20, le=100)):
+    """Full-text search across project chat history (including archived/compressed messages)."""
+    from core.memory import search_history
+    _api("GET", f"/api/v1/projects/{project_id}/history/search", project_id=project_id)
+    results = await search_history(q, project_id=project_id, limit=limit)
+    return {"results": results, "count": len(results), "query": q}
+
+
+@router.get("/chat/hub/history/search")
+async def search_hub_history(q: str = Query(min_length=2), limit: int = Query(default=20, le=100)):
+    """Full-text search across hub chat history."""
+    from core.memory import search_history
+    _api("GET", "/api/v1/chat/hub/history/search")
+    results = await search_history(q, project_id=None, limit=limit)
+    return {"results": results, "count": len(results), "query": q}
+
+
 @router.post("/projects/fix-paths")
 async def fix_project_paths():
     """Recalculate project paths that reference cloud /app/ directories."""

@@ -102,8 +102,8 @@ class ContextCompressor:
             messages, project_id=project_id, use_llm=True, model_config=model_config
         )
         if summary:
-            deleted = await delete_old_messages(project_id, keep_last=self.KEEP_RECENT_MESSAGES)
-            print(f"  [compressor] Удалено {deleted} старых сообщений из БД")
+            archived = await delete_old_messages(project_id, keep_last=self.KEEP_RECENT_MESSAGES)
+            print(f"  [compressor] Архивировано {archived} старых сообщений (сохранены для поиска)")
         return summary, remaining, was_llm
 
     def build_compressed_system_prompt(self, original_prompt: str, compressed_summary: str) -> str:
