@@ -86,6 +86,9 @@ LEADER_MODEL_PATTERNS = [
     "deepseek-reasoner",              # DeepSeek Reasoner
     "route-llm",                       # Abacus RouteLLM (smart routing)
     "qwen3-coder", "qwen3-235b",     # Qwen coding
+    # Бесплатные модели высокой производительности
+    "llama-4-scout", "llama-4-maverick",  # Cerebras (бесплатно, fast)
+    "llama-3.3-70b",                       # Groq (бесплатно, fast)
 ]
 
 

@@ -1,0 +1,46 @@
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Секреты и локальные конфиги (никогда не должны попасть в образ)
+config.yaml
+keys.yaml
+keys.json
+.env
+.env.local
+data/keys.json
+data/uploads/
+data/logs/
+data/*.db
+*.db
+
+# Мусор
+download/
+render_env*.json
+worklog.md
+worklog_session.md
+audit-trace/
+projects/
+
+# Docs (опционально — не нужно в рантайме контейнера)
+README.md
+V2_PLAN.md
+PROMPT.md
+.dockerignore
+Dockerfile

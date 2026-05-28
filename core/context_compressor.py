@@ -283,7 +283,7 @@ class ContextCompressor:
         for m in all_models:
             if m.get("status") in ("valid", "available"):
                 model_type = m.get("type", "")
-                # Пропускаем модели без ключа (free но без openrouter ключа, local без сервера)
+                # Пропускаем модели без ключа (free но без ключа, local без сервера)
                 if model_type in ("local",) and not m.get("base_url"):
                     continue
                 config = keys_manager.get_model_config(m["id"])

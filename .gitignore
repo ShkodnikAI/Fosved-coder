@@ -1,20 +1,55 @@
+# Python
 venv/
 .venv/
+env/
 __pycache__/
 *.pyc
 *.pyo
-*.db
-.env
-.cache/
 *.egg-info/
+.python-version
+
+# Build
 dist/
 build/
-config.yaml
-keys.yaml
-fosvedcoder.env
+
+# OS
 .DS_Store
 Thumbs.db
-data/
+
+# IDE
+.idea/
+.vscode/
+
+# Project — конфиг и секреты
+config.yaml
+keys.yaml
+keys.json
+.env
+.env.local
+fosvedcoder.env
+
+# Project — runtime данные (никогда не коммитим)
+data/keys.json
+data/projects.json
+data/uploads/
+data/logs/
+data/*.db
+*.db
+.cache/
+
+# Project — рабочие проекты пользователя (содержимое, но не саму папку)
+projects/*
+!projects/.gitkeep
+
+# Project — мусорные дампы
 download/
-worklog.md
+render_env*.json
 nixpacks.toml
+
+# Project — логи работы агентов
+worklog.md
+worklog_session.md
+audit-trace/
+
+# Archives
+archives/

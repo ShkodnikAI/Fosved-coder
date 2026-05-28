@@ -16,6 +16,7 @@ from core.agent import handle_chat_message, handle_hub_message
 from core.executor import CommandExecutor
 from core.ideas_injector import IdeasInjector
 from core.context_manager import ContextManager
+from core.intelligent_router import intelligent_router
 from core.action_logger import get_logger
 from core.observation_manager import assemble_context, generate_session_summary_async, ensure_observation_tables
 from api.endpoints import router as api_router
@@ -287,6 +288,7 @@ async def websocket_chat(websocket: WebSocket):
     async def _run_chat_task(task_id: str, prompt: str, project_id, repo_map_val, mode_val, model_id_val, priority_models_val, probed_ids_val, skills_val=None):
         """Run a chat task in parallel — each task has its own cancel flag and ContextVar."""
         from core.agent import _current_task_id, handle_chat_message, handle_hub_message
+        from core.intelligent_router import intelligent_router
         
         # Set context var — propagates to all child async calls (safe_ws_send, etc.)
         _current_task_id.set(task_id)
