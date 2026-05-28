@@ -135,15 +135,43 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  [memory] Warning: {e}")
 
+    # Preload embedding model in background (не блокирует старт)
+    async def _bg_preload_embeddings():
+        try:
+            from core.memory_embeddings import preload_model_async, is_model_ready
+            await preload_model_async()
+            if is_model_ready():
+                print(f"  [memory] Embedding model loaded (semantic search enabled)")
+            else:
+                print(f"  [memory] Embedding model not available (FTS5 fallback)")
+        except Exception as e:
+            print(f"  [memory] Embedding preload: {e}")
+    asyncio.create_task(_bg_preload_embeddings())
+
+    # Memory decay: фоновый eviction loop (раз в час)
+    try:
+        from core.memory_decay import decay_loop
+        bg_decay_task = asyncio.create_task(decay_loop())
+        print(f"  [memory] Decay loop started (eviction every 60 min)")
+    except Exception as e:
+        bg_decay_task = None
+        print(f"  [memory] Decay loop error: {e}")
+
     print(f"  Готово! Откройте приложение в браузере.\n")
     yield
 
-    # Shutdown: остановить фоновое revalidation
+    # Shutdown: остановить фоновые задачи
     try:
         bg_revalidate_task.cancel()
         await asyncio.wait_for(bg_revalidate_task, timeout=2)
     except (asyncio.CancelledError, asyncio.TimeoutError):
         pass
+    if bg_decay_task is not None:
+        try:
+            bg_decay_task.cancel()
+            await asyncio.wait_for(bg_decay_task, timeout=2)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
 
 
 app = FastAPI(title="Fosved Coder", version="2.0", lifespan=lifespan)

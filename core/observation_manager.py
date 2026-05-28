@@ -9,8 +9,12 @@ FOSVED CODER V2.0 — Observation Manager (вдохновлено claude-mem)
   Observation — сжатая запись о действии (tool call, ошибка, решение)
   SessionSummary — AI-сгенерированное резюме сессии
   3-layer search: search() → timeline() → get_details()
+  + Hybrid search: FTS5 + Vector embeddings + RRF (v2)
+  + Smart Context Assembly: семантический выбор контекста (v2)
+  + Memory Decay: затухание по кривой Эббингауза (v2)
 """
 
+import asyncio
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -50,6 +54,12 @@ class Observation(Base):
     is_private: Mapped[bool] = mapped_column(Boolean, default=False)
     relevance_score: Mapped[float] = mapped_column(Float, default=0.0)
 
+    # Memory decay (Эббингауз) — v2
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -82,7 +92,7 @@ class SessionSummary(Base):
 # ═══════════════════════════════════════════════════════════════
 
 async def ensure_observation_tables():
-    """Создать таблицы observations и session_summaries."""
+    """Создать таблицы observations, session_summaries, observation_embeddings."""
     async with engine.begin() as conn:
         if IS_POSTGRES:
             await conn.execute(sa_text("""
@@ -100,6 +110,8 @@ async def ensure_observation_tables():
                     is_compressed BOOLEAN DEFAULT FALSE,
                     is_private BOOLEAN DEFAULT FALSE,
                     relevance_score FLOAT DEFAULT 0.0,
+                    access_count INTEGER DEFAULT 0,
+                    last_accessed_at TIMESTAMPTZ DEFAULT NULL,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
@@ -123,6 +135,7 @@ async def ensure_observation_tables():
                 "CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id)",
                 "CREATE INDEX IF NOT EXISTS idx_obs_type ON observations(obs_type)",
                 "CREATE INDEX IF NOT EXISTS idx_obs_created ON observations(created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_obs_access ON observations(access_count)",
                 "CREATE INDEX IF NOT EXISTS idx_sum_project ON session_summaries(project_id)",
                 "CREATE INDEX IF NOT EXISTS idx_sum_session ON session_summaries(session_id)",
             ]:
@@ -137,6 +150,14 @@ async def ensure_observation_tables():
                 """))
             except Exception:
                 pass
+            # observation_embeddings (vector search)
+            await conn.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS observation_embeddings (
+                    obs_id INTEGER PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+                    embedding BYTEA NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
         else:
             await conn.execute(sa_text("""
                 CREATE TABLE IF NOT EXISTS observations (
@@ -153,6 +174,8 @@ async def ensure_observation_tables():
                     is_compressed INTEGER DEFAULT 0,
                     is_private INTEGER DEFAULT 0,
                     relevance_score REAL DEFAULT 0.0,
+                    access_count INTEGER DEFAULT 0,
+                    last_accessed_at TIMESTAMP DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
@@ -180,6 +203,60 @@ async def ensure_observation_tables():
                 """))
             except Exception:
                 pass
+            # observation_embeddings (vector search)
+            await conn.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS observation_embeddings (
+                    obs_id INTEGER PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+                    embedding BLOB NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+
+    # Миграция: добавить access_count и last_accessed_at в существующие таблицы
+    await _migrate_observation_decay_columns()
+
+
+async def _migrate_observation_decay_columns():
+    """Добавить колонки decay (access_count, last_accessed_at) если не существуют."""
+    if IS_POSTGRES:
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE observations ADD COLUMN IF NOT EXISTS access_count INTEGER DEFAULT 0"
+                ))
+            except Exception:
+                pass
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE observations ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ DEFAULT NULL"
+                ))
+            except Exception:
+                pass
+    else:
+        import sqlite3
+        db_file = _get_sqlite_path()
+        try:
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(observations)")
+            existing = {row[1] for row in cursor.fetchall()}
+            if "access_count" not in existing:
+                cursor.execute("ALTER TABLE observations ADD COLUMN access_count INTEGER DEFAULT 0")
+            if "last_accessed_at" not in existing:
+                cursor.execute("ALTER TABLE observations ADD COLUMN last_accessed_at TIMESTAMP DEFAULT NULL")
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"  [obs] migration warning: {e}")
+
+
+def _get_sqlite_path() -> str:
+    """Извлечь путь к SQLite файлу из DB_URL."""
+    from core.memory import DB_URL
+    if ":///" in DB_URL:
+        return DB_URL.split(":///")[-1]
+    return "data/fosved_coder.db"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -198,8 +275,9 @@ async def store_observation(
     is_private: bool = False,
     is_compressed: bool = False,
     tokens_used: int = 0,
+    _skip_embedding: bool = False,
 ) -> int:
-    """Сохранить наблюдение. Возвращает ID."""
+    """Сохранить наблюдение. Возвращает ID. Автоматически вычисляет embedding в фоне."""
     # Strip <private> content before saving for privacy
     content, _has_private = strip_private_tags(content)
     if raw_content:
@@ -234,7 +312,24 @@ async def store_observation(
         except Exception:
             pass
 
+    # Вычислить embedding асинхронно в фоне (не блокируем store_observation)
+    if not _skip_embedding and content and not is_private:
+        asyncio.create_task(_bg_compute_and_save_embedding(obs_id, content))
+
     return obs_id
+
+
+async def _bg_compute_and_save_embedding(obs_id: int, text: str):
+    """Фоновая задача: вычислить и сохранить embedding для observation."""
+    try:
+        from core.memory_embeddings import compute_embedding_async, save_embedding, is_model_ready
+        if not is_model_ready():
+            return
+        embedding = await compute_embedding_async(text)
+        if embedding:
+            await save_embedding(obs_id, embedding)
+    except Exception as e:
+        print(f"  [obs] embedding bg task error for obs_id={obs_id}: {e}")
 
 
 async def get_observation(obs_id: int) -> dict | None:
@@ -279,7 +374,7 @@ async def get_observations_by_project(
 
 
 # ═══════════════════════════════════════════════════════════════
-# SEARCH — 3-layer progressive disclosure (claude-mem pattern)
+# SEARCH — Hybrid: FTS5 + Vector Embeddings + RRF (v2)
 # ═══════════════════════════════════════════════════════════════
 
 async def search_observations(
@@ -287,13 +382,46 @@ async def search_observations(
     limit: int = 20, obs_types: list[str] | None = None,
     hours: int | None = None,
 ) -> list[dict]:
-    """Layer 1: Compact search — ~50-100 tokens per result."""
+    """Layer 1: Hybrid search — FTS5 + Vector embeddings via RRF.
+
+    При наличии загруженной модели sentence-transformers:
+      1. FTS5 поиск по ключевым словам -> (obs_id, rank)
+      2. Vector search по косинусному сходству -> (obs_id, score)
+      3. RRF слияние -> отсортированный результат
+    Без модели: fallback на чистый FTS5 (текущее поведение).
+    """
     if not query or len(query.strip()) < 2:
         return []
 
     query_clean = query.strip()[:200]
-    conditions = [Observation.is_private == False]
 
+    # --- Попытка гибридного поиска (FTS5 + Vector + RRF) ---
+    try:
+        from core.memory_embeddings import is_model_ready
+        if is_model_ready():
+            return await _hybrid_search(
+                query_clean, project_id=project_id,
+                limit=limit, obs_types=obs_types, hours=hours,
+            )
+    except Exception as e:
+        print(f"  [obs] hybrid search fallback to FTS5: {e}")
+
+    # --- Fallback: чистый FTS5 (оригинальное поведение) ---
+    return await _fts_search(
+        query_clean, project_id=project_id,
+        limit=limit, obs_types=obs_types, hours=hours,
+    )
+
+
+async def _fts_search(
+    query_clean: str,
+    project_id: int | None = None,
+    limit: int = 20,
+    obs_types: list[str] | None = None,
+    hours: int | None = None,
+) -> list[dict]:
+    """Чистый FTS5 поиск (оригинальное поведение, fallback)."""
+    conditions = [Observation.is_private == False]
     if project_id:
         conditions.append(Observation.project_id == project_id)
     if obs_types:
@@ -310,8 +438,7 @@ async def search_observations(
         async with async_session() as session:
             result = await session.execute(
                 select(Observation).where(and_(*conditions))
-                .order_by(desc(Observation.created_at)).limit(limit),
-                {"q": search_term}
+                .order_by(desc(Observation.created_at)).limit(limit)
             )
             observations = result.scalars().all()
     else:
@@ -340,6 +467,15 @@ async def search_observations(
                 )
                 observations = result.scalars().all()
 
+    # Touch observations (memory decay: access tracking)
+    obs_ids = [o.id for o in observations]
+    if obs_ids:
+        try:
+            from core.memory_decay import touch_observations_batch
+            await touch_observations_batch(obs_ids)
+        except Exception:
+            pass
+
     return [
         {
             "id": o.id, "obs_type": o.obs_type,
@@ -349,6 +485,85 @@ async def search_observations(
         }
         for o in observations
     ]
+
+
+async def _hybrid_search(
+    query_clean: str,
+    project_id: int | None = None,
+    limit: int = 20,
+    obs_types: list[str] | None = None,
+    hours: int | None = None,
+) -> list[dict]:
+    """Гибридный поиск: FTS5 + Vector + RRF fusion."""
+    from core.memory_embeddings import (
+        compute_embedding_async, vector_search, reciprocal_rank_fusion,
+    )
+
+    # 1. FTS5 — поиск по ключевым словам
+    fts_results = []  # [(obs_id, rank_position)]
+    try:
+        fts_observations = await _fts_search(
+            query_clean, project_id=project_id,
+            limit=limit * 2, obs_types=obs_types, hours=hours,
+        )
+        fts_results = [(obs["id"], rank) for rank, obs in enumerate(fts_observations, start=1)]
+    except Exception:
+        pass
+
+    # 2. Vector search — семантический поиск
+    vector_results = []  # [(obs_id, score)]
+    try:
+        query_embedding = await compute_embedding_async(query_clean)
+        if query_embedding:
+            vector_results = await vector_search(
+                query_embedding,
+                project_id=project_id,
+                limit=limit * 2,
+                min_score=0.25,
+                obs_types=obs_types,
+                hours=hours,
+            )
+    except Exception as e:
+        print(f"  [obs] vector search error: {e}")
+
+    # 3. RRF fusion
+    if fts_results or vector_results:
+        rrf_results = reciprocal_rank_fusion(fts_results, vector_results, limit=limit)
+    else:
+        rrf_results = []
+
+    # 4. Получить полные observations для RRF результатов
+    if rrf_results:
+        obs_ids = [obs_id for obs_id, _score in rrf_results]
+        try:
+            from core.memory_decay import touch_observations_batch
+            await touch_observations_batch(obs_ids)
+        except Exception:
+            pass
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(Observation).where(
+                    Observation.id.in_(obs_ids),
+                    Observation.is_private == False
+                )
+            )
+            obs_map = {o.id: o for o in result.scalars().all()}
+
+        observations = []
+        for obs_id, score in rrf_results:
+            o = obs_map.get(obs_id)
+            if o:
+                observations.append({
+                    "id": o.id, "obs_type": o.obs_type,
+                    "content_preview": o.content[:150] + ("..." if len(o.content) > 150 else ""),
+                    "tool_name": o.tool_name, "file_path": o.file_path,
+                    "rrf_score": round(score, 4),
+                    "created_at": o.created_at.isoformat() if o.created_at else "",
+                })
+        return observations
+
+    return []
 
 
 async def get_observation_details(obs_ids: list[int]) -> list[dict]:
@@ -448,13 +663,24 @@ async def get_recent_summaries(project_id: int | None = None, limit: int = 5) ->
 
 
 # ═══════════════════════════════════════════════════════════════
-# CONTEXT ASSEMBLY — inject into system prompt
+# CONTEXT ASSEMBLY — Smart Context Assembly (v2)
 # ═══════════════════════════════════════════════════════════════
 
-async def assemble_context(project_id: int | None = None, max_tokens: int = 500) -> str:
-    """Собрать релевантный контекст из прошлых сессий."""
+async def assemble_context(
+    project_id: int | None = None, max_tokens: int = 500,
+    query: str | None = None,
+) -> str:
+    """Собрать релевантный контекст из прошлых сессий.
+
+    Smart Context Assembly (v2):
+      - Если query передан -> семантический поиск релевантных observations
+      - Session summaries (последние 3) — всегда
+      - Последние observations (24h) — всегда
+      - Семантически релевантные факты — если query и модель загружена
+    """
     parts = []
 
+    # 1. Session summaries — всегда инжектим
     summaries = await get_recent_summaries(project_id=project_id, limit=3)
     if summaries:
         parts.append("=== Предыдущие сессии (резюме) ===")
@@ -466,6 +692,7 @@ async def assemble_context(project_id: int | None = None, max_tokens: int = 500)
                 for dec in s["key_decisions"][:3]:
                     parts.append(f"    Решение: {dec[:80]}")
 
+    # 2. Последние observations (24h)
     if project_id:
         recent = await get_observations_by_project(project_id, limit=10, hours=24)
     else:
@@ -482,6 +709,40 @@ async def assemble_context(project_id: int | None = None, max_tokens: int = 500)
         for o in recent[:8]:
             preview = o["content"][:120]
             parts.append(f"[{o['obs_type']}] {preview}")
+
+    # 3. Семантически релевантный контекст (если query передан)
+    if query and query.strip():
+        try:
+            from core.memory_embeddings import is_model_ready, compute_embedding_async, vector_search
+            if is_model_ready():
+                query_embedding = await compute_embedding_async(query.strip()[:200])
+                if query_embedding:
+                    semantic_results = await vector_search(
+                        query_embedding,
+                        project_id=project_id,
+                        limit=5,
+                        min_score=0.35,
+                    )
+                    if semantic_results:
+                        sem_ids = [obs_id for obs_id, _score in semantic_results]
+                        sem_obs = await get_observation_details(sem_ids)
+                        # Фильтруем: убираем дубли с recent
+                        recent_ids = {o.get("id") for o in (recent or [])}
+                        unique_sem = [o for o in sem_obs if o.get("id") not in recent_ids]
+                        if unique_sem:
+                            parts.append("")
+                            parts.append("=== Релевантный контекст ===")
+                            for o in unique_sem[:5]:
+                                preview = o["content"][:120]
+                                parts.append(f"[{o['obs_type']}] {preview}")
+                            # Touch для decay
+                            try:
+                                from core.memory_decay import touch_observations_batch
+                                await touch_observations_batch(sem_ids)
+                            except Exception:
+                                pass
+        except Exception:
+            pass  # Embedding не работает — продолжаем без семантики
 
     context = "\n".join(parts)
     if len(context) > max_tokens * 3:
@@ -626,7 +887,6 @@ async def cleanup_old_observations(days: int = 30) -> int:
     async with async_session() as session:
         async with session.begin():
             result = await session.execute(
-
                 delete(Observation).where(Observation.created_at < cutoff)
             )
             return result.rowcount
@@ -653,5 +913,7 @@ def _obs_to_dict(obs: Observation) -> dict:
         "file_path": obs.file_path, "tokens_used": obs.tokens_used,
         "is_compressed": obs.is_compressed, "is_private": obs.is_private,
         "relevance_score": obs.relevance_score,
+        "access_count": obs.access_count or 0,
+        "last_accessed_at": obs.last_accessed_at.isoformat() if obs.last_accessed_at else None,
         "created_at": obs.created_at.isoformat() if obs.created_at else "",
     }
