@@ -1860,7 +1860,7 @@ async def probe_selected_models(websocket, selected_model_ids: list[str]) -> lis
     - Прогресс — ТОЛЬКО через _send_log (в панель логов)
     - НЕ отправляет chunk/type сообщения на главный экран
     """
-    _sem = asyncio.Semaphore(5)
+    _sem = asyncio.Semaphore(3)
     _probed: list[dict] = []
     _lock = asyncio.Lock()
 
@@ -1918,18 +1918,20 @@ async def probe_selected_models(websocket, selected_model_ids: list[str]) -> lis
                     litellm.acompletion(
                         model=litellm_model,
                         messages=probe_messages,
-                        max_tokens=3,
+                        max_tokens=1,
                         stream=False,
                         api_key=api_key,
                         **({"api_base": api_base} if api_base else {}),
                     ),
-                    timeout=30,
+                    timeout=15,
                 )
+                # Минимальная очистка — не держим объект ответа
+                resp = None
                 print(f"  [probe] OK {model_id} ({litellm_model})")
                 return {"id": model_id, "name": model_name, "status": "valid"}
             except asyncio.TimeoutError:
                 print(f"  [probe] TIMEOUT {model_id} ({litellm_model})")
-                await _send_log(websocket, f"⏱️ {model_name}: таймаут (30с)", "warning")
+                await _send_log(websocket, f"⏱️ {model_name}: таймаут (15с)", "warning")
                 return None
             except Exception as e:
                 print(f"  [probe] FAIL {model_id} ({litellm_model}): {str(e)[:200]}")
@@ -1994,7 +1996,7 @@ async def _do_probe(websocket=None, live: bool = False) -> list[dict]:
     """
     Общее зондирование. Если live=True — отправляет каждую модель по мере проверки.
     """
-    _sem = asyncio.Semaphore(5)
+    _sem = asyncio.Semaphore(3)
     _probed: list[dict] = []
     _lock = asyncio.Lock()  # для потокобезопасного добавления
 
