@@ -23,8 +23,8 @@ from api.endpoints import router as api_router
 logger = get_logger()
 
 
-async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False):
-    """Send JSON to websocket, silently ignoring any errors (closed conn, etc.)."""
+async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False) -> bool:
+    """Send JSON to websocket. Returns True on success, False on error."""
     try:
         # Inject task_id from ContextVar if available (parallel task support)
         if not _skip_task_id:
@@ -33,8 +33,10 @@ async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False):
             if tid:
                 data = {**data, "task_id": tid}
         await websocket.send_json(data)
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        print(f"  [ws] safe_ws_send error: {type(e).__name__}: {e}", flush=True)
+        return False
 
 
 # Global instances
@@ -271,18 +273,10 @@ async def websocket_chat(websocket: WebSocket):
     # ── Auto-clone dedup: only attempt clone once per project per session ──
     last_auto_clone_pid = None
 
-    # ── Server-side keepalive: ping every 4 sec to prevent proxy idle kill ──
-    async def _ws_keepalive():
-        try:
-            while True:
-                await asyncio.sleep(4)
-                try:
-                    await safe_ws_send(websocket, {"type": "ping"})
-                except Exception:
-                    break
-        except asyncio.CancelledError:
-            pass
-    keepalive_task = asyncio.create_task(_ws_keepalive())
+    # ── Keepalive handled by Uvicorn ws_ping_interval (RFC 6455 PING frames). ──
+    # Application-level JSON pings removed — reverse proxies (Render/nginx) only
+    # recognise WebSocket control frames (opcode 0x9), not TEXT frames.
+    keepalive_task = None  # Placeholder for backward compat with finally blocks
 
     async def _run_chat_task(task_id: str, prompt: str, project_id, repo_map_val, mode_val, model_id_val, priority_models_val, probed_ids_val, skills_val=None):
         """Run a chat task in parallel — each task has its own cancel flag and ContextVar."""
@@ -336,11 +330,8 @@ async def websocket_chat(websocket: WebSocket):
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_RECEIVE_TIMEOUT)
             except asyncio.TimeoutError:
-                # Idle: send a ping; if peer is gone, the next iteration will raise
-                try:
-                    await safe_ws_send(websocket, {"type": "ping"})
-                except Exception:
-                    raise WebSocketDisconnect()
+                # Idle — Uvicorn's ws_ping_interval handles keepalive (RFC 6455).
+                # Just continue the loop; if peer is gone, next receive_text() will raise.
                 continue
 
             try:
@@ -585,7 +576,8 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
     except WebSocketDisconnect:
-        keepalive_task.cancel()
+        if keepalive_task:
+            keepalive_task.cancel()
         logger.log("websocket_disconnected", level="info", source="ws", project_id=current_project_id)
         # Generate session summary (background, non-blocking)
         try:
@@ -595,7 +587,8 @@ async def websocket_chat(websocket: WebSocket):
         except Exception:
             pass
     except Exception as e:
-        keepalive_task.cancel()
+        if keepalive_task:
+            keepalive_task.cancel()
         import traceback
         logger.log("websocket_error", level="error", source="ws", project_id=current_project_id,
                    error=str(e)[:500], stack_trace=traceback.format_exc()[-2000:])
@@ -1017,7 +1010,11 @@ async def websocket_executor(websocket: WebSocket):
         pass
     try:
         while True:
-            data = await websocket.receive_json()
+            try:
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+            except asyncio.TimeoutError:
+                # Idle — Uvicorn's ws_ping_interval handles keepalive
+                continue
             cmd = data.get("command", "")
             request_id = data.get("request_id", "")
 
@@ -1046,4 +1043,11 @@ if __name__ == "__main__":
     print("  |   Fosved Coder v2.0                  |")
     print(f"  |   http://0.0.0.0:{port:<21}|")
     print("  +========================================+")
-    uvicorn.run("run:app", host="0.0.0.0", port=port, reload=False)
+    uvicorn.run(
+        "run:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False,
+        ws_ping_interval=15,   # RFC 6455 PING frame every 15s (under 30s proxy timeout)
+        ws_ping_timeout=10,    # Close if no PONG within 10s
+    )

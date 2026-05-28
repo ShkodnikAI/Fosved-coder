@@ -1832,7 +1832,7 @@ setTimeout(() => { hideLoadingScreen(); }, 12000);
 let wsReconnectAttempts = 0;
 const WS_MAX_RECONNECTS = 10;
 const WS_STABLE_DELAY = 15000; // 15 сек до признания соединения стабильным
-const WS_PING_INTERVAL = 4000; // Ping каждые 4 сек (keepalive через reverse proxy)
+const WS_PING_INTERVAL = 25000; // Application-level ping fallback (Uvicorn handles RFC 6455 PING frames every 15s)
 let wsIsConnected = false;
 let wsConnecting = false;
 let wsEverConnected = false;
@@ -2221,6 +2221,9 @@ function wsConnect() {
         const code = event ? event.code : '?';
         const reason = event ? event.reason : '';
         addClientLog('ws', 'WS closed [code:' + code + (reason ? ' reason:' + reason : '') + '] wasStable:' + wasStable);
+        if (code === 1006) {
+            showToast('Connection lost (abnormal closure) — reconnecting...', 'warning');
+        }
         if (wasStable) {
             wsReconnectAttempts = 0; // Stable connection died — full reset
         } else {

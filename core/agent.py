@@ -103,16 +103,18 @@ def _is_no_credits_provider(model_id: str) -> bool:
     return False
 
 
-async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False):
-    """Send JSON to websocket, silently ignoring any errors (closed conn, etc.)."""
+async def safe_ws_send(websocket, data: dict, _skip_task_id: bool = False) -> bool:
+    """Send JSON to websocket. Returns True on success, False on error."""
     try:
         if not _skip_task_id:
             tid = _current_task_id.get('')
             if tid:
                 data = {**data, "task_id": tid}
         await websocket.send_json(data)
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        print(f"  [ws] safe_ws_send error: {type(e).__name__}: {e}", flush=True)
+        return False
 
 
 async def _send_log(websocket, content: str, level: str = "info"):
