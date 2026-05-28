@@ -24,6 +24,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.memory import Base, async_session, engine, IS_POSTGRES
+
+# Semaphore для фоновой вычисления эмбеддингов — предотвращает pileup задач
+_embedding_semaphore = asyncio.Semaphore(2)
 from core.action_logger import get_logger
 
 logger = get_logger()
@@ -320,16 +323,17 @@ async def store_observation(
 
 
 async def _bg_compute_and_save_embedding(obs_id: int, text: str):
-    """Фоновая задача: вычислить и сохранить embedding для observation."""
-    try:
-        from core.memory_embeddings import compute_embedding_async, save_embedding, is_model_ready
-        if not is_model_ready():
-            return
-        embedding = await compute_embedding_async(text)
-        if embedding:
-            await save_embedding(obs_id, embedding)
-    except Exception as e:
-        print(f"  [obs] embedding bg task error for obs_id={obs_id}: {e}")
+    """Фоновая задача: вычислить и сохранить embedding для observation. Semaphore-limited."""
+    async with _embedding_semaphore:
+        try:
+            from core.memory_embeddings import compute_embedding_async, save_embedding, is_model_ready
+            if not is_model_ready():
+                return
+            embedding = await compute_embedding_async(text)
+            if embedding:
+                await save_embedding(obs_id, embedding)
+        except Exception as e:
+            print(f"  [obs] embedding bg task error for obs_id={obs_id}: {e}")
 
 
 async def get_observation(obs_id: int) -> dict | None:

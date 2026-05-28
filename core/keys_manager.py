@@ -217,6 +217,7 @@ class KeysManager:
         self._failed_probe_ids: set = set()  # Кэш ID моделей, НЕ прошедших probe
         # Lazily created to avoid binding to a loop that hasn't started yet.
         self._lock: asyncio.Lock | None = None
+        self._save_keys_pending: bool = False  # Debounce флаг для _save_keys
         self._load_keys()
 
     def _get_lock(self) -> asyncio.Lock:
@@ -382,6 +383,22 @@ class KeysManager:
             os.environ["EXPO_TOKEN"] = self.expo_token
 
     def _save_keys(self):
+        """Пометить keys как dirty. Реальное сохранение в _do_save_keys() с debounce."""
+        if not self._save_keys_pending:
+            self._save_keys_pending = True
+            try:
+                asyncio.get_event_loop().call_later(2.0, self._do_save_keys_soon)
+            except RuntimeError:
+                self._do_save_keys()
+
+    def _do_save_keys_soon(self):
+        """Callback из event loop — запускает реальное сохранение."""
+        self._save_keys_pending = False
+        self._do_save_keys()
+
+    def _do_save_keys(self):
+        """Реальное сохранение ключей в файл и БД."""
+        self._save_keys_pending = False
         try:
             # Ensure directory exists
             keys_dir = os.path.dirname(KEYS_FILE)
@@ -408,11 +425,12 @@ class KeysManager:
                     "enabled": self.expo_enabled,
                 },
             }
+            yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True)
             with open(KEYS_FILE, "w", encoding="utf-8") as f:
-                yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+                f.write(yaml_str)
 
             # Персистентное сохранение в БД (на случай если FS эфемерная — Render)
-            self._save_db_pending_yaml(yaml.dump(data, default_flow_style=False, allow_unicode=True))
+            self._save_db_pending_yaml(yaml_str)
         except Exception as e:
             print(f"  [keys_manager] Warning: could not save keys to {KEYS_FILE}: {e}")
             try:

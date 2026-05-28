@@ -592,6 +592,11 @@ async def websocket_chat(websocket: WebSocket):
     except WebSocketDisconnect:
         if keepalive_task:
             keepalive_task.cancel()
+        # Clean up stale pending_approvals for this websocket (memory leak fix)
+        stale_ids = [rid for rid, entry in pending_approvals.items() if entry.get("websocket") is websocket]
+        for rid in stale_ids:
+            pending_approvals.pop(rid, None)
+            print(f"  [ws] Cleaned stale pending approval {rid}")
         logger.log("websocket_disconnected", level="info", source="ws", project_id=current_project_id)
         # Generate session summary (background, non-blocking)
         try:

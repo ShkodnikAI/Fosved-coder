@@ -43,9 +43,8 @@ class ActionLogger:
         # ── Debug Mode (кнопка ТЕСТ) ──
         self._debug_mode = False
         self._debug_start_ts = None
-        self._debug_entries: list = []  # отдельный буфер для debug-сессии
-        self._debug_file = None
-        self._debug_client_logs: list = []  # логи с клиента (JS errors, fetch fails)
+        self._debug_entries: list = []  # отдельный буфер для debug-сессии (max MAX_DEBUG_ENTRIES)
+        self._debug_client_logs: list = []  # логи с клиента (max MAX_DEBUG_ENTRIES)
 
     def _ensure_log_dir(self):
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -240,6 +239,8 @@ class ActionLogger:
             **client_log,
         }
         self._debug_client_logs.append(entry)
+        if len(self._debug_client_logs) > MAX_DEBUG_ENTRIES:
+            self._debug_client_logs = self._debug_client_logs[-MAX_DEBUG_ENTRIES:]
 
     def log(self, action: str, level: str = "info", source: str = "",
             project_id: int = None, details: dict = None, error: str = None,
@@ -276,6 +277,8 @@ class ActionLogger:
         # В debug-буфер (если активен)
         if self._debug_mode:
             self._debug_entries.append(entry)
+            if len(self._debug_entries) > MAX_DEBUG_ENTRIES:
+                self._debug_entries = self._debug_entries[-MAX_DEBUG_ENTRIES:]
             # В debug-файл
             if self._debug_file:
                 try:
