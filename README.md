@@ -1,6 +1,6 @@
 # Fosved Coder v2.0
 
-Локальный автопилот для разработки, объединяющий лучшее из **Aider** (Repo Map), **Claude Code** (автономное выполнение команд) и **Cursor** (UI), с уникальными фичами, которых нет ни у одного инструмента.
+AI-ассистент для разработки с персистентной памятью. Объединяет лучшее из **Aider** (Repo Map), **Claude Code** (автономные агенты), **agentmemory** (4-уровневая память) и **Cursor** (UI), с уникальными фичами, которых нет ни у одного инструмента.
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)
@@ -8,17 +8,52 @@
 
 ---
 
-## Возможности
+## Ключевые возможности
 
-- **Умный Роутер (Money Saver)** — единая точка выбора модели в `_build_models_to_try()`. Учитывает: явный выбор пользователя, приоритетные модели проекта, `fallback_chain` из config.yaml, рекомендацию `intelligent_router` (классификация задачи: рутина → дешёвая модель, сложная → флагман), список проверенных моделей. Статусы провайдеров обновляются фоном (revalidation каждые 5 минут), `rate_limited` имеет TTL 10 минут.
-- **Циклический Агент** — tool-calling цикл до 10 итераций (`MAX_TOOL_ITERATIONS`). Защита от залипания: если модель повторяет один и тот же tool_call 3 раза подряд, цикл прерывается и модель просят свернуть работу.
-- **Repo Map** — сканирует структуру проекта, извлекает сигнатуры функций/классов и передаёт контекст ИИ. Кешируется с MD5-хешированием.
-- **Идеи-Инъектор** — анализирует чужие GitHub-репозитории через API: скачивает ключевые файлы, создаёт ИИ-выжимку архитектуры. Снижает галлюцинации.
-- **Мульти-проектность** — переключение между проектами с сохранением отдельной истории чата.
-- **Киборг-режим** — блокировка критических команд (rm -rf, DROP TABLE) с звуковым алертом и git checkpoint перед выполнением.
-- **REST API** — 120+ эндпоинтов под префиксом `/api/v1` для интеграции с внешними ИИ-агентами (ИИ-Офис, чат, проекты, ключи, модели, скиллы, идеи, статистика).
-- **Markdown UI** — рендеринг ответов ИИ через marked.js, подсветка кода highlight.js, тёмная тема VS Code.
-- **Скиллы** — 69 готовых пресетов для типовых задач (`skills/`, 18 МБ): работа со скиллом ppt, pdf, docx, xlsx, market-research, UI/UX, charts и др. Авто-выбор скилла моделью по контексту запроса; `SKILL.md` каждого скилла инжектится в системный промпт.
+### Умная система памяти (Smart Memory v2)
+
+Система памяти, вдохновлённая [agentmemory](https://github.com/rohitg00/agentmemory) (18.7K ★) и кривой забывания Эббингауза:
+
+- **Семантический поиск** — находит observations по смыслу, а не только по ключевым словам. При запросе «где чинили авторизацию» находит observation «fixed JWT token validation in auth middleware»
+  - Движок: `sentence-transformers` (all-MiniLM-L6-v2, 384 dim, локально без API)
+  - Хранение: numpy BLOB в SQLite / PostgreSQL (без pgvector dependency)
+  - Комбинирование: FTS5 + vector search через **Reciprocal Rank Fusion** (RRF, k=60)
+
+- **Smart Context Assembly** — при каждом запросе инжектит в system prompt не просто последние N observations, а семантически релевантные факты из прошлых сессий
+  - Session summaries (последние 3) — всегда
+  - Последние observations (24h) — всегда
+  - Семантически релевантные факты — если query передан и модель загружена
+
+- **Memory Decay (кривая Эббингауза)** — плавное затухание памяти вместо жёсткого порога
+  - Score = recency_factor × access_boost
+  - Часто используемые факты живут дольше, редкие затухают
+  - Фоновый eviction loop (раз в час)
+  - Hard floor: 180 дней — защита от бесконечного роста
+
+- **Observations** — сжатые записи о действиях агента (tool use, ошибки, решения, инсайты). LLM-компрессия в фоне, privacy tag stripping, 3-layer progressive search
+
+- **Session Summaries** — AI-сгенерированные резюме сессий при закрытии WebSocket
+
+### Ядро агента
+
+- **Умный Роутер (Money Saver)** — единая точка выбора модели. Учитывает: явный выбор пользователя, приоритетные модели проекта, `fallback_chain`, рекомендацию `intelligent_router` (классификация задачи), список проверенных моделей. Фоновое revalidation каждые 5 минут.
+- **Циклический Агент** — tool-calling цикл до 10 итераций. Антизалипание: 3 одинаковых tool_call подряд → прерывание цикла.
+- **Двойной режим** — Tool Calling (Claude, GPT, Gemini) + Prompt Injection (fallback для Qwen, Llama, Ollama)
+- **Автономный режим** — AI итеративно выполняет задачи без участия пользователя
+
+### Инструменты и контекст
+
+- **Repo Map** — сканирует структуру проекта, извлекает сигнатуры функций/классов. MD5-кеш инвалидации.
+- **Идеи-Инъектор** — анализирует GitHub-репозитории через API: скачивает ключевые файлы, создаёт ИИ-выжимку архитектуры
+- **Context Compressor** — LLM-сжатие истории + regex fallback. Не-деструктивная архивация (`archived=True`, данные сохраняются для поиска)
+- **69 скиллов** — готовые пресеты для ppt, pdf, docx, xlsx, market-research, UI/UX, charts и др. Авто-выбор моделью по контексту
+
+### Безопасность и инфраструктура
+
+- **Киборг-режим** — блокировка критических команд (rm -rf, DROP TABLE) с подтверждением и git checkpoint
+- **Постоянная БД** — PostgreSQL (Supabase/Neon/Render) + SQLite fallback. 15 таблиц, async SQLAlchemy.
+- **REST API** — 120+ эндпоинтов под `/api/v1` для внешней интеграции
+- **WebSocket** — RFC 6455 PING frames keepalive, восстановление PAT-токенов из БД
 
 ---
 
@@ -26,15 +61,12 @@
 
 | Компонент | Технология |
 |-----------|-----------|
-| Веб-сервер | FastAPI + Uvicorn |
-| ИИ-оболочка | LiteLLM (Anthropic, OpenAI, Grok, Cerebras (бесплатно), DeepSeek, Gemini, Qwen, Abacus, Ollama) |
-| База данных | SQLite + SQLAlchemy (async) |
-| HTTP-клиент | aiohttp |
-| Терминал | asyncio.create_subprocess_shell |
-| Валидация | Pydantic v2 |
-| UI | HTML + CSS + Vanilla JS |
-| Markdown | marked.js |
-| Подсветка кода | highlight.js |
+| Веб-сервер | FastAPI + Uvicorn (async) |
+| ИИ-оболочка | LiteLLM (Anthropic, OpenAI, Grok, Cerebras, DeepSeek, Gemini, Qwen, Abacus, Ollama) |
+| Память | sentence-transformers + numpy + FTS5 |
+| База данных | PostgreSQL (asyncpg) / SQLite (aiosqlite) + SQLAlchemy |
+| HTTP-клиент | aiohttp + httpx |
+| UI | HTML + CSS + Vanilla JS, marked.js, highlight.js |
 
 ---
 
@@ -44,38 +76,32 @@
 
 - Python 3.10+
 - Windows 10 / macOS / Linux
-- API ключи [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), [Groq](https://console.groq.com/) (бесплатно), [Cerebras](https://cloud.cerebras.ai/) (бесплатно), или другие поддерживаемые провайдеры
+- API ключи: [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), [Groq](https://console.groq.com/) (бесплатно), [Cerebras](https://cloud.cerebras.ai/) (бесплатно), или другие
 
 ### Шаги
 
 ```bash
-# 1. Клонируйте репозиторий
 git clone https://github.com/ShkodnikAI/Fosved-coder.git
 cd Fosved-coder
-
-# 2. Создайте виртуальное окружение
 python -m venv venv
-
-# 3. Активируйте (Windows PowerShell)
-.\venv\Scripts\Activate.ps1
-
-# 3. Активируйте (macOS / Linux)
-source venv/bin/activate
-
-# 4. Установите зависимости
+source venv/bin/activate  # Windows: .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
-# 5. Создайте файл конфигурации
-copy config.example.yaml config.yaml
-
-# 6. Отредактируйте config.yaml — настройте API ключи (через UI или переменные окружения)
-#    Минимальный набор: хотя бы один API ключ (Groq и Cerebras — бесплатны!)
-
-# 7. Запустите
+cp config.example.yaml config.yaml
+# Настройте API ключи в config.yaml или через UI
 python run.py
 ```
 
 Откройте [http://localhost:8000](http://localhost:8000) в браузере.
+
+### Переменные окружения (опционально)
+
+| Переменная | Описание | Default |
+|-----------|----------|---------|
+| `DATABASE_URL` | PostgreSQL/SQLite URL | SQLite |
+| `EMBEDDING_MODEL` | Модель для эмбеддингов | `all-MiniLM-L6-v2` |
+| `EMBEDDING_CACHE_DIR` | Кеш модели | `data/embeddings` |
+| `WS_PING_INTERVAL` | WebSocket PING интервал (сек) | `15` |
+| `WS_PING_TIMEOUT` | WebSocket PING таймаут (сек) | `10` |
 
 ---
 
@@ -83,51 +109,44 @@ python run.py
 
 ```
 Fosved-coder/
-├── run.py                     # Точка входа (Uvicorn) — 4 WS/HTTP эндпоинта верхнего уровня
-├── config.yaml                # Конфигурация (НЕ попадает в git!)
-├── config.example.yaml        # Шаблон конфигурации
-├── requirements.txt           # Зависимости Python
-├── PROMPT.md                  # Мастер-промпт проекта
-├── V2_PLAN.md                 # План реализации v2
+├── run.py                     # Точка входа (Uvicorn) + WebSocket handler
+├── config.yaml                # Конфигурация (не в git)
+├── requirements.txt           # Python зависимости
 │
-├── core/                      # Бизнес-логика (15 модулей)
-│   ├── agent.py               # LLM-цикл, tool-calling, fallback между моделями
-│   ├── intelligent_router.py  # Советник по выбору модели (лидер для сложных задач)
-│   ├── keys_manager.py        # API-ключи, валидация, статусы, фоновое revalidation
-│   ├── memory.py              # SQLAlchemy модели + CRUD, async engine
-│   ├── executor.py            # Async shell-команды, киборг-режим
+├── core/                      # Бизнес-логика (17 модулей)
+│   ├── agent.py               # LLM-цикл, tool-calling, fallback
+│   ├── intelligent_router.py  # Советник по выбору модели
+│   ├── keys_manager.py        # API-ключи, валидация, revalidation
+│   ├── memory.py              # SQLAlchemy модели + CRUD (15 таблиц)
+│   ├── memory_embeddings.py   # Векторные эмбеддинги + RRF fusion
+│   ├── memory_decay.py        # Затухание памяти (Эббингауз) + eviction
+│   ├── observation_manager.py # Observations, search, context assembly
+│   ├── context_compressor.py  # LLM + regex сжатие истории
 │   ├── context_manager.py     # Repo Map (сканирование, кеш)
-│   ├── context_compressor.py  # Сжатие истории сообщений
-│   ├── ideas_injector.py      # GitHub API, скачивание, ИИ-анализ
+│   ├── executor.py            # Async shell-команды, киборг-режим
+│   ├── response_parser.py     # Парсинг ответа модели
 │   ├── prompt_injector.py     # Инъекция скиллов и контекста
-│   ├── response_parser.py     # Парсинг ответа модели (file/command/diff блоки)
-│   ├── auto_agent.py          # Автономный режим (без участия пользователя)
-│   ├── code_tester.py         # Запуск тестов сгенерированного кода
-│   ├── apk_builder.py         # Сборка APK для мобильных проектов
-│   ├── action_logger.py       # Структурированный лог действий
-│   └── observation_manager.py # Наблюдения за процессом
+│   ├── ideas_injector.py      # GitHub API анализ
+│   ├── auto_agent.py          # Автономный режим
+│   ├── action_logger.py       # Структурированный лог
+│   ├── code_tester.py         # Запуск тестов
+│   └── apk_builder.py         # Сборка APK
 │
-├── api/                       # REST API
-│   └── endpoints.py           # 120+ эндпоинтов под /api/v1
+├── api/                       # REST API (120+ эндпоинтов)
+│   └── endpoints.py
 │
 ├── ui/                        # Веб-интерфейс
 │   ├── static/style.css       # Тёмная тема VS Code
-│   └── templates/index.html   # Верстка + WebSocket + JS
+│   └── templates/index.html   # SPA + WebSocket + JS
 │
-├── skills/                    # 69 скиллов (18 МБ): ppt, pdf, docx, xlsx, ui-ux и др.
-│
-├── projects/                  # Рабочие папки пользователей (содержимое в .gitignore)
-│
-├── data/                      # Runtime: SQLite БД, логи (целиком в .gitignore)
-│
-└── audit-trace/               # Отчёты и бэкапы аудитов (в .gitignore)
+├── skills/                    # 69 скиллов (ppt, pdf, docx, xlsx, ui-ux)
+├── projects/                  # Рабочие папки пользователей
+└── data/                      # SQLite БД, логи, кеш эмбеддингов
 ```
 
 ---
 
 ## Конфигурация
-
-Редактируйте `config.yaml` или используйте UI для добавления API-ключей:
 
 ```yaml
 llm:
@@ -143,16 +162,11 @@ llm:
     - "groq/llama-3.3-70b-versatile"              # Groq (бесплатно)
 
 system:
-  db_url: "sqlite+aiosqlite:///fosved_coder.db"
+  db_url: "sqlite+aiosqlite:///data/fosved_coder.db"
   projects_dir: "./projects"
-  ideas_cache_dir: "./.cache/ideas"
-  max_iterations: 3
-  max_context_files: 20
 ```
 
 ### Поддерживаемые провайдеры
-
-Через LiteLLM поддерживаются любые провайдеры. Бесплатные: Groq и Cerebras.
 
 | Провайдер | Статус | Пример модели |
 |-----------|--------|--------------|
@@ -164,44 +178,51 @@ system:
 | Qwen (Alibaba) | Платный | `qwen3-235b-a22b` |
 | Z.AI (GLM) | Платный | `glm-5.1` |
 | Kimi (Moonshot) | Платный | `kimi-k2-0711` |
-| Abacus.AI (RouteLLM) | Платный | `route-llm` (65+ моделей) |
+| Abacus.AI | Платный | `route-llm` (65+ моделей) |
 | **Groq** | **Бесплатно** | `llama-3.3-70b-versatile` |
 | **Cerebras** | **Бесплатно** | `llama-4-scout-17b-16e-instruct` |
-| Ollama (local) | Локальный | `llama3` и другие |
+| Ollama | Локальный | `llama3` и другие |
 
 ---
 
-## Использование
+## Архитектура памяти
 
-### Чат с ИИ
-
-Просто пишите задачи в чат — ИИ отвечает с поддержкой Markdown и подсветкой кода.
-
-### Slash-команды
-
-| Команда | Описание |
-|---------|---------|
-| `/terminal <cmd>` | Выполнить shell-команду |
-| `/approve <id>` | Подтвердить критическую команду |
-| `/reject <id>` | Отклонить критическую команду |
-| `/git_pull` | git pull в текущем проекте |
-| `/git_push` | git push в текущем проекте |
-| `/ideas <url>` | Проанализировать GitHub-репозиторий |
-| `/repo_map` | Показать структуру проекта |
-| `/clear` | Очистить историю чата |
-| `/help` | Справка |
-
-### Управление проектами
-
-- Нажмите **+** в левой панели для создания нового проекта
-- Клик по проекту — переключение контекста
-- Каждый проект имеет отдельную историю чата и Repo Map
-
-### Идеи (База знаний)
-
-- Вставьте ссылку на GitHub-репозиторий в поле ввода
-- Нажмите **OK** — ИИ проанализирует структуру и архитектуру
-- Результат сохраняется в БД и используется как контекст
+```
+User Query
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│         Smart Context Assembly                │
+│                                               │
+│  1. Session Summaries (последние 3)           │
+│  2. Recent Observations (24h)                 │
+│  3. Semantic Search (query → embedding →      │
+│     cosine similarity → top-5 relevant facts)  │
+│                                               │
+│  Output → injected into system prompt         │
+└──────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│         Hybrid Search (search_observations)    │
+│                                               │
+│  FTS5 (keywords) ──┐                          │
+│                     ├─ RRF (k=60) → ranked list │
+│  Vector (semantic) ─┘                          │
+│                                               │
+│  decay_score = e^(-λ·days) × (1+ln(acc+1))   │
+└──────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│         Background Tasks                      │
+│                                               │
+│  - Embedding computation (per observation)     │
+│  - LLM compression (per observation)           │
+│  - Session summary (on WS disconnect)          │
+│  - Decay eviction loop (ежечасно)              │
+└──────────────────────────────────────────────┘
+```
 
 ---
 
@@ -209,46 +230,35 @@ system:
 
 Базовый URL: `http://localhost:8000/api/v1/`
 
-Реализовано **120+ эндпоинтов**, сгруппированных по доменам:
-
 | Домен | Префикс | Примеры |
 |-------|---------|--------|
-| Проекты | `/projects` | список, создание, удаление, переименование, регенерация ключа |
-| Ключи и провайдеры | `/keys` | добавление, удаление, переключение, валидация |
-| Модели | `/models` | список, probed, валидация, локальные, custom, abacus refresh |
-| Скиллы | `/skills` | список, активация для проекта |
-| Идеи (GitHub) | `/ideas` | анализ репо, список, удаление |
-| Драфты | `/drafts` | CRUD, генерация промпта, конвертация в проект |
-| Анкета | `/questionnaire`, `/questionnaires` | динамические вопросы по проекту |
+| Проекты | `/projects` | CRUD, переименование, регенерация ключа |
+| Ключи | `/keys` | добавление, удаление, валидация |
+| Модели | `/models` | список, probe, local, abacus |
+| Скиллы | `/skills` | список, активация |
+| Идеи | `/ideas` | анализ GitHub-репо |
+| Память | `/memory` | observations, поиск, статистика |
+| Драфты | `/drafts` | CRUD, генерация промпта |
 | Чат | `/chat` | история, очистка |
-| Hub (ИИ-Офис) | `/hub` | приём задач от внешних агентов |
-| Архивы | `/archives` | архивирование завершённых проектов |
-| Шаблоны | `/templates` | шаблоны кода для генерации |
-| Память | `/memory` | observation-логи, наблюдения |
-| Логи | `/logs` | action-логи, ошибки |
-| Статистика | `/stats`, `/status`, `/health`, `/config` | системная информация |
-| Probe | `/probe-models`, `/probed-models` | тихое зондирование моделей |
-| Webhook | `/webhook` | внешние интеграции |
+| Статистика | `/stats`, `/health` | системная информация |
 
-Точечные действия: `POST /upload` (загрузка файлов), `WS /ws` (основной WebSocket), `WS /ws/executor` (исполнение команд).
-
-Полный список эндпоинтов — в `api/endpoints.py` или через автодокументацию Swagger: `http://localhost:8000/docs`.
+Полная документация: `http://localhost:8000/docs`
 
 ---
 
-## Киборг-режим (Безопасность)
+## Slash-команды
 
-При обнаружении опасных команд:
-- `rm -rf`, `DROP TABLE`, `FORMAT C:`, `shutdown` и др.
-- Звуковой сигнал (winsound на Windows)
-- Команда блокируется до подтверждения
-- Автоматический git checkpoint перед выполнением
-
----
-
-## Разработка
-
-Подробное описание архитектуры и логики модулей — в файле [PROMPT.md](PROMPT.md).
+| Команда | Описание |
+|---------|---------|
+| `/terminal <cmd>` | Выполнить shell-команду |
+| `/git_pull` | git pull |
+| `/git_push` | git push |
+| `/quick_push` | git add -A + commit + push |
+| `/git_clone <url>` | Клонировать GitHub-репозиторий |
+| `/repo_map` | Показать структуру проекта |
+| `/ideas <url>` | Проанализировать GitHub-репозиторий |
+| `/clear` | Очистить историю чата |
+| `/help` | Справка |
 
 ---
 
