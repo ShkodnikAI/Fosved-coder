@@ -1,5 +1,5 @@
 """
-Fosved Coder v2.0 — Keys Manager
+MindCoder v2.0 — Keys Manager
 Управление API-ключами, валидация, провайдеры, бесплатные модели, локальные модели.
 """
 import os

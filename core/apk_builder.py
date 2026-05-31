@@ -1,5 +1,5 @@
 """
-Fosved Coder — APK Builder Module
+MindCoder — APK Builder Module
 Сборка .apk в зависимости от шаблона проекта.
 Поддержка: React, Next.js, Expo, FastAPI, Flask, Python CLI.
 Автоматическая генерация иконки через AI.

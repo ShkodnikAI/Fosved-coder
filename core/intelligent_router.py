@@ -1,5 +1,5 @@
 """
-Fosved Coder V2.0 — Intelligent Router (Task 5)
+MindCoder V2.0 — Intelligent Router (Task 5)
 Интеллектуальный маршрутизатор: классифицирует задачи пользователя
 и направляет их на подходящую модель (бесплатная или лидер).
 

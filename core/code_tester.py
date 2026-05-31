@@ -1,5 +1,5 @@
 """
-Fosved Coder v2.0 — Code Tester & Validator
+MindCoder v2.0 — Code Tester & Validator
 Автоматическая проверка и тестирование кода проекта.
 
 Возможности:

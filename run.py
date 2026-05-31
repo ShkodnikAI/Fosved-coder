@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
             safe_url = f"{parts[0]}://{user}:****@{auth_part[1]}"
 
     print(f"\n  {'=' * 44}")
-    print(f"  Fosved Coder v2.0 — Запуск")
+    print(f"  MindCoder v2.0 — Запуск")
     print(f"  БД: {'PostgreSQL (постоянная)' if IS_POSTGRES else 'SQLite (локальная)'}")
     if IS_POSTGRES:
         print(f"  URL: {safe_url}")
@@ -160,7 +160,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="Fosved Coder", version="2.0", lifespan=lifespan)
+app = FastAPI(title="MindCoder", version="2.0", lifespan=lifespan)
 
 # Include REST API router
 app.include_router(api_router)
@@ -1059,7 +1059,7 @@ async def websocket_executor(websocket: WebSocket):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print("  +========================================+")
-    print("  |   Fosved Coder v2.0                  |")
+    print("  |   MindCoder v2.0                  |")
     print(f"  |   http://0.0.0.0:{port:<21}|")
     print("  +========================================+")
     uvicorn.run(

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Fosved Coder V2.0</title>
+    <title>MindCoder V2.0</title>
     <link rel="stylesheet" href="/static/style.css">
     <!-- Внешние библиотеки (CDN) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -12,7 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style>
     /* ═══════════════════════════════════════════════════════════════
-       FOSVED CODER V2.0 — Дополнительные стили для двухэкранной архитектуры
+       MINDCODER V2.0 — Дополнительные стили для двухэкранной архитектуры
        ═══════════════════════════════════════════════════════ */
 
     /* Экраны: только один видимый за раз */
@@ -359,7 +359,7 @@
      ЭКРАН ЗАГРУЗКИ
      ═══════════════════════════════════════════════════════ -->
 <div id="loading-screen">
-    <div class="logo">FOSVED CODER V2.0</div>
+    <div class="logo">MINDCODER V2.0</div>
     <div class="sub" id="loading-text">Загрузка...</div>
     <div class="bar-track"><div class="bar-fill" id="loading-bar"></div></div>
 </div>
@@ -381,7 +381,7 @@
      ═══════════════════════════════════════════════════════ -->
 <header class="header">
     <div class="header-left">
-        <span class="header-logo">FOSVED CODER V2.0</span>
+        <span class="header-logo">MINDCODER V2.0</span>
         <div style="width:1px;height:20px;background:var(--border);margin:0 4px;"></div>
         <!-- Кнопки навигации между экранами -->
         <button class="nav-btn active" id="nav-main" onclick="switchScreen('main')">🏠 Главная</button>
@@ -975,7 +975,7 @@
 
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// FOSVED CODER V2.0 — ПОЛНЫЙ JS-МОДУЛЬ
+// MINDCODER V2.0 — ПОЛНЫЙ JS-МОДУЛЬ
 // Двухэкранная архитектура: Главная (Hub) + Проект
 // ═══════════════════════════════════════════════════════════════════
 
@@ -992,7 +992,7 @@ let currentHubTypingDiv = null;
 let currentProjectId = null;
 let allModels = [];
 let allProjects = [];
-let activeModelId = localStorage.getItem('fosved_active_model') || null;
+let activeModelId = localStorage.getItem('mc_active_model') || null;
 let attachedFile = null;           // Прикреплённый файл (проектный чат)
 let hubAttachedFile = null;        // Прикреплённый файл (hub-чат)
 let openPanels = new Set();
@@ -1005,11 +1005,11 @@ let lastHubSentPayload = null;
 let autoModeRunning = false;
 let priorityModels = [];
 // Восстановить приоритеты из localStorage
-try { const saved = localStorage.getItem('fosved-priority-models'); if (saved) priorityModels = JSON.parse(saved); } catch(e) {}
+try { const saved = localStorage.getItem('mc-priority-models'); if (saved) priorityModels = JSON.parse(saved); } catch(e) {}
 // ═══ Явно проверенные модели (только через ручной опрос из UI) ═══
 let explicitlyProbedIds = new Set();
-try { const s = localStorage.getItem('fosved-probed-ids'); if (s) explicitlyProbedIds = new Set(JSON.parse(s)||[]); } catch(e) {}
-function _saveProbedIds() { try { localStorage.setItem('fosved-probed-ids', JSON.stringify([...explicitlyProbedIds])); } catch(e) {} }
+try { const s = localStorage.getItem('mc-probed-ids'); if (s) explicitlyProbedIds = new Set(JSON.parse(s)||[]); } catch(e) {}
+function _saveProbedIds() { try { localStorage.setItem('mc-probed-ids', JSON.stringify([...explicitlyProbedIds])); } catch(e) {} }
 let currentLogFilter = "all";
 let autoLogCount = 0;
 let autoLogPanelVisible = true;
@@ -1025,7 +1025,7 @@ let hubWaitingTaskId = null;  // task_id of the current hub generation
 function generateTaskId() { return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 6); }
 let diffViewMode = "unified";
 let currentFileViewPath = null;
-let activeSkills = new Set(JSON.parse(localStorage.getItem('fosved_active_skills') || '[]'));
+let activeSkills = new Set(JSON.parse(localStorage.getItem('mc-active-skills') || '[]'));
 let currentScreen = "main";        // "main" или "project"
 let tokenCount = 0;                // Счётчик токенов
 // Маршрутизация streaming-ответов: "hub" или "project"
@@ -1239,11 +1239,11 @@ function setupResize(handleId, panelId, storageKey, minW, maxW) {
     handle.addEventListener("dblclick", () => { panel.style.width = ''; localStorage.removeItem(storageKey); });
 }
 // Инициализация ручек для обоих экранов
-setupResize("hub-left-resize-handle", "hub-left-panel", "fosved-hub-left-w", 140, 400);
-setupResize("hub-right-resize-handle", "hub-right-panel", "fosved-hub-right-w", 140, 400);
+setupResize("hub-left-resize-handle", "hub-left-panel", "mc-hub-left-w", 140, 400);
+setupResize("hub-right-resize-handle", "hub-right-panel", "mc-hub-right-w", 140, 400);
 
-setupResize("proj-left-resize-handle", "project-left-panel", "fosved-proj-left-w", 140, 400);
-setupResize("proj-right-resize-handle", "project-right-panel", "fosved-proj-right-w", 140, 400);
+setupResize("proj-left-resize-handle", "project-left-panel", "mc-proj-left-w", 140, 400);
+setupResize("proj-right-resize-handle", "project-right-panel", "mc-proj-right-w", 140, 400);
 
 
 // ═══════════════════════════════════════════════════════
@@ -1840,8 +1840,8 @@ let wsIsStable = false;
 let wsStableTimer = null;
 let wsPingTimer = null;
 let wsMessageQueue = [];
-try { const s = localStorage.getItem("fosved-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
-function persistQ() { try { localStorage.setItem("fosved-ws-q", JSON.stringify(wsMessageQueue.slice(-50))); } catch(e) {} }
+try { const s = localStorage.getItem("mc-ws-q"); if (s) wsMessageQueue = JSON.parse(s)||[]; } catch(e) {}
+function persistQ() { try { localStorage.setItem("mc-ws-q", JSON.stringify(wsMessageQueue.slice(-50))); } catch(e) {} }
 
 function wsSend(data) {
     const msg = typeof data === 'string' ? data : JSON.stringify(data);
@@ -2290,12 +2290,12 @@ function _showProbedOnlyModels() {
     // Авто-выбираем: если activeModelId валиден — оставляем, иначе берём первую проверенную
     if (activeModelId && !explicitlyProbedIds.has(activeModelId)) {
         activeModelId = null;
-        localStorage.removeItem('fosved_active_model');
+        localStorage.removeItem('mc_active_model');
         updateInputPlaceholders();
     }
     if (!activeModelId && probed.length > 0) {
         activeModelId = probed[0].id;
-        localStorage.setItem('fosved_active_model', activeModelId);
+        localStorage.setItem('mc_active_model', activeModelId);
         updateInputPlaceholders();
         updateStatusBar();
     }
@@ -2565,7 +2565,7 @@ function cycleModelPriority(id) {
     renderModels();
     updateStatusBar();
     // Сохранить приоритеты
-    try { localStorage.setItem('fosved-priority-models', JSON.stringify(priorityModels)); } catch(e) {}
+    try { localStorage.setItem('mc-priority-models', JSON.stringify(priorityModels)); } catch(e) {}
 }
 
 async function loadModels() {
@@ -2584,7 +2584,7 @@ async function loadModels() {
 
 function selectModel(id) {
     activeModelId = id;
-    localStorage.setItem('fosved_active_model', id);
+    localStorage.setItem('mc_active_model', id);
     renderModels();
     updateStatusBar();
     updateInputPlaceholders();
@@ -3213,7 +3213,7 @@ function toggleSkill(id) {
 }
 
 function _saveActiveSkills() {
-    localStorage.setItem('fosved_active_skills', JSON.stringify([...activeSkills]));
+    localStorage.setItem('mc-active-skills', JSON.stringify([...activeSkills]));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -3298,7 +3298,7 @@ function saveAllLogs() {
     const text = Array.from(entries).map(e=>e.textContent).join('\n');
     const blob = new Blob([text], {type:'text/plain'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = 'fosved-logs.txt'; a.click();
+    a.download = 'mc-logs.txt'; a.click();
 }
 
 async function loadServerLogs(filter) {
@@ -4153,7 +4153,7 @@ async function showStats() {
 // НАСТРОЙКИ
 // ═══════════════════════════════════════════════════════
 function showSettings() {
-    const body = `<div class="form-group"><label>Версия</label><div style="color:var(--text-primary);">Fosved Coder v2.0</div></div>
+    const body = `<div class="form-group"><label>Версия</label><div style="color:var(--text-primary);">MindCoder v2.0</div></div>
         <div class="form-group"><label>База данных</label><div style="color:var(--text-primary);">SQLite (локальная)</div></div>
         <div class="form-group"><label>Тема</label><div style="color:var(--text-primary);">VS Code Dark</div></div>`;
     openGenericModal("⚙️ Настройки", body);

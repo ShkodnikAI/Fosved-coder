@@ -1,5 +1,5 @@
 """
-Automatic Agent for Fosved Coder v2.0
+Automatic Agent for MindCoder v2.0
 Автоматический режим — ИИ сам кодит по плану, выполняет команды,
 пушит в GitHub и обращается к пользователю только при ошибках.
 
@@ -54,7 +54,7 @@ async def send_auto_log(websocket, content: str, level: str = "info", step: int 
 
 
 # System prompt for plan generation
-AUTO_PLAN_PROMPT = """Ты автоматический агент разработки Fosved Coder.
+AUTO_PLAN_PROMPT = """Ты автоматический агент разработки MindCoder.
 Твоя задача — создать ПОДРОБНЫЙ пошаговый план выполнения задачи пользователя.
 
 Ты ДОЛЖЕН ответить ТОЛЬКО в формате JSON (без markdown, без ```):
@@ -84,7 +84,7 @@ AUTO_PLAN_PROMPT = """Ты автоматический агент разраб�
 """
 
 # System prompt for auto execution (explains context)
-AUTO_EXEC_PROMPT = """Ты автоматический агент разработки Fosved Coder v2.0.
+AUTO_EXEC_PROMPT = """Ты автоматический агент разработки MindCoder v2.0.
 Ты работаешь в автоматическом режиме — пользователь дал задачу, ты выполняешь её полностью.
 
 Контекст проекта:

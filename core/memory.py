@@ -78,7 +78,7 @@ def _resolve_db_url() -> tuple[str, bool]:
     # 3. Fallback: SQLite (local development)
     os.makedirs("data", exist_ok=True)
     print("  [db] DATABASE_URL не задан — используется SQLite (локальный режим)")
-    return "sqlite+aiosqlite:///data/fosved_coder.db", False
+    return "sqlite+aiosqlite:///data/mindcoder.db", False
 
 DB_URL, IS_POSTGRES = _resolve_db_url()
 
@@ -1234,7 +1234,7 @@ async def migrate_db():
                 pass
     else:
         import sqlite3
-        db_file = DB_URL.split(":///")[-1] if ":///" in DB_URL else "fosved_coder.db"
+        db_file = DB_URL.split(":///")[-1] if ":///" in DB_URL else "mindcoder.db"
         try:
             conn = sqlite3.connect(db_file)
             cursor = conn.cursor()
@@ -2066,13 +2066,13 @@ async def get_full_stats() -> dict:
         
         # --- Пути хранения ---
         projects_dir = CONFIG.get("system", {}).get("projects_dir", "projects")
-        db_path = CONFIG.get("database", {}).get("url", "sqlite:///data/fosved.db")
+        db_path = CONFIG.get("database", {}).get("url", "sqlite:///data/mindcoder.db")
         
         # Размер БД
         db_size_mb = 0
         try:
             if "sqlite" in db_path:
-                db_file = db_path.split(":///")[-1] if ":///" in db_path else "data/fosved.db"
+                db_file = db_path.split(":///")[-1] if ":///" in db_path else "data/mindcoder.db"
                 if _os.path.exists(db_file):
                     db_size_mb = round(_os.path.getsize(db_file) / (1024 * 1024), 2)
         except Exception:

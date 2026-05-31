@@ -1,5 +1,5 @@
 """
-Fosved Coder v2.0 — Context Compressor
+MindCoder v2.0 — Context Compressor
 Сжатие контекста для больших проектов: LLM-based + regex fallback.
 """
 import re

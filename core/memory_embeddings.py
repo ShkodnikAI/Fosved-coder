@@ -1,5 +1,5 @@
 """
-Fosved Coder v2.0 — Embedding Engine для семантического поиска по observations.
+MindCoder v2.0 — Embedding Engine для семантического поиска по observations.
 
 Архитектура:
   - Lazy-load модели sentence-transformers (all-MiniLM-L6-v2, 384 dim)

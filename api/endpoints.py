@@ -1,5 +1,5 @@
 """
-Fosved Coder v2.0 — REST API Endpoints
+MindCoder v2.0 — REST API Endpoints
 Включает управление ключами, моделями, проектами, локальные модели, кастомные модели.
 Поиск файлов, гит, шаблоны, пакеты, архив.
 """
@@ -259,7 +259,7 @@ async def api_root():
     """Корень API — список доступных endpoints."""
     _api("GET", "/api/v1/")
     return {
-        "name": "Fosved Coder API",
+        "name": "MindCoder API",
         "version": "2.0",
         "docs": "/api/v1/health",
         "endpoints": {
@@ -1914,13 +1914,13 @@ const styles = StyleSheet.create({{
     "scheme": "{name}".toLowerCase().replace(/\\s+/g, "-"),
     "ios": {{
       "supportsTablet": true,
-      "bundleIdentifier": "com.fosved.{name}".toLowerCase().replace(/\\s+/g, "")
+      "bundleIdentifier": "com.mindcoder.{name}".toLowerCase().replace(/\\s+/g, "")
     }},
     "android": {{
       "adaptiveIcon": {{
         "backgroundColor": "#1a1a1a"
       }},
-      "package": "com.fosved.{name}".toLowerCase().replace(/\\s+/g, "")
+      "package": "com.mindcoder.{name}".toLowerCase().replace(/\\s+/g, "")
     }},
     "web": {{
       "bundler": "metro",
@@ -2780,7 +2780,7 @@ async def debug_analyze():
 
     # Отправляем в AI для анализа
     analysis_prompt = f"""Ты — эксперт по отладке web-приложений (FastAPI + WebSocket + vanilla JS).
-Проанализируй лог debug-сессии приложения Fosved Coder и найди все баги, ошибки и проблемные места.
+Проанализируй лог debug-сессии приложения MindCoder и найди все баги, ошибки и проблемные места.
 
 {summary_text}
 
@@ -2944,7 +2944,7 @@ async def debug_push_to_github():
         gh_enabled = keys_manager.github_enabled
 
         if gh_token and gh_enabled:
-            # Ищем репозиторий (проект с .git или корень Fosved Coder)
+            # Ищем репозиторий (проект с .git или корень MindCoder)
             from core.memory import get_all_projects
             projects = await get_all_projects()
             repo_path = None

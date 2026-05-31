@@ -1,4 +1,4 @@
-# Fosved Coder — пример конфигурации.
+# MindCoder — пример конфигурации.
 # Скопируй в config.yaml (он в .gitignore) и заполни под себя.
 # API-ключи можно задавать через UI (приоритет) или через .env (см. .env.example).
 
@@ -27,10 +27,10 @@ llm:
 
 system:
   # URL базы данных. Поддерживается:
-  #   sqlite+aiosqlite:///data/fosved_coder.db (по умолчанию, локально)
+  #   sqlite+aiosqlite:///data/mindcoder.db (по умолчанию, локально)
   #   postgresql+asyncpg://user:pass@host:5432/dbname (продакшен)
   # Также можно переопределить через переменную окружения DATABASE_URL.
-  db_url: "sqlite+aiosqlite:///data/fosved_coder.db"
+  db_url: "sqlite+aiosqlite:///data/mindcoder.db"
 
   # Папка с рабочими проектами пользователя. Содержимое в .gitignore.
   projects_dir: "./projects"

@@ -1,6 +1,6 @@
-# Fosved Coder v2.0
+# MindCoder
 
-AI-ассистент для разработки с персистентной памятью. Объединяет лучшее из **Aider** (Repo Map), **Claude Code** (автономные агенты), **agentmemory** (4-уровневая память) и **Cursor** (UI), с уникальными фичами, которых нет ни у одного инструмента.
+An AI-powered coding assistant with persistent memory. Combines the best ideas from **Aider** (Repo Map), **Claude Code** (autonomous agents), **agentmemory** (4-level memory system), and **Cursor** (IDE-like UI) into a single self-hosted application.
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)
@@ -8,183 +8,195 @@ AI-ассистент для разработки с персистентной 
 
 ---
 
-## Ключевые возможности
+## Features
 
-### Умная система памяти (Smart Memory v2)
+### Smart Memory System
 
-Система памяти, вдохновлённая [agentmemory](https://github.com/rohitg00/agentmemory) (18.7K ★) и кривой забывания Эббингауза:
+A memory system inspired by [agentmemory](https://github.com/rohitg00/agentmemory) and the Ebbinghaus forgetting curve:
 
-- **Семантический поиск** — находит observations по смыслу, а не только по ключевым словам. При запросе «где чинили авторизацию» находит observation «fixed JWT token validation in auth middleware»
-  - Движок: `sentence-transformers` (all-MiniLM-L6-v2, 384 dim, локально без API)
-  - Хранение: numpy BLOB в SQLite / PostgreSQL (без pgvector dependency)
-  - Комбинирование: FTS5 + vector search через **Reciprocal Rank Fusion** (RRF, k=60)
+- **Semantic Search** — finds observations by meaning, not just keywords. Query "where did we fix auth" finds "fixed JWT token validation in auth middleware"
+  - Engine: `sentence-transformers` (all-MiniLM-L6-v2, 384-dim, runs locally, no API needed)
+  - Storage: numpy BLOB in SQLite / PostgreSQL (no pgvector dependency)
+  - Combines: FTS5 + vector search via **Reciprocal Rank Fusion** (RRF, k=60)
 
-- **Smart Context Assembly** — при каждом запросе инжектит в system prompt не просто последние N observations, а семантически релевантные факты из прошлых сессий
-  - Session summaries (последние 3) — всегда
-  - Последние observations (24h) — всегда
-  - Семантически релевантные факты — если query передан и модель загружена
+- **Smart Context Assembly** — injects semantically relevant facts from past sessions into the system prompt on each request, instead of just the last N observations
 
-- **Memory Decay (кривая Эббингауза)** — плавное затухание памяти вместо жёсткого порога
-  - Score = recency_factor × access_boost
-  - Часто используемые факты живут дольше, редкие затухают
-  - Фоновый eviction loop (раз в час)
-  - Hard floor: 180 дней — защита от бесконечного роста
+- **Memory Decay (Ebbinghaus Curve)** — smooth memory decay instead of hard thresholds
+  - Score = recency_factor x access_boost
+  - Frequently used facts persist longer, rare ones decay faster
+  - Background eviction loop (hourly)
+  - Hard floor: 180 days
 
-- **Observations** — сжатые записи о действиях агента (tool use, ошибки, решения, инсайты). LLM-компрессия в фоне, privacy tag stripping, 3-layer progressive search
+- **Observations** — compressed records of agent actions (tool use, errors, decisions, insights). Background LLM compression, privacy tag stripping, 3-layer progressive search
 
-- **Session Summaries** — AI-сгенерированные резюме сессий при закрытии WebSocket
+- **Session Summaries** — AI-generated summaries created on WebSocket disconnect
 
-### Ядро агента
+### Agent Core
 
-- **Умный Роутер (Money Saver)** — единая точка выбора модели. Учитывает: явный выбор пользователя, приоритетные модели проекта, `fallback_chain`, рекомендацию `intelligent_router` (классификация задачи), список проверенных моделей. Фоновое revalidation каждые 5 минут.
-- **Циклический Агент** — tool-calling цикл до 10 итераций. Антизалипание: 3 одинаковых tool_call подряд → прерывание цикла.
-- **Двойной режим** — Tool Calling (Claude, GPT, Gemini) + Prompt Injection (fallback для Qwen, Llama, Ollama)
-- **Автономный режим** — AI итеративно выполняет задачи без участия пользователя
+- **Smart Router** — single model selection point considering: explicit user choice, project priority models, fallback chain, intelligent router recommendation (task classification), probed model list. Background revalidation every 5 minutes
+- **Cyclic Agent** — tool-calling loop up to 10 iterations. Anti-stuck: 3 identical tool_calls in a row triggers loop interruption
+- **Dual Mode** — Tool Calling (Claude, GPT, Gemini) + Prompt Injection (fallback for Qwen, Llama, Ollama)
+- **Autonomous Mode** — AI iteratively executes tasks without user interaction
 
-### Инструменты и контекст
+### Tools & Context
 
-- **Repo Map** — сканирует структуру проекта, извлекает сигнатуры функций/классов. MD5-кеш инвалидации.
-- **Идеи-Инъектор** — анализирует GitHub-репозитории через API: скачивает ключевые файлы, создаёт ИИ-выжимку архитектуры
-- **Context Compressor** — LLM-сжатие истории + regex fallback. Не-деструктивная архивация (`archived=True`, данные сохраняются для поиска)
-- **69 скиллов** — готовые пресеты для ppt, pdf, docx, xlsx, market-research, UI/UX, charts и др. Авто-выбор моделью по контексту
+- **Repo Map** — scans project structure, extracts function/class signatures. MD5 cache invalidation
+- **Idea Injector** — analyzes GitHub repositories via API: downloads key files, creates AI-generated architecture summaries
+- **Context Compressor** — LLM compression + regex fallback. Non-destructive archiving
+- **69 Built-in Skills** — ready-to-use presets for ppt, pdf, docx, xlsx, market research, UI/UX, charts, and more
 
-### Безопасность и инфраструктура
+### Security & Infrastructure
 
-- **Киборг-режим** — блокировка критических команд (rm -rf, DROP TABLE) с подтверждением и git checkpoint
-- **Постоянная БД** — PostgreSQL (Supabase/Neon/Render) + SQLite fallback. 15 таблиц, async SQLAlchemy.
-- **REST API** — 120+ эндпоинтов под `/api/v1` для внешней интеграции
-- **WebSocket** — RFC 6455 PING frames keepalive, восстановление PAT-токенов из БД
+- **Cyborg Mode** — blocks critical commands (rm -rf, DROP TABLE) with confirmation and git checkpoint
+- **Persistent Database** — PostgreSQL (Supabase/Neon/Render) + SQLite fallback. 18 tables, async SQLAlchemy
+- **REST API** — 120+ endpoints under `/api/v1` for external integrations
+- **WebSocket** — RFC 6455 PING frames keepalive, token recovery from database
 
 ---
 
-## Стек технологий
+## Quick Start
 
-| Компонент | Технология |
-|-----------|-----------|
-| Веб-сервер | FastAPI + Uvicorn (async) |
-| ИИ-оболочка | LiteLLM (Anthropic, OpenAI, Grok, Cerebras, DeepSeek, Gemini, Qwen, Ollama) |
-| Память | sentence-transformers + numpy + FTS5 |
-| База данных | PostgreSQL (asyncpg) / SQLite (aiosqlite) + SQLAlchemy |
-| HTTP-клиент | aiohttp + httpx |
-| UI | HTML + CSS + Vanilla JS, marked.js, highlight.js |
-
----
-
-## Установка
-
-### Требования
+### Prerequisites
 
 - Python 3.10+
-- Windows 10 / macOS / Linux
-- API ключи: [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), [Groq](https://console.groq.com/) (бесплатно), [Cerebras](https://cloud.cerebras.ai/) (бесплатно), или другие
+- At least one LLM API key: [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), [Groq](https://console.groq.com/) (free), [Cerebras](https://cloud.cerebras.ai/) (free), [Google Gemini](https://aistudio.google.com/apikey) (free tier), or others
+- Optional: PostgreSQL database (Supabase, Neon, Render) — falls back to SQLite if not configured
 
-### Шаги
+### Installation
 
 ```bash
-git clone https://github.com/ShkodnikAI/Fosved-coder.git
-cd Fosved-coder
+# Clone the repository
+git clone https://github.com/ShkodnikAI/MindCoder.git
+cd MindCoder
+
+# Create and activate virtual environment
 python -m venv venv
-source venv/bin/activate  # Windows: .\venv\Scripts\Activate.ps1
+source venv/bin/activate        # Linux/macOS
+# venv\Scripts\activate         # Windows (PowerShell)
+
+# Install dependencies
 pip install -r requirements.txt
+
+# (Optional) Copy config template
 cp config.example.yaml config.yaml
-# Настройте API ключи в config.yaml или через UI
+
+# Run the server
 python run.py
 ```
 
-Откройте [http://localhost:8000](http://localhost:8000) в браузере.
+Open [http://localhost:8000](http://localhost:8000) in your browser.
 
-### Переменные окружения (опционально)
+### First Launch
 
-| Переменная | Описание | Default |
-|-----------|----------|---------|
-| `DATABASE_URL` | PostgreSQL/SQLite URL | SQLite |
-| `EMBEDDING_MODEL` | Модель для эмбеддингов | `all-MiniLM-L6-v2` |
-| `EMBEDDING_CACHE_DIR` | Кеш модели | `data/embeddings` |
-| `WS_PING_INTERVAL` | WebSocket PING интервал (сек) | `15` |
-| `WS_PING_TIMEOUT` | WebSocket PING таймаут (сек) | `10` |
+1. Open the web UI at `http://localhost:8000`
+2. Go to **Settings** (gear icon) and add your API keys
+3. Click **Probe** to check which models are accessible
+4. Select a model and start chatting
+
+That's it. No database setup needed — SQLite is used by default.
+
+### Using PostgreSQL (Production)
+
+Set the `DATABASE_URL` environment variable:
+
+```bash
+export DATABASE_URL=postgresql://user:password@host:5432/dbname
+python run.py
+```
+
+Or add it to your `.env` file (see `.env.example`).
+
+### Docker
+
+```bash
+docker build -t mindcoder .
+docker run -p 8000:8000 \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e DATABASE_URL=postgresql://... \
+  mindcoder
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | HTTP server port | `8000` |
+| `DATABASE_URL` | PostgreSQL or SQLite URL | SQLite (`data/mindcoder.db`) |
+| `ANTROPIC_API_KEY` | Anthropic API key | — |
+| `OPENAI_API_KEY` | OpenAI API key | — |
+| `GEMINI_API_KEY` | Google Gemini API key | — |
+| `XAI_API_KEY` | xAI/Grok API key | — |
+| `DEEPSEEK_API_KEY` | DeepSeek API key | — |
+| `QWEN_API_KEY` | Qwen/Alibaba API key | — |
+| `CEREBRAS_API_KEY` | Cerebras API key (free) | — |
+| `GROQ_API_KEY` | Groq API key (free) | — |
+| `GITHUB_TOKEN` | GitHub PAT for git operations | — |
+
+All API keys are optional. You can also add them through the web UI after launch.
 
 ---
 
-## Структура проекта
+## Project Structure
 
 ```
-Fosved-coder/
-├── run.py                     # Точка входа (Uvicorn) + WebSocket handler
-├── config.yaml                # Конфигурация (не в git)
-├── requirements.txt           # Python зависимости
+MindCoder/
+├── run.py                     # Entry point (Uvicorn) + WebSocket handler
+├── config.example.yaml        # Configuration template
+├── .env.example                # Environment variables template
+├── requirements.txt           # Python dependencies
+├── Dockerfile                  # Docker setup
 │
-├── core/                      # Бизнес-логика (17 модулей)
-│   ├── agent.py               # LLM-цикл, tool-calling, fallback
-│   ├── intelligent_router.py  # Советник по выбору модели
-│   ├── keys_manager.py        # API-ключи, валидация, revalidation
-│   ├── memory.py              # SQLAlchemy модели + CRUD (15 таблиц)
-│   ├── memory_embeddings.py   # Векторные эмбеддинги + RRF fusion
-│   ├── memory_decay.py        # Затухание памяти (Эббингауз) + eviction
-│   ├── observation_manager.py # Observations, search, context assembly
-│   ├── context_compressor.py  # LLM + regex сжатие истории
-│   ├── context_manager.py     # Repo Map (сканирование, кеш)
-│   ├── executor.py            # Async shell-команды, киборг-режим
-│   ├── response_parser.py     # Парсинг ответа модели
-│   ├── prompt_injector.py     # Инъекция скиллов и контекста
-│   ├── ideas_injector.py      # GitHub API анализ
-│   ├── auto_agent.py          # Автономный режим
-│   ├── action_logger.py       # Структурированный лог
-│   ├── code_tester.py         # Запуск тестов
-│   └── apk_builder.py         # Сборка APK
+├── core/                       # Business logic (17 modules)
+│   ├── agent.py                # LLM loop, tool-calling, fallback
+│   ├── intelligent_router.py   # Model selection advisor
+│   ├── keys_manager.py         # API keys, validation, revalidation
+│   ├── memory.py               # SQLAlchemy models + CRUD (18 tables)
+│   ├── memory_embeddings.py    # Vector embeddings + RRF fusion
+│   ├── memory_decay.py         # Memory decay (Ebbinghaus) + eviction
+│   ├── observation_manager.py  # Observations, search, context assembly
+│   ├── context_compressor.py   # LLM + regex history compression
+│   ├── context_manager.py      # Repo Map (scanning, caching)
+│   ├── executor.py             # Async shell commands, cyborg mode
+│   ├── response_parser.py      # Model response parsing
+│   ├── prompt_injector.py      # Skill and context injection
+│   ├── ideas_injector.py       # GitHub API analysis
+│   ├── auto_agent.py           # Autonomous mode
+│   ├── action_logger.py        # Structured logging
+│   ├── code_tester.py          # Test runner
+│   └── apk_builder.py          # APK builder
 │
-├── api/                       # REST API (120+ эндпоинтов)
+├── api/                        # REST API (120+ endpoints)
 │   └── endpoints.py
 │
-├── ui/                        # Веб-интерфейс
-│   ├── static/style.css       # Тёмная тема VS Code
-│   └── templates/index.html   # SPA + WebSocket + JS
+├── ui/                         # Web interface
+│   ├── static/style.css        # VS Code dark theme
+│   └── templates/index.html    # SPA + WebSocket + JS
 │
-├── skills/                    # 69 скиллов (ppt, pdf, docx, xlsx, ui-ux)
-├── projects/                  # Рабочие папки пользователей
-└── data/                      # SQLite БД, логи, кеш эмбеддингов
+├── skills/                     # 69 built-in skills
+└── data/                       # SQLite DB, logs, embedding cache
 ```
 
 ---
 
-## Конфигурация
+## Supported LLM Providers
 
-```yaml
-llm:
-  default_model: "grok/grok-3"
-  temperature: 0.2
-  max_tokens: 4096
-  fallback_chain:
-    - "openai/gpt-4o"
-    - "anthropic/claude-sonnet-4-6"
-    - "gemini/gemini-2.5-flash"
-    - "deepseek/deepseek-chat"
-    - "openai/llama-4-scout-17b-16e-instruct"   # Cerebras (бесплатно)
-    - "groq/llama-3.3-70b-versatile"              # Groq (бесплатно)
-
-system:
-  db_url: "sqlite+aiosqlite:///data/fosved_coder.db"
-  projects_dir: "./projects"
-```
-
-### Поддерживаемые провайдеры
-
-| Провайдер | Статус | Пример модели |
-|-----------|--------|--------------|
-| Anthropic | Платный | `claude-sonnet-4-6` |
-| OpenAI | Платный | `gpt-4o`, `gpt-4.1` |
-| xAI Grok | Платный | `grok-3`, `grok-3-mini` |
-| Google Gemini | Платный | `gemini-2.5-pro`, `gemini-2.5-flash` |
-| DeepSeek | Платный | `deepseek-chat`, `deepseek-reasoner` |
-| Qwen (Alibaba) | Платный | `qwen3-235b-a22b` |
-| Z.AI (GLM) | Платный | `glm-5.1` |
-| Kimi (Moonshot) | Платный | `kimi-k2-0711` |
-| **Groq** | **Бесплатно** | `llama-3.3-70b-versatile` |
-| **Cerebras** | **Бесплатно** | `llama-4-scout-17b-16e-instruct` |
-| Ollama | Локальный | `llama3` и другие |
+| Provider | Type | Example Models |
+|----------|------|---------------|
+| Anthropic | Paid | `claude-sonnet-4-6`, `claude-opus-4-7` |
+| OpenAI | Paid | `gpt-4o`, `gpt-4.1` |
+| xAI Grok | Paid | `grok-3`, `grok-3-mini` |
+| Google Gemini | Paid | `gemini-2.5-pro`, `gemini-2.5-flash` |
+| DeepSeek | Paid | `deepseek-chat`, `deepseek-reasoner` |
+| Qwen (Alibaba) | Paid | `qwen3-235b-a22b` |
+| Z.AI (GLM) | Paid | `glm-4.5` |
+| Kimi (Moonshot) | Paid | `kimi-k2-0711` |
+| **Groq** | **Free** | `llama-3.3-70b-versatile` |
+| **Cerebras** | **Free** | `llama-4-scout-17b-16e-instruct` |
+| Ollama | Local | `llama3`, `qwen3`, any GGUF model |
 
 ---
 
-## Архитектура памяти
+## Memory Architecture
 
 ```
 User Query
@@ -193,23 +205,23 @@ User Query
 ┌──────────────────────────────────────────────┐
 │         Smart Context Assembly                │
 │                                               │
-│  1. Session Summaries (последние 3)           │
+│  1. Session Summaries (last 3)                │
 │  2. Recent Observations (24h)                 │
-│  3. Semantic Search (query → embedding →      │
-│     cosine similarity → top-5 relevant facts)  │
+│  3. Semantic Search (query -> embedding ->    │
+│     cosine similarity -> top-5 relevant facts)  │
 │                                               │
-│  Output → injected into system prompt         │
+│  Output -> injected into system prompt         │
 └──────────────────────────────────────────────┘
     │
     ▼
 ┌──────────────────────────────────────────────┐
 │         Hybrid Search (search_observations)    │
 │                                               │
-│  FTS5 (keywords) ──┐                          │
-│                     ├─ RRF (k=60) → ranked list │
-│  Vector (semantic) ─┘                          │
+│  FTS5 (keywords) --+                          │
+│                     +-- RRF (k=60) -> ranked   │
+│  Vector (semantic) -+                          │
 │                                               │
-│  decay_score = e^(-λ·days) × (1+ln(acc+1))   │
+│  decay_score = e^(-lambda*days) * (1+ln(acc+1))│
 └──────────────────────────────────────────────┘
     │
     ▼
@@ -219,7 +231,7 @@ User Query
 │  - Embedding computation (per observation)     │
 │  - LLM compression (per observation)           │
 │  - Session summary (on WS disconnect)          │
-│  - Decay eviction loop (ежечасно)              │
+│  - Decay eviction loop (hourly)               │
 └──────────────────────────────────────────────┘
 ```
 
@@ -227,40 +239,82 @@ User Query
 
 ## REST API
 
-Базовый URL: `http://localhost:8000/api/v1/`
+Base URL: `http://localhost:8000/api/v1/`
 
-| Домен | Префикс | Примеры |
-|-------|---------|--------|
-| Проекты | `/projects` | CRUD, переименование, регенерация ключа |
-| Ключи | `/keys` | добавление, удаление, валидация |
-| Модели | `/models` | список, probe, local |
-| Скиллы | `/skills` | список, активация |
-| Идеи | `/ideas` | анализ GitHub-репо |
-| Память | `/memory` | observations, поиск, статистика |
-| Драфты | `/drafts` | CRUD, генерация промпта |
-| Чат | `/chat` | история, очистка |
-| Статистика | `/stats`, `/health` | системная информация |
+Full Swagger docs: `http://localhost:8000/docs`
 
-Полная документация: `http://localhost:8000/docs`
+| Domain | Prefix | Examples |
+|--------|--------|----------|
+| Projects | `/projects` | CRUD, rename, key regeneration |
+| Keys | `/keys` | add, remove, validate providers |
+| Models | `/models` | list, probe, local, custom |
+| Skills | `/skills` | list, activate |
+| Ideas | `/ideas` | GitHub repo analysis |
+| Memory | `/memory` | observations, search, stats |
+| Drafts | `/drafts` | CRUD, prompt generation |
+| Chat | `/chat` | history, clear |
 
 ---
 
-## Slash-команды
+## Slash Commands
 
-| Команда | Описание |
-|---------|---------|
-| `/terminal <cmd>` | Выполнить shell-команду |
+| Command | Description |
+|---------|-------------|
+| `/terminal <cmd>` | Execute a shell command |
 | `/git_pull` | git pull |
 | `/git_push` | git push |
 | `/quick_push` | git add -A + commit + push |
-| `/git_clone <url>` | Клонировать GitHub-репозиторий |
-| `/repo_map` | Показать структуру проекта |
-| `/ideas <url>` | Проанализировать GitHub-репозиторий |
-| `/clear` | Очистить историю чата |
-| `/help` | Справка |
+| `/git_clone <url>` | Clone a GitHub repository |
+| `/repo_map` | Show project structure |
+| `/ideas <url>` | Analyze a GitHub repository |
+| `/clear` | Clear chat history |
+| `/help` | Show help |
 
 ---
 
-## Лицензия
+## Contributing
 
-MIT
+This is an open-source project and **contributions are welcome**! Whether you want to fix a bug, add a feature, improve documentation, or translate the UI — every contribution helps.
+
+### How to Contribute
+
+1. **Fork** the repository
+2. **Create a branch**: `git checkout -b feature/your-feature-name`
+3. **Make your changes** and test them
+4. **Commit**: `git commit -m "feat: description of your change"`
+5. **Push**: `git push origin feature/your-feature-name`
+6. **Open a Pull Request** on GitHub
+
+### Areas That Need Help
+
+- **Documentation** — translate the UI and prompts to English (currently Russian)
+- **Testing** — add unit tests (there are none yet!)
+- **UI/UX** — the interface is functional but could use polish
+- **Mobile** — improve the responsive design for tablets
+- **Skills** — add new skills (the system supports plugins)
+- **Integrations** — GitLab, Bitbucket support
+- **Embeddings** — add support for OpenAI embeddings as an alternative to local sentence-transformers
+
+### Development Setup
+
+```bash
+git clone https://github.com/ShkodnikAI/MindCoder.git
+cd MindCoder
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python run.py
+```
+
+### Code Style
+
+- Python 3.10+ with type hints
+- Async-first (asyncio + FastAPI)
+- Each core module is independent and importable
+- UI: vanilla HTML/CSS/JS (no build step needed)
+
+---
+
+## License
+
+[MIT](LICENSE) — use it, modify it, ship it.

@@ -1,5 +1,5 @@
 """
-Fosved Coder v2.0 — Memory Decay (затухание памяти по кривой Эббингауза)
+MindCoder v2.0 — Memory Decay (затухание памяти по кривой Эббингауза)
 
 Архитектура:
   - Каждое observation имеет access_count и last_accessed_at

@@ -1,5 +1,5 @@
 """
-FOSVED CODER V2.0 — Observation Manager (вдохновлено claude-mem)
+MINDCODER V2.0 — Observation Manager (вдохновлено claude-mem)
 
 Система памяти: захватывает наблюдения (tool use, ошибки, решения),
 сжимает через LLM, хранит в БД и извлекает релевантный контекст
@@ -270,7 +270,7 @@ def _get_sqlite_path() -> str:
     from core.memory import DB_URL
     if ":///" in DB_URL:
         return DB_URL.split(":///")[-1]
-    return "data/fosved_coder.db"
+    return "data/mindcoder.db"
 
 
 # ═══════════════════════════════════════════════════════════════
